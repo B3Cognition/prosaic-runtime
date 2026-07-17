@@ -489,6 +489,9 @@ def _has_reasoning_content(parsed: object) -> bool:
         delta = choice.get("delta")
         if isinstance(delta, dict) and isinstance(delta.get("reasoning_content"), str):
             return True
+        for container in (message, delta):
+            if isinstance(container, dict) and _reasoning_text(container):
+                return True
     return False
 
 
@@ -516,18 +519,37 @@ def _event_has_tool_calls(event: object) -> bool:
 
 
 def _event_content(event: object) -> str:
-    delta = _first_delta(event)
-    if not delta:
+    choice = _first_choice(event)
+    if not choice:
         return ""
-    return _content_text(delta.get("content"))
+    delta = choice.get("delta")
+    if isinstance(delta, dict):
+        content = _content_text(delta.get("content"))
+        if content:
+            return content
+    message = choice.get("message")
+    if isinstance(message, dict):
+        content = _content_text(message.get("content"))
+        if content:
+            return content
+    return _content_text(choice.get("text"))
 
 
 def _event_reasoning_content(event: object) -> str:
-    delta = _first_delta(event)
-    if not delta:
+    choice = _first_choice(event)
+    if not choice:
         return ""
-    content = delta.get("reasoning_content")
-    return content if isinstance(content, str) else ""
+    delta = choice.get("delta")
+    if isinstance(delta, dict):
+        reasoning = _reasoning_text(delta)
+        if reasoning:
+            return reasoning
+    message = choice.get("message")
+    if isinstance(message, dict):
+        reasoning = _reasoning_text(message)
+        if reasoning:
+            return reasoning
+    return _reasoning_text(choice)
 
 
 def _event_finish_reason(event: object) -> str:
@@ -544,6 +566,14 @@ def _event_finish_reason(event: object) -> str:
 
 
 def _first_delta(event: object) -> dict[str, object] | None:
+    choice = _first_choice(event)
+    if not choice:
+        return None
+    delta = choice.get("delta")
+    return delta if isinstance(delta, dict) else None
+
+
+def _first_choice(event: object) -> dict[str, object] | None:
     if not isinstance(event, dict):
         return None
     choices = event.get("choices")
@@ -552,8 +582,32 @@ def _first_delta(event: object) -> dict[str, object] | None:
     first = choices[0]
     if not isinstance(first, dict):
         return None
-    delta = first.get("delta")
-    return delta if isinstance(delta, dict) else None
+    return first
+
+
+def _reasoning_text(container: dict[str, object]) -> str:
+    for key in (
+        "reasoning_content",
+        "reasoning",
+        "reasoning_text",
+        "reasoning_output",
+    ):
+        value = container.get(key)
+        if isinstance(value, str) and value:
+            return value
+    details = container.get("reasoning_details")
+    if isinstance(details, list):
+        parts: list[str] = []
+        for item in details:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                text = item.get("text") or item.get("content") or item.get("reasoning")
+                if isinstance(text, str):
+                    parts.append(text)
+        if parts:
+            return "".join(parts)
+    return ""
 
 
 def _content_text(content: object) -> str:
