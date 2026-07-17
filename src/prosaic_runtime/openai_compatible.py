@@ -33,6 +33,9 @@ class OpenAICompatibleBackend:
             payload["max_tokens"] = llm.max_tokens
         if _feature_enabled(llm.features, "json_mode", default=False):
             payload["response_format"] = {"type": "json_object"}
+        reasoning_effort = _reasoning_effort(llm.features)
+        if reasoning_effort:
+            payload["reasoning_effort"] = reasoning_effort
         if streaming:
             payload["stream"] = True
             if _feature_enabled(llm.features, "stream_options", default=True):
@@ -313,6 +316,16 @@ def _reasoning_content_policy(features: dict[str, object]) -> str:
     if normalized in {"auto", "field", "merged", "none"}:
         return normalized
     return "auto"
+
+
+def _reasoning_effort(features: dict[str, object]) -> str:
+    value = features.get("reasoning_effort")
+    if not isinstance(value, str):
+        return ""
+    normalized = value.strip().lower()
+    if normalized in {"low", "medium", "high"}:
+        return normalized
+    return ""
 
 
 def _header(response: object, name: str) -> str:
