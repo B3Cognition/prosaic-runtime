@@ -121,6 +121,7 @@ class OpenAICompatibleBackend:
             "provider": self.name,
             "streamed": False,
             "finish_reason": _finish_reason(parsed),
+            "raw_response_metadata": _raw_response_metadata(parsed),
             "reasoning_content_policy": _reasoning_content_policy(llm.features),
             "reasoning_content_observed": _has_reasoning_content(parsed),
         }
@@ -152,6 +153,7 @@ class OpenAICompatibleBackend:
         token_usage = 0
         finish_reason = ""
         reasoning_content_observed = False
+        raw_response_metadata: dict[str, object] = {}
         event_data: list[str] = []
 
         def handle_complete_event() -> CliRunResult | None:
@@ -163,7 +165,8 @@ class OpenAICompatibleBackend:
             return maybe_result
 
         def handle_event(raw_data: str) -> CliRunResult | None:
-            nonlocal token_usage, finish_reason, reasoning_content_observed
+            nonlocal token_usage, finish_reason, raw_response_metadata
+            nonlocal reasoning_content_observed
             if raw_data == "[DONE]":
                 return None
             try:
@@ -181,6 +184,9 @@ class OpenAICompatibleBackend:
                 )
             if _event_has_tool_calls(event):
                 return _unsupported_tool_calls_result(self.name)
+            event_metadata = _raw_response_metadata(event)
+            if event_metadata:
+                raw_response_metadata = event_metadata
             event_usage = _token_usage(event)
             if event_usage:
                 token_usage = event_usage
@@ -236,6 +242,7 @@ class OpenAICompatibleBackend:
             "provider": self.name,
             "streamed": True,
             "finish_reason": finish_reason or None,
+            "raw_response_metadata": raw_response_metadata,
             "reasoning_content_policy": _reasoning_content_policy(llm.features),
             "reasoning_content_observed": reasoning_content_observed,
         }
@@ -326,6 +333,17 @@ def _reasoning_effort(features: dict[str, object]) -> str:
     if normalized in {"low", "medium", "high"}:
         return normalized
     return ""
+
+
+def _raw_response_metadata(parsed: object) -> dict[str, object]:
+    if not isinstance(parsed, dict):
+        return {}
+    metadata: dict[str, object] = {}
+    for key in ("id", "object", "created", "model", "system_fingerprint"):
+        value = parsed.get(key)
+        if isinstance(value, (str, int, float, bool)):
+            metadata[key] = value
+    return metadata
 
 
 def _header(response: object, name: str) -> str:
