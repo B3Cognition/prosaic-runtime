@@ -69,6 +69,7 @@ class OpenAICompatibleBackend:
                 if streaming and _is_sse_response(response):
                     return self._read_sse_response(response, deadline)
                 http_status = _http_status(response)
+                raw_response_headers = _raw_response_headers(response)
                 body = response.read().decode("utf-8", errors="replace")
         except TimeoutError as exc:
             return _timeout_result(self.name, str(exc))
@@ -122,6 +123,7 @@ class OpenAICompatibleBackend:
             "provider": self.name,
             "streamed": False,
             "http_status": http_status,
+            "raw_response_headers": raw_response_headers,
             "finish_reason": _finish_reason(parsed),
             "raw_response_metadata": _raw_response_metadata(parsed),
             "reasoning_content_policy": _reasoning_content_policy(llm.features),
@@ -152,6 +154,7 @@ class OpenAICompatibleBackend:
     def _read_sse_response(self, response: object, deadline: float) -> CliRunResult:
         llm = self._config.llm
         http_status = _http_status(response)
+        raw_response_headers = _raw_response_headers(response)
         text_parts: list[str] = []
         token_usage = 0
         finish_reason = ""
@@ -245,6 +248,7 @@ class OpenAICompatibleBackend:
             "provider": self.name,
             "streamed": True,
             "http_status": http_status,
+            "raw_response_headers": raw_response_headers,
             "finish_reason": finish_reason or None,
             "raw_response_metadata": raw_response_metadata,
             "reasoning_content_policy": _reasoning_content_policy(llm.features),
@@ -363,6 +367,27 @@ def _http_status(response: object) -> int | None:
         if isinstance(code, int):
             return code
     return None
+
+
+def _raw_response_headers(response: object) -> dict[str, str]:
+    allowlist = {
+        "content-type",
+        "openai-request-id",
+        "request-id",
+        "x-request-id",
+    }
+    headers = getattr(response, "headers", None)
+    if headers is None:
+        return {}
+    items = headers.items() if hasattr(headers, "items") else []
+    result: dict[str, str] = {}
+    for key, value in items:
+        if not isinstance(key, str) or not isinstance(value, str):
+            continue
+        normalized = key.strip().lower()
+        if normalized in allowlist:
+            result[normalized] = value.strip()
+    return result
 
 
 def _header(response: object, name: str) -> str:
