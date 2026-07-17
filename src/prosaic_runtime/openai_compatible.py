@@ -33,7 +33,8 @@ class OpenAICompatibleBackend:
             payload["max_tokens"] = llm.max_tokens
         if streaming:
             payload["stream"] = True
-            payload["stream_options"] = {"include_usage": True}
+            if _feature_enabled(llm.features, "stream_options", default=True):
+                payload["stream_options"] = {"include_usage": True}
         data = json.dumps(payload).encode("utf-8")
         headers = {"Content-Type": "application/json"}
         token, token_error = _api_key(llm.api_key_env, llm.api_key_file, request.env)
