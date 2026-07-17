@@ -6,6 +6,7 @@ import socket
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Mapping
 from pathlib import Path
 
 from harness.ai_cli_backend import CliRunRequest, CliRunResult
@@ -35,7 +36,7 @@ class OpenAICompatibleBackend:
             payload["stream_options"] = {"include_usage": True}
         data = json.dumps(payload).encode("utf-8")
         headers = {"Content-Type": "application/json"}
-        token, token_error = _api_key(llm.api_key_env, llm.api_key_file)
+        token, token_error = _api_key(llm.api_key_env, llm.api_key_file, request.env)
         if token_error:
             return CliRunResult(
                 exit_code=1,
@@ -219,9 +220,17 @@ class OpenAICompatibleBackend:
         )
 
 
-def _api_key(api_key_env: str | None, api_key_file: str | None = None) -> tuple[str, str]:
+def _api_key(
+    api_key_env: str | None,
+    api_key_file: str | None = None,
+    request_env: object = None,
+) -> tuple[str, str]:
     if api_key_env:
-        token = os.environ.get(api_key_env, "").strip()
+        token = ""
+        if isinstance(request_env, Mapping):
+            token = str(request_env.get(api_key_env, "")).strip()
+        if not token:
+            token = os.environ.get(api_key_env, "").strip()
         if token:
             return token, ""
     if not api_key_file:
