@@ -126,6 +126,7 @@ class OpenAICompatibleBackend:
             "http_status": http_status,
             "raw_response_headers": raw_response_headers,
             "finish_reason": _finish_reason(parsed),
+            "token_usage_details": _token_usage_details(parsed),
             "raw_response_metadata": _raw_response_metadata(parsed),
             "reasoning_content_policy": _reasoning_content_policy(llm.features),
             "reasoning_content_observed": _has_reasoning_content(parsed),
@@ -158,6 +159,7 @@ class OpenAICompatibleBackend:
         raw_response_headers = _raw_response_headers(response)
         text_parts: list[str] = []
         token_usage = 0
+        token_usage_details: dict[str, int] = {}
         finish_reason = ""
         reasoning_content_observed = False
         raw_response_metadata: dict[str, object] = {}
@@ -172,7 +174,8 @@ class OpenAICompatibleBackend:
             return maybe_result
 
         def handle_event(raw_data: str) -> CliRunResult | None:
-            nonlocal token_usage, finish_reason, raw_response_metadata
+            nonlocal token_usage, token_usage_details, finish_reason
+            nonlocal raw_response_metadata
             nonlocal reasoning_content_observed
             if raw_data == "[DONE]":
                 return None
@@ -197,6 +200,9 @@ class OpenAICompatibleBackend:
             event_usage = _token_usage(event)
             if event_usage:
                 token_usage = event_usage
+            event_usage_details = _token_usage_details(event)
+            if event_usage_details:
+                token_usage_details = event_usage_details
             event_finish_reason = _event_finish_reason(event)
             if event_finish_reason:
                 finish_reason = event_finish_reason
@@ -251,6 +257,7 @@ class OpenAICompatibleBackend:
             "http_status": http_status,
             "raw_response_headers": raw_response_headers,
             "finish_reason": finish_reason or None,
+            "token_usage_details": token_usage_details,
             "raw_response_metadata": raw_response_metadata,
             "reasoning_content_policy": _reasoning_content_policy(llm.features),
             "reasoning_content_observed": reasoning_content_observed,
@@ -582,6 +589,25 @@ def _token_usage(parsed: object) -> int:
     if isinstance(completion, int):
         total_tokens += completion
     return total_tokens
+
+
+def _token_usage_details(parsed: object) -> dict[str, int]:
+    if not isinstance(parsed, dict):
+        return {}
+    usage = parsed.get("usage")
+    if not isinstance(usage, dict):
+        return {}
+    details: dict[str, int] = {}
+    for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+        value = usage.get(key)
+        if isinstance(value, int):
+            details[key] = value
+    if "total_tokens" not in details:
+        prompt = details.get("prompt_tokens")
+        completion = details.get("completion_tokens")
+        if prompt is not None and completion is not None:
+            details["total_tokens"] = prompt + completion
+    return details
 
 
 def _timeout_result(provider: str, message: str) -> CliRunResult:
