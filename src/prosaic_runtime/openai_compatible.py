@@ -96,6 +96,8 @@ class OpenAICompatibleBackend:
         try:
             parsed = json.loads(body)
         except json.JSONDecodeError:
+            if streaming and _looks_like_sse_body(body):
+                return self._read_sse_body(body)
             return CliRunResult(
                 exit_code=1,
                 stdout="",
@@ -219,6 +221,19 @@ class OpenAICompatibleBackend:
             },
         )
 
+    def _read_sse_body(self, body: str) -> CliRunResult:
+        class _BodyResponse:
+            def __init__(self, text: str) -> None:
+                self._lines = iter(text.splitlines(keepends=True))
+
+            def readline(self) -> bytes:
+                try:
+                    return next(self._lines).encode("utf-8")
+                except StopIteration:
+                    return b""
+
+        return self._read_sse_response(_BodyResponse(body), time.monotonic() + 60.0)
+
 
 def _api_key(
     api_key_env: str | None,
@@ -270,6 +285,15 @@ def _header(response: object, name: str) -> str:
 
 def _is_sse_response(response: object) -> bool:
     return "text/event-stream" in _header(response, "Content-Type").lower()
+
+
+def _looks_like_sse_body(body: str) -> bool:
+    for line in body.splitlines():
+        stripped = line.lstrip()
+        if not stripped:
+            continue
+        return stripped.startswith("data:") or stripped.startswith(":")
+    return False
 
 
 def _assistant_text(parsed: object) -> str:
