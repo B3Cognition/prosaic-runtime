@@ -35,7 +35,17 @@ class OpenAICompatibleBackend:
             payload["stream_options"] = {"include_usage": True}
         data = json.dumps(payload).encode("utf-8")
         headers = {"Content-Type": "application/json"}
-        token = _api_key(llm.api_key_env, llm.api_key_file)
+        token, token_error = _api_key(llm.api_key_env, llm.api_key_file)
+        if token_error:
+            return CliRunResult(
+                exit_code=1,
+                stdout="",
+                stderr=token_error,
+                metadata={
+                    "provider": self.name,
+                    "provider_error_code": "api_key_file_error",
+                },
+            )
         if token:
             headers["Authorization"] = f"Bearer {token}"
         http_request = urllib.request.Request(
@@ -209,17 +219,21 @@ class OpenAICompatibleBackend:
         )
 
 
-def _api_key(api_key_env: str | None, api_key_file: str | None = None) -> str:
+def _api_key(api_key_env: str | None, api_key_file: str | None = None) -> tuple[str, str]:
     if api_key_env:
         token = os.environ.get(api_key_env, "").strip()
         if token:
-            return token
+            return token, ""
     if not api_key_file:
-        return ""
+        return "", ""
+    path = Path(api_key_file).expanduser()
     try:
-        return Path(api_key_file).expanduser().read_text(encoding="utf-8").strip()
-    except OSError:
-        return ""
+        token = path.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        return "", f"OpenAI-compatible API key file is not readable: {path}: {exc}"
+    if not token:
+        return "", f"OpenAI-compatible API key file is empty: {path}"
+    return token, ""
 
 
 def _feature_enabled(
