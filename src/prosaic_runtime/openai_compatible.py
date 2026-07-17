@@ -68,6 +68,7 @@ class OpenAICompatibleBackend:
             ) as response:
                 if streaming and _is_sse_response(response):
                     return self._read_sse_response(response, deadline)
+                http_status = _http_status(response)
                 body = response.read().decode("utf-8", errors="replace")
         except TimeoutError as exc:
             return _timeout_result(self.name, str(exc))
@@ -120,6 +121,7 @@ class OpenAICompatibleBackend:
         metadata = {
             "provider": self.name,
             "streamed": False,
+            "http_status": http_status,
             "finish_reason": _finish_reason(parsed),
             "raw_response_metadata": _raw_response_metadata(parsed),
             "reasoning_content_policy": _reasoning_content_policy(llm.features),
@@ -149,6 +151,7 @@ class OpenAICompatibleBackend:
 
     def _read_sse_response(self, response: object, deadline: float) -> CliRunResult:
         llm = self._config.llm
+        http_status = _http_status(response)
         text_parts: list[str] = []
         token_usage = 0
         finish_reason = ""
@@ -241,6 +244,7 @@ class OpenAICompatibleBackend:
         metadata = {
             "provider": self.name,
             "streamed": True,
+            "http_status": http_status,
             "finish_reason": finish_reason or None,
             "raw_response_metadata": raw_response_metadata,
             "reasoning_content_policy": _reasoning_content_policy(llm.features),
@@ -344,6 +348,21 @@ def _raw_response_metadata(parsed: object) -> dict[str, object]:
         if isinstance(value, (str, int, float, bool)):
             metadata[key] = value
     return metadata
+
+
+def _http_status(response: object) -> int | None:
+    value = getattr(response, "status", None)
+    if isinstance(value, int):
+        return value
+    value = getattr(response, "code", None)
+    if isinstance(value, int):
+        return value
+    getter = getattr(response, "getcode", None)
+    if callable(getter):
+        code = getter()
+        if isinstance(code, int):
+            return code
+    return None
 
 
 def _header(response: object, name: str) -> str:
