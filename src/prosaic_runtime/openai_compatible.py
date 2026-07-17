@@ -116,6 +116,7 @@ class OpenAICompatibleBackend:
             "provider": self.name,
             "streamed": False,
             "finish_reason": _finish_reason(parsed),
+            "reasoning_content_policy": _reasoning_content_policy(llm.features),
             "reasoning_content_observed": _has_reasoning_content(parsed),
         }
         incomplete = _incomplete_finish_reason(metadata["finish_reason"])
@@ -141,6 +142,7 @@ class OpenAICompatibleBackend:
         return self.run_prompt(request)
 
     def _read_sse_response(self, response: object, deadline: float) -> CliRunResult:
+        llm = self._config.llm
         text_parts: list[str] = []
         token_usage = 0
         finish_reason = ""
@@ -229,6 +231,7 @@ class OpenAICompatibleBackend:
             "provider": self.name,
             "streamed": True,
             "finish_reason": finish_reason or None,
+            "reasoning_content_policy": _reasoning_content_policy(llm.features),
             "reasoning_content_observed": reasoning_content_observed,
         }
         incomplete = _incomplete_finish_reason(metadata["finish_reason"])
@@ -298,6 +301,16 @@ def _feature_enabled(
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "yes", "on"}
     return bool(value)
+
+
+def _reasoning_content_policy(features: dict[str, object]) -> str:
+    value = features.get("reasoning_content", "auto")
+    if not isinstance(value, str):
+        return "auto"
+    normalized = value.strip().lower()
+    if normalized in {"auto", "field", "merged", "none"}:
+        return normalized
+    return "auto"
 
 
 def _header(response: object, name: str) -> str:
