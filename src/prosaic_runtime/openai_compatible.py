@@ -283,8 +283,8 @@ def _assistant_text(parsed: object) -> str:
         return ""
     message = first.get("message")
     if isinstance(message, dict):
-        content = message.get("content")
-        if isinstance(content, str):
+        content = _content_text(message.get("content"))
+        if content:
             return content
     text = first.get("text")
     return text if isinstance(text, str) else ""
@@ -348,8 +348,7 @@ def _event_content(event: object) -> str:
     delta = _first_delta(event)
     if not delta:
         return ""
-    content = delta.get("content")
-    return content if isinstance(content, str) else ""
+    return _content_text(delta.get("content"))
 
 
 def _event_reasoning_content(event: object) -> str:
@@ -384,6 +383,22 @@ def _first_delta(event: object) -> dict[str, object] | None:
         return None
     delta = first.get("delta")
     return delta if isinstance(delta, dict) else None
+
+
+def _content_text(content: object) -> str:
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    parts: list[str] = []
+    for item in content:
+        if isinstance(item, str):
+            parts.append(item)
+        elif isinstance(item, dict):
+            text = item.get("text")
+            if isinstance(text, str):
+                parts.append(text)
+    return "".join(parts)
 
 
 def _token_usage(parsed: object) -> int:
