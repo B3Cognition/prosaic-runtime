@@ -84,6 +84,7 @@ class OpenAICompatibleBackend:
                 metadata={
                     "provider": self.name,
                     "http_status": int(exc.code),
+                    "raw_response_headers": _raw_response_headers(exc),
                     "provider_error_code": "http_error",
                 },
             )
