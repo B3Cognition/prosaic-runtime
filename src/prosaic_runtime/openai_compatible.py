@@ -111,14 +111,23 @@ class OpenAICompatibleBackend:
         if _has_tool_calls(parsed):
             return _unsupported_tool_calls_result(self.name)
         text = _assistant_text(parsed)
-        if text:
-            print(text, flush=True)
         metadata = {
             "provider": self.name,
             "streamed": False,
             "finish_reason": _finish_reason(parsed),
             "reasoning_content_observed": _has_reasoning_content(parsed),
         }
+        incomplete = _incomplete_finish_reason(metadata["finish_reason"])
+        if incomplete:
+            return _incomplete_generation_result(
+                self.name,
+                text,
+                _token_usage(parsed),
+                metadata,
+                str(incomplete),
+            )
+        if text:
+            print(text, flush=True)
         return CliRunResult(
             exit_code=0,
             stdout=text,
@@ -215,6 +224,21 @@ class OpenAICompatibleBackend:
                 return maybe_result
 
         text = "".join(text_parts)
+        metadata = {
+            "provider": self.name,
+            "streamed": True,
+            "finish_reason": finish_reason or None,
+            "reasoning_content_observed": reasoning_content_observed,
+        }
+        incomplete = _incomplete_finish_reason(metadata["finish_reason"])
+        if incomplete:
+            return _incomplete_generation_result(
+                self.name,
+                text,
+                token_usage,
+                metadata,
+                str(incomplete),
+            )
         if text:
             print(text, flush=True)
         return CliRunResult(
@@ -222,12 +246,7 @@ class OpenAICompatibleBackend:
             stdout=text,
             stderr="",
             token_usage=token_usage,
-            metadata={
-                "provider": self.name,
-                "streamed": True,
-                "finish_reason": finish_reason or None,
-                "reasoning_content_observed": reasoning_content_observed,
-            },
+            metadata=metadata,
         )
 
     def _read_sse_body(self, body: str) -> CliRunResult:
@@ -347,6 +366,13 @@ def _finish_reason(parsed: object) -> str | None:
         return None
     finish_reason = first.get("finish_reason")
     return finish_reason if isinstance(finish_reason, str) else None
+
+
+def _incomplete_finish_reason(finish_reason: object) -> str:
+    if not isinstance(finish_reason, str):
+        return ""
+    normalized = finish_reason.strip().lower()
+    return normalized if normalized in {"length", "content_filter"} else ""
 
 
 def _has_reasoning_content(parsed: object) -> bool:
@@ -485,4 +511,26 @@ def _unsupported_tool_calls_result(provider: str) -> CliRunResult:
             "provider": provider,
             "provider_error_code": "unsupported_tool_calls",
         },
+    )
+
+
+def _incomplete_generation_result(
+    provider: str,
+    stdout: str,
+    token_usage: int,
+    metadata: dict[str, object],
+    finish_reason: str,
+) -> CliRunResult:
+    enriched = dict(metadata)
+    enriched["provider"] = provider
+    enriched["provider_error_code"] = "incomplete_generation"
+    return CliRunResult(
+        exit_code=1,
+        stdout=stdout,
+        stderr=(
+            "OpenAI-compatible response ended before a complete artifact could be "
+            f"trusted: finish_reason={finish_reason}"
+        ),
+        token_usage=token_usage,
+        metadata=enriched,
     )
