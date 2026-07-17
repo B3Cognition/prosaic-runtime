@@ -169,6 +169,9 @@ class OpenAICompatibleBackend:
             nonlocal event_data
             if not event_data:
                 return None
+            if not any(item.strip() for item in event_data):
+                event_data = []
+                return None
             maybe_result = handle_event("\n".join(event_data))
             event_data = []
             return maybe_result
@@ -177,7 +180,7 @@ class OpenAICompatibleBackend:
             nonlocal token_usage, token_usage_details, finish_reason
             nonlocal raw_response_metadata
             nonlocal reasoning_content_observed
-            if raw_data == "[DONE]":
+            if _is_done_marker(raw_data):
                 return None
             try:
                 event = json.loads(raw_data)
@@ -229,12 +232,12 @@ class OpenAICompatibleBackend:
                 if maybe_result is not None:
                     return maybe_result
                 continue
-            if line.startswith(":"):
+            if line.lstrip().startswith(":"):
                 continue
-            if not line.startswith("data:"):
+            data = _sse_data_payload(line)
+            if data is None:
                 continue
-            data = line.removeprefix("data:").strip()
-            if data == "[DONE]":
+            if _is_done_marker(data):
                 maybe_result = handle_complete_event()
                 if maybe_result is not None:
                     return maybe_result
@@ -423,11 +426,26 @@ def _looks_like_sse_body(body: str) -> bool:
     return False
 
 
+def _sse_data_payload(line: str) -> str | None:
+    stripped = line.lstrip()
+    field, separator, value = stripped.partition(":")
+    if separator != ":" or field.strip().lower() != "data":
+        return None
+    if value.startswith(" "):
+        value = value[1:]
+    return value.strip()
+
+
+def _is_done_marker(raw_data: str) -> bool:
+    normalized = raw_data.strip().strip('"').upper()
+    return normalized == "[DONE]"
+
+
 def _complete_json_event(event_data: list[str]) -> bool:
     if not event_data:
         return False
     raw_data = "\n".join(event_data)
-    if raw_data == "[DONE]":
+    if _is_done_marker(raw_data):
         return True
     try:
         json.loads(raw_data)
