@@ -31,6 +31,8 @@ class OpenAICompatibleBackend:
         }
         if llm.max_tokens is not None:
             payload["max_tokens"] = llm.max_tokens
+        if _feature_enabled(llm.features, "json_mode", default=False):
+            payload["response_format"] = {"type": "json_object"}
         if streaming:
             payload["stream"] = True
             if _feature_enabled(llm.features, "stream_options", default=True):
