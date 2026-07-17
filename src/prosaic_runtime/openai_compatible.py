@@ -6,6 +6,7 @@ import socket
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 from harness.ai_cli_backend import CliRunRequest, CliRunResult
 from harness.config import HarnessConfig
@@ -34,7 +35,7 @@ class OpenAICompatibleBackend:
             payload["stream_options"] = {"include_usage": True}
         data = json.dumps(payload).encode("utf-8")
         headers = {"Content-Type": "application/json"}
-        token = _api_key(llm.api_key_env)
+        token = _api_key(llm.api_key_env, llm.api_key_file)
         if token:
             headers["Authorization"] = f"Bearer {token}"
         http_request = urllib.request.Request(
@@ -208,10 +209,17 @@ class OpenAICompatibleBackend:
         )
 
 
-def _api_key(api_key_env: str | None) -> str:
-    if not api_key_env:
+def _api_key(api_key_env: str | None, api_key_file: str | None = None) -> str:
+    if api_key_env:
+        token = os.environ.get(api_key_env, "").strip()
+        if token:
+            return token
+    if not api_key_file:
         return ""
-    return os.environ.get(api_key_env, "")
+    try:
+        return Path(api_key_file).expanduser().read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
 
 
 def _feature_enabled(
