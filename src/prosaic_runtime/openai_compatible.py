@@ -137,6 +137,14 @@ class OpenAICompatibleBackend:
         reasoning_content_observed = False
         event_data: list[str] = []
 
+        def handle_complete_event() -> CliRunResult | None:
+            nonlocal event_data
+            if not event_data:
+                return None
+            maybe_result = handle_event("\n".join(event_data))
+            event_data = []
+            return maybe_result
+
         def handle_event(raw_data: str) -> CliRunResult | None:
             nonlocal token_usage, finish_reason, reasoning_content_observed
             if raw_data == "[DONE]":
@@ -181,11 +189,9 @@ class OpenAICompatibleBackend:
                 break
             line = raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
             if not line:
-                if event_data:
-                    maybe_result = handle_event("\n".join(event_data))
-                    event_data = []
-                    if maybe_result is not None:
-                        return maybe_result
+                maybe_result = handle_complete_event()
+                if maybe_result is not None:
+                    return maybe_result
                 continue
             if line.startswith(":"):
                 continue
@@ -193,15 +199,18 @@ class OpenAICompatibleBackend:
                 continue
             data = line.removeprefix("data:").strip()
             if data == "[DONE]":
+                maybe_result = handle_complete_event()
+                if maybe_result is not None:
+                    return maybe_result
                 break
             event_data.append(data)
-            maybe_result = handle_event("\n".join(event_data))
-            event_data = []
-            if maybe_result is not None:
-                return maybe_result
+            if _complete_json_event(event_data):
+                maybe_result = handle_complete_event()
+                if maybe_result is not None:
+                    return maybe_result
 
         if event_data:
-            maybe_result = handle_event("\n".join(event_data))
+            maybe_result = handle_complete_event()
             if maybe_result is not None:
                 return maybe_result
 
@@ -294,6 +303,19 @@ def _looks_like_sse_body(body: str) -> bool:
             continue
         return stripped.startswith("data:") or stripped.startswith(":")
     return False
+
+
+def _complete_json_event(event_data: list[str]) -> bool:
+    if not event_data:
+        return False
+    raw_data = "\n".join(event_data)
+    if raw_data == "[DONE]":
+        return True
+    try:
+        json.loads(raw_data)
+    except json.JSONDecodeError:
+        return False
+    return True
 
 
 def _assistant_text(parsed: object) -> str:
