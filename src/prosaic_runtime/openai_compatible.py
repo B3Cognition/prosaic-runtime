@@ -23,17 +23,23 @@ class OpenAICompatibleBackend:
         llm = self._config.llm
         assert llm.base_url is not None
         assert llm.model is not None
+        prompt_metadata = _prompt_metadata(request)
         streaming = _feature_enabled(llm.features, "streaming", default=True)
         payload: dict[str, object] = {
-            "model": llm.model,
+            "model": _metadata_str(prompt_metadata, "model") or llm.model,
             "messages": [{"role": "user", "content": request.prompt}],
-            "temperature": llm.temperature,
+            "temperature": _metadata_float(prompt_metadata, "temperature", llm.temperature),
         }
-        if llm.max_tokens is not None:
-            payload["max_tokens"] = llm.max_tokens
+        max_tokens = _metadata_int(prompt_metadata, "max_tokens", llm.max_tokens)
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
         if _feature_enabled(llm.features, "json_mode", default=False):
             payload["response_format"] = {"type": "json_object"}
-        reasoning_effort = _reasoning_effort(llm.features)
+        reasoning_effort = (
+            _metadata_reasoning_effort(prompt_metadata, "reasoning_effort")
+            or _metadata_reasoning_effort(prompt_metadata, "effort")
+            or _reasoning_effort(llm.features)
+        )
         if reasoning_effort:
             payload["reasoning_effort"] = reasoning_effort
         if streaming:
@@ -332,6 +338,47 @@ def _feature_enabled(
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "yes", "on"}
     return bool(value)
+
+
+def _prompt_metadata(request: CliRunRequest) -> Mapping[str, object]:
+    metadata = request.metadata.get("prompt_metadata")
+    return metadata if isinstance(metadata, Mapping) else {}
+
+
+def _metadata_str(metadata: Mapping[str, object], key: str) -> str:
+    value = metadata.get(key)
+    return value.strip() if isinstance(value, str) else ""
+
+
+def _metadata_float(
+    metadata: Mapping[str, object],
+    key: str,
+    default: float,
+) -> float:
+    value = metadata.get(key)
+    if isinstance(value, (int, float)):
+        return float(value)
+    return default
+
+
+def _metadata_int(
+    metadata: Mapping[str, object],
+    key: str,
+    default: int | None,
+) -> int | None:
+    value = metadata.get(key)
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, int):
+        return value
+    return default
+
+
+def _metadata_reasoning_effort(metadata: Mapping[str, object], key: str) -> str:
+    normalized = _metadata_str(metadata, key).lower()
+    if normalized in {"low", "medium", "high"}:
+        return normalized
+    return ""
 
 
 def _reasoning_content_policy(features: dict[str, object]) -> str:
