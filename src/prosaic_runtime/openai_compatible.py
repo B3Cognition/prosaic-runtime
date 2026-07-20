@@ -18,6 +18,16 @@ from harness.ai_cli_backend import CliRunRequest, CliRunResult
 from harness.config import HarnessConfig
 
 
+_OPENAI_COMPATIBLE_TOOL_GUIDANCE = (
+    "Prefer bulk context tools first when inspecting Echelon RE or artifact runs. "
+    "Use read_re_analysis_pack for run-level context, read_domain_pack for one "
+    "source/domain, codegraph_context or perlgraph_context for graph summaries, "
+    "grep_context for search with surrounding lines, read_many_files for known "
+    "file sets, and list_tree_with_sizes before broad file reads. Keep tool calls "
+    "purposeful and return the final artifact once enough evidence is available."
+)
+
+
 class OpenAICompatibleBackend:
     name = "openai-compatible"
 
@@ -177,6 +187,7 @@ class OpenAICompatibleBackend:
         assert llm.model is not None
         registry = _OpenAIToolRegistry(Path(request.cwd), llm.features)
         messages: list[dict[str, object]] = [
+            {"role": "system", "content": _OPENAI_COMPATIBLE_TOOL_GUIDANCE},
             {"role": "user", "content": request.prompt}
         ]
         deadline = time.monotonic() + max(0.001, request.timeout_s)
@@ -187,13 +198,15 @@ class OpenAICompatibleBackend:
         max_tool_rounds = _feature_int(
             llm.features,
             "max_tool_rounds",
-            default=8,
+            default=24,
             minimum=1,
-            maximum=32,
+            maximum=64,
         )
+        run_started = time.monotonic()
 
         while True:
             turn_number = tool_rounds + 1
+            turn_started = time.monotonic()
             payload = self._chat_payload(
                 messages,
                 prompt_metadata,
@@ -202,28 +215,35 @@ class OpenAICompatibleBackend:
             )
             _progress(
                 "turn "
-                f"{turn_number}/{max_tool_rounds + 1}: request "
+                f"{turn_number}: request "
                 f"model={payload.get('model')} "
                 f"stream={str(streaming).lower()} "
-                f"tools={len(payload.get('tools', []))}"
+                f"messages={len(messages)} "
+                f"tools={len(payload.get('tools', []))} "
+                f"tool_rounds={tool_rounds}/{max_tool_rounds}"
             )
             turn_or_result = self._post_chat_turn(payload, request, deadline, streaming)
             if isinstance(turn_or_result, CliRunResult):
                 _progress(
                     "turn "
-                    f"{turn_number}/{max_tool_rounds + 1}: "
+                    f"{turn_number}: "
                     f"failed code={turn_or_result.exit_code} "
                     f"reason={turn_or_result.metadata.get('provider_error_code')}"
                 )
                 return turn_or_result
             turn = turn_or_result
+            model_elapsed = time.monotonic() - turn_started
             _progress(
                 "turn "
-                f"{turn_number}/{max_tool_rounds + 1}: response "
+                f"{turn_number}: response "
                 f"finish_reason={turn.finish_reason or 'unknown'} "
                 f"tool_calls={len(turn.tool_calls)} "
-                f"tokens={turn.token_usage}"
+                f"text_chars={len(turn.text)} "
+                f"tokens={turn.token_usage} "
+                f"elapsed={_elapsed_s(turn_started)}s"
             )
+            if turn.text and not turn.streamed:
+                _progress_llm_preview(turn.text)
             token_usage += turn.token_usage
             if turn.token_usage_details:
                 token_usage_details = _merge_token_usage_details(
@@ -233,22 +253,52 @@ class OpenAICompatibleBackend:
             if turn.tool_calls:
                 tool_rounds += 1
                 if tool_rounds > max_tool_rounds:
+                    last_tool_call = turn.tool_calls[-1]
+                    last_tool_name = _tool_call_name(last_tool_call)
+                    last_tool_summary = _tool_call_summary(last_tool_call)
+                    last_model_preview = _single_line_preview(turn.text)
+                    failure_detail = (
+                        "OpenAI-compatible provider exceeded "
+                        f"max_tool_rounds={max_tool_rounds}; "
+                        f"last_tool={last_tool_name}"
+                    )
+                    if last_tool_summary:
+                        failure_detail += f" {last_tool_summary}"
+                    if last_model_preview:
+                        failure_detail += (
+                            f"; last_model_preview={last_model_preview}"
+                        )
+                    _progress(
+                        "final: failed reason=tool_round_limit "
+                        f"last_tool={last_tool_name}"
+                        + (f" {last_tool_summary}" if last_tool_summary else "")
+                        + (
+                            f" last_model_preview={last_model_preview}"
+                            if last_model_preview else ""
+                        )
+                    )
                     return CliRunResult(
                         exit_code=1,
                         stdout="",
-                        stderr=(
-                            "OpenAI-compatible provider exceeded "
-                            f"max_tool_rounds={max_tool_rounds}"
-                        ),
+                        stderr=failure_detail,
                         token_usage=token_usage,
                         metadata={
                             "provider": self.name,
                             "provider_error_code": "tool_round_limit",
                             "tool_call_count": tool_call_count,
                             "tool_rounds": tool_rounds,
+                            "last_tool_name": last_tool_name,
+                            "last_tool_summary": last_tool_summary,
+                            "last_model_preview": last_model_preview,
                         },
                 )
+                _progress(
+                    "tool budget: "
+                    f"rounds={tool_rounds}/{max_tool_rounds} "
+                    f"calls_total={tool_call_count}"
+                )
                 messages.append(_assistant_tool_message(turn))
+                tool_started = time.monotonic()
                 for tool_call in turn.tool_calls:
                     tool_call_count += 1
                     tool_name = _tool_call_name(tool_call)
@@ -259,8 +309,29 @@ class OpenAICompatibleBackend:
                         f"{_tool_result_status(tool_message)}"
                     )
                     messages.append(tool_message)
+                tool_elapsed = time.monotonic() - tool_started
+                _progress_turn_summary(
+                    turn_number,
+                    model_elapsed=model_elapsed,
+                    tool_elapsed=tool_elapsed,
+                    model_text_chars=len(turn.text),
+                    turn_tool_calls=len(turn.tool_calls),
+                    tool_rounds=tool_rounds,
+                    max_tool_rounds=max_tool_rounds,
+                    tool_call_count=tool_call_count,
+                )
                 continue
 
+            _progress_turn_summary(
+                turn_number,
+                model_elapsed=model_elapsed,
+                tool_elapsed=0.0,
+                model_text_chars=len(turn.text),
+                turn_tool_calls=0,
+                tool_rounds=tool_rounds,
+                max_tool_rounds=max_tool_rounds,
+                tool_call_count=tool_call_count,
+            )
             metadata = {
                 "provider": self.name,
                 "streamed": turn.streamed,
@@ -290,7 +361,8 @@ class OpenAICompatibleBackend:
                 "final: "
                 f"finish_reason={turn.finish_reason or 'unknown'} "
                 f"tokens={token_usage} "
-                f"tool_calls={tool_call_count}"
+                f"tool_calls={tool_call_count} "
+                f"elapsed={_elapsed_s(run_started)}s"
             )
             return CliRunResult(
                 exit_code=0,
@@ -369,7 +441,7 @@ class OpenAICompatibleBackend:
         try:
             with urllib.request.urlopen(http_request, timeout=timeout) as response:
                 if streaming and _is_sse_response(response):
-                    _progress("stream: connected")
+                    _progress("stream: connected; waiting for model deltas")
                     return self._read_sse_turn(response, deadline)
                 http_status = _http_status(response)
                 raw_response_headers = _raw_response_headers(response)
@@ -514,6 +586,8 @@ class OpenAICompatibleBackend:
                         "provider_error_code": "malformed_sse",
                     },
                 )
+            for summary in _event_tool_call_delta_summaries(event):
+                _progress(f"stream: tool_call_delta {summary}")
             tool_accumulator.add_event(event)
             event_metadata = _raw_response_metadata(event)
             if event_metadata:
@@ -533,6 +607,11 @@ class OpenAICompatibleBackend:
             content = _event_content(event)
             if content:
                 text_parts.append(content)
+                _progress(
+                    "stream: content_delta "
+                    f"chars={len(content)} total_chars={sum(len(part) for part in text_parts)}"
+                )
+                _progress_llm_preview(content)
             return None
 
         while True:
@@ -734,6 +813,20 @@ class _OpenAIToolRegistry:
             return self._list_files(args)
         if normalized == "grep_files":
             return self._grep_files(args)
+        if normalized == "read_many_files":
+            return self._read_many_files(args)
+        if normalized == "list_tree_with_sizes":
+            return self._list_tree_with_sizes(args)
+        if normalized == "grep_context":
+            return self._grep_context(args)
+        if normalized == "read_domain_pack":
+            return self._read_domain_pack(args)
+        if normalized == "read_re_analysis_pack":
+            return self._read_re_analysis_pack(args)
+        if normalized == "codegraph_context":
+            return self._codegraph_context(args)
+        if normalized == "perlgraph_context":
+            return self._perlgraph_context(args)
         if normalized == "fetch_url":
             return self._fetch_url(args)
         if normalized == "web_search":
@@ -851,6 +944,313 @@ class _OpenAIToolRegistry:
             "truncated": len(matches) >= max_matches,
         }
 
+    def _read_many_files(self, args: dict[str, object]) -> dict[str, object]:
+        raw_paths = args.get("paths")
+        if not isinstance(raw_paths, list) or not raw_paths:
+            raise ValueError("read_many_files requires non-empty paths array")
+        paths = [
+            self._resolve_path_value(raw)
+            for raw in raw_paths
+            if isinstance(raw, str) and raw.strip()
+        ]
+        if not paths:
+            raise ValueError("read_many_files requires at least one string path")
+        if len(paths) > 200:
+            paths = paths[:200]
+        limit_per_file = _int_arg(
+            args,
+            "limit_per_file",
+            default=500,
+            minimum=1,
+            maximum=5_000,
+        )
+        max_total_chars = _int_arg(
+            args,
+            "max_total_chars",
+            default=120_000,
+            minimum=1_000,
+            maximum=1_000_000,
+        )
+        remaining = max_total_chars
+        files: list[dict[str, object]] = []
+        truncated = len(raw_paths) > len(paths)
+        for path in paths:
+            if remaining <= 0:
+                truncated = True
+                break
+            if not path.is_file():
+                files.append({
+                    "path": self._rel(path),
+                    "status": "error",
+                    "error": "not a readable file",
+                })
+                continue
+            try:
+                lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+            except OSError as exc:
+                files.append({
+                    "path": self._rel(path),
+                    "status": "error",
+                    "error": str(exc),
+                })
+                continue
+            selected = lines[:limit_per_file]
+            content = "\n".join(
+                f"{line_no}: {line}"
+                for line_no, line in enumerate(selected, start=1)
+            )
+            file_truncated = len(lines) > limit_per_file or len(content) > remaining
+            files.append({
+                "path": self._rel(path),
+                "status": "ok",
+                "line_count": len(lines),
+                "truncated": file_truncated,
+                "content": content[:remaining],
+            })
+            truncated = truncated or file_truncated
+            remaining -= min(len(content), remaining)
+        return {
+            "status": "ok",
+            "files": files,
+            "truncated": truncated,
+        }
+
+    def _list_tree_with_sizes(self, args: dict[str, object]) -> dict[str, object]:
+        path = self._path_arg(args, default=".")
+        max_entries = _int_arg(
+            args,
+            "max_entries",
+            default=500,
+            minimum=1,
+            maximum=10_000,
+        )
+        entries: list[dict[str, object]] = []
+        candidates = [path] if path.is_file() else sorted(path.rglob("*"))
+        truncated = False
+        for candidate in candidates:
+            if len(entries) >= max_entries:
+                truncated = True
+                break
+            if not self._inside_root(candidate):
+                continue
+            if candidate.is_dir():
+                entries.append({
+                    "path": self._rel(candidate),
+                    "type": "dir",
+                    "size": 0,
+                })
+            elif candidate.is_file():
+                try:
+                    size = candidate.stat().st_size
+                except OSError:
+                    size = 0
+                entries.append({
+                    "path": self._rel(candidate),
+                    "type": "file",
+                    "size": size,
+                })
+        return {
+            "status": "ok",
+            "path": self._rel(path),
+            "entries": entries,
+            "truncated": truncated,
+        }
+
+    def _grep_context(self, args: dict[str, object]) -> dict[str, object]:
+        pattern = _str_arg(args, "pattern", default="")
+        if not pattern:
+            raise ValueError("grep_context requires pattern")
+        base = self._path_arg(args, default=".")
+        file_pattern = _str_arg(args, "file_pattern", default="**/*")
+        self._validate_relative_pattern(file_pattern)
+        before = _int_arg(args, "before", default=2, minimum=0, maximum=20)
+        after = _int_arg(args, "after", default=2, minimum=0, maximum=20)
+        max_matches = _int_arg(args, "max_matches", default=100, minimum=1, maximum=1_000)
+        regex = re.compile(pattern)
+        matches: list[dict[str, object]] = []
+        paths = [base] if base.is_file() else sorted(base.glob(file_pattern))
+        truncated = False
+        for path in paths:
+            if len(matches) >= max_matches:
+                truncated = True
+                break
+            if not path.is_file() or not self._inside_root(path):
+                continue
+            try:
+                if path.stat().st_size > 2_000_000:
+                    continue
+                lines = path.read_text(encoding="utf-8").splitlines()
+            except (OSError, UnicodeDecodeError):
+                continue
+            for index, line in enumerate(lines):
+                if not regex.search(line):
+                    continue
+                start = max(0, index - before)
+                end = min(len(lines), index + after + 1)
+                context = "\n".join(
+                    f"{line_no}: {context_line}"
+                    for line_no, context_line in enumerate(
+                        lines[start:end],
+                        start=start + 1,
+                    )
+                )
+                matches.append({
+                    "path": self._rel(path),
+                    "line": index + 1,
+                    "text": line,
+                    "context": context,
+                })
+                if len(matches) >= max_matches:
+                    truncated = True
+                    break
+        return {
+            "status": "ok",
+            "pattern": pattern,
+            "path": self._rel(base),
+            "matches": matches,
+            "truncated": truncated,
+        }
+
+    def _read_re_analysis_pack(self, args: dict[str, object]) -> dict[str, object]:
+        run_dir = self._path_arg(args, key="run_dir")
+        max_chars = _int_arg(
+            args,
+            "max_chars_per_file",
+            default=80_000,
+            minimum=1_000,
+            maximum=500_000,
+        )
+        files, missing, truncated = self._read_pack_files(
+            run_dir,
+            [
+                "re-execution-plan.json",
+                "re-source-index.json",
+                "re-workspace-inputs.json",
+                "workspace/domain-catalog.md",
+                "workspace/architecture-map.json",
+                "workspace/workspace-manifest.json",
+                "workspace/repos-manifest.json",
+                "workspace/cross-repo.json",
+                "analysis.json",
+                "re-analysis-manifest.json",
+            ],
+            max_chars=max_chars,
+        )
+        return {
+            "status": "ok",
+            "run_dir": self._rel(run_dir),
+            "files": files,
+            "missing": missing,
+            "truncated": truncated,
+        }
+
+    def _read_domain_pack(self, args: dict[str, object]) -> dict[str, object]:
+        run_dir = self._path_arg(args, key="run_dir")
+        source_id = _str_arg(args, "source_id", default="")
+        domain_id = _str_arg(args, "domain_id", default="")
+        if not source_id:
+            raise ValueError("read_domain_pack requires source_id")
+        if not domain_id:
+            raise ValueError("read_domain_pack requires domain_id")
+        max_files = _int_arg(args, "max_files", default=200, minimum=1, maximum=2_000)
+        max_chars = _int_arg(
+            args,
+            "max_chars_per_file",
+            default=80_000,
+            minimum=1_000,
+            maximum=500_000,
+        )
+        source_run_dir = run_dir / "sources" / source_id
+        manifest_path = source_run_dir / "domain-manifest.json"
+        manifest = self._read_json_file(manifest_path)
+        domain_entry = self._domain_entry(manifest, domain_id)
+        owned_root = _mapping_str(domain_entry, "root") or _mapping_str(
+            domain_entry,
+            "owned_root",
+        )
+        if not owned_root:
+            owned_root = _mapping_str(domain_entry, "path") or "."
+        source_root = self._source_root_from_index(run_dir, source_id)
+        domain_source_root = (source_root / owned_root).resolve(strict=False)
+        if not self._inside_root(domain_source_root):
+            raise ValueError(f"Domain source root escapes provider root: {owned_root}")
+        source_files = self._tree_files(domain_source_root, max_entries=max_files)
+        target_spec = self._file_payload(
+            source_run_dir / "specs" / domain_id / "spec.md",
+            max_chars=max_chars,
+        )
+        analysis = self._file_payload(source_run_dir / "analysis.json", max_chars=max_chars)
+        return {
+            "status": "ok",
+            "run_dir": self._rel(run_dir),
+            "source_id": source_id,
+            "domain_id": domain_id,
+            "owned_root": owned_root,
+            "domain_manifest": self._file_payload(manifest_path, max_chars=max_chars),
+            "analysis": analysis,
+            "target_spec": target_spec,
+            "source_files": source_files,
+            "truncated": len(source_files) >= max_files,
+        }
+
+    def _codegraph_context(self, args: dict[str, object]) -> dict[str, object]:
+        return self._graph_context(
+            args,
+            [
+                "codegraph-summary.json",
+                "codegraph-analysis.json",
+                "codegraph-index.json",
+            ],
+        )
+
+    def _perlgraph_context(self, args: dict[str, object]) -> dict[str, object]:
+        return self._graph_context(
+            args,
+            [
+                "perlgraph-summary.json",
+                "perlgraph-analysis.json",
+                "perlgraph-index.json",
+            ],
+        )
+
+    def _graph_context(
+        self,
+        args: dict[str, object],
+        file_names: list[str],
+    ) -> dict[str, object]:
+        run_dir = self._path_arg(args, key="run_dir")
+        source_id = _str_arg(args, "source_id", default="")
+        if not source_id:
+            raise ValueError("graph context tools require source_id")
+        max_chars = _int_arg(
+            args,
+            "max_chars_per_file",
+            default=80_000,
+            minimum=1_000,
+            maximum=500_000,
+        )
+        files: dict[str, str] = {}
+        missing: list[str] = []
+        truncated = False
+        for file_name in file_names:
+            path = run_dir / "sources" / source_id / file_name
+            if not path.is_file() or not self._inside_root(path):
+                missing.append(file_name)
+                continue
+            payload = self._file_payload(path, max_chars=max_chars)
+            content = payload.get("content")
+            if isinstance(content, str):
+                files[file_name] = content
+            truncated = truncated or bool(payload.get("truncated"))
+        return {
+            "status": "ok",
+            "run_dir": self._rel(run_dir),
+            "source_id": source_id,
+            "files": files,
+            "missing": missing,
+            "truncated": truncated,
+        }
+
     def _fetch_url(self, args: dict[str, object]) -> dict[str, object]:
         url = _str_arg(args, "url", default="")
         if not url:
@@ -950,10 +1350,28 @@ class _OpenAIToolRegistry:
             "results": results,
         }
 
-    def _path_arg(self, args: dict[str, object]) -> Path:
-        raw = args.get("path") or args.get("filePath") or args.get("file_path")
+    def _path_arg(
+        self,
+        args: dict[str, object],
+        *,
+        key: str = "path",
+        default: str | None = None,
+    ) -> Path:
+        raw = args.get(key)
+        if key == "path":
+            raw = raw or args.get("filePath") or args.get("file_path")
+        return self._resolve_path_value(raw, default=default)
+
+    def _resolve_path_value(
+        self,
+        raw: object,
+        *,
+        default: str | None = None,
+    ) -> Path:
         if not isinstance(raw, str) or not raw.strip():
-            raise ValueError("Tool requires path")
+            if default is None:
+                raise ValueError("Tool requires path")
+            raw = default
         candidate = Path(raw).expanduser()
         if not candidate.is_absolute():
             candidate = self._root / candidate
@@ -961,6 +1379,128 @@ class _OpenAIToolRegistry:
         if not self._inside_root(resolved):
             raise ValueError(f"Path escapes provider root: {raw}")
         return resolved
+
+    def _read_pack_files(
+        self,
+        base: Path,
+        relative_paths: list[str],
+        *,
+        max_chars: int,
+    ) -> tuple[dict[str, str], list[str], bool]:
+        files: dict[str, str] = {}
+        missing: list[str] = []
+        truncated = False
+        for relative in relative_paths:
+            path = (base / relative).resolve(strict=False)
+            if not self._inside_root(path) or not path.is_file():
+                missing.append(relative)
+                continue
+            payload = self._file_payload(path, max_chars=max_chars)
+            content = payload.get("content")
+            if isinstance(content, str):
+                files[relative] = content
+            truncated = truncated or bool(payload.get("truncated"))
+        return files, missing, truncated
+
+    def _file_payload(self, path: Path, *, max_chars: int) -> dict[str, object]:
+        if not self._inside_root(path):
+            return {
+                "status": "error",
+                "path": str(path),
+                "error": "path escapes provider root",
+            }
+        if not path.is_file():
+            return {
+                "status": "missing",
+                "path": self._rel(path),
+                "content": "",
+                "truncated": False,
+            }
+        try:
+            content = path.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            return {
+                "status": "error",
+                "path": self._rel(path),
+                "error": str(exc),
+            }
+        return {
+            "status": "ok",
+            "path": self._rel(path),
+            "content": content[:max_chars],
+            "truncated": len(content) > max_chars,
+        }
+
+    def _read_json_file(self, path: Path) -> object:
+        if not path.is_file() or not self._inside_root(path):
+            return {}
+        try:
+            return json.loads(path.read_text(encoding="utf-8", errors="replace"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+
+    def _domain_entry(self, manifest: object, domain_id: str) -> Mapping[str, object]:
+        if not isinstance(manifest, Mapping):
+            return {}
+        domains = manifest.get("domains")
+        if not isinstance(domains, list):
+            return {}
+        for item in domains:
+            if not isinstance(item, Mapping):
+                continue
+            item_id = (
+                _mapping_str(item, "domain_id")
+                or _mapping_str(item, "id")
+                or _mapping_str(item, "name")
+            )
+            if item_id == domain_id:
+                return item
+        return {}
+
+    def _source_root_from_index(self, run_dir: Path, source_id: str) -> Path:
+        index = self._read_json_file(run_dir / "re-source-index.json")
+        source_entry = self._source_index_entry(index, source_id)
+        raw_path = _mapping_str(source_entry, "absolute_path")
+        if not raw_path:
+            raw_path = _mapping_str(source_entry, "path")
+        if not raw_path:
+            raw_path = f"sources/{source_id}"
+        return self._resolve_path_value(raw_path)
+
+    def _source_index_entry(self, index: object, source_id: str) -> Mapping[str, object]:
+        if not isinstance(index, Mapping):
+            return {}
+        sources = index.get("sources")
+        if not isinstance(sources, list):
+            return {}
+        for item in sources:
+            if not isinstance(item, Mapping):
+                continue
+            item_id = (
+                _mapping_str(item, "id")
+                or _mapping_str(item, "source_id")
+                or _mapping_str(item, "name")
+            )
+            if item_id == source_id:
+                return item
+        return {}
+
+    def _tree_files(self, base: Path, *, max_entries: int) -> list[dict[str, object]]:
+        files: list[dict[str, object]] = []
+        if not base.exists():
+            return files
+        candidates = [base] if base.is_file() else sorted(base.rglob("*"))
+        for path in candidates:
+            if len(files) >= max_entries:
+                break
+            if not path.is_file() or not self._inside_root(path):
+                continue
+            try:
+                size = path.stat().st_size
+            except OSError:
+                size = 0
+            files.append({"path": self._rel(path), "size": size})
+        return files
 
     def _inside_root(self, path: Path) -> bool:
         try:
@@ -1021,6 +1561,104 @@ class _OpenAIToolRegistry:
                     "file_pattern": {"type": "string"},
                     "max_matches": {"type": "integer", "minimum": 1, "maximum": 1000},
                 }, required=["pattern"]),
+            ),
+            _OpenAITool(
+                "read_many_files",
+                "Read multiple UTF-8 files in one call with line numbers and bounded output.",
+                _object_schema({
+                    "paths": {"type": "array", "items": {"type": "string"}},
+                    "limit_per_file": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 5000,
+                    },
+                    "max_total_chars": {
+                        "type": "integer",
+                        "minimum": 1000,
+                        "maximum": 1000000,
+                    },
+                }, required=["paths"]),
+            ),
+            _OpenAITool(
+                "list_tree_with_sizes",
+                "Recursively list files and directories with byte sizes under a provider-root path.",
+                _object_schema({
+                    "path": {"type": "string"},
+                    "max_entries": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 10000,
+                    },
+                }, required=[]),
+            ),
+            _OpenAITool(
+                "grep_context",
+                "Search UTF-8 files and return matching lines with surrounding context.",
+                _object_schema({
+                    "pattern": {"type": "string"},
+                    "path": {"type": "string"},
+                    "file_pattern": {"type": "string"},
+                    "before": {"type": "integer", "minimum": 0, "maximum": 20},
+                    "after": {"type": "integer", "minimum": 0, "maximum": 20},
+                    "max_matches": {"type": "integer", "minimum": 1, "maximum": 1000},
+                }, required=["pattern"]),
+            ),
+            _OpenAITool(
+                "read_domain_pack",
+                "Read an RE source/domain context pack: manifest, analysis, target spec, and source file list.",
+                _object_schema({
+                    "run_dir": {"type": "string"},
+                    "source_id": {"type": "string"},
+                    "domain_id": {"type": "string"},
+                    "max_files": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 2000,
+                    },
+                    "max_chars_per_file": {
+                        "type": "integer",
+                        "minimum": 1000,
+                        "maximum": 500000,
+                    },
+                }, required=["run_dir", "source_id", "domain_id"]),
+            ),
+            _OpenAITool(
+                "read_re_analysis_pack",
+                "Read high-value RE run-level planning, index, workspace, and catalog files in one call.",
+                _object_schema({
+                    "run_dir": {"type": "string"},
+                    "max_chars_per_file": {
+                        "type": "integer",
+                        "minimum": 1000,
+                        "maximum": 500000,
+                    },
+                }, required=["run_dir"]),
+            ),
+            _OpenAITool(
+                "codegraph_context",
+                "Read available codegraph summary, analysis, and index files for one RE source.",
+                _object_schema({
+                    "run_dir": {"type": "string"},
+                    "source_id": {"type": "string"},
+                    "max_chars_per_file": {
+                        "type": "integer",
+                        "minimum": 1000,
+                        "maximum": 500000,
+                    },
+                }, required=["run_dir", "source_id"]),
+            ),
+            _OpenAITool(
+                "perlgraph_context",
+                "Read available perlgraph summary, analysis, and index files for one RE source.",
+                _object_schema({
+                    "run_dir": {"type": "string"},
+                    "source_id": {"type": "string"},
+                    "max_chars_per_file": {
+                        "type": "integer",
+                        "minimum": 1000,
+                        "maximum": 500000,
+                    },
+                }, required=["run_dir", "source_id"]),
             ),
         ]
         if _feature_enabled(self._features, "web_tools", default=False):
@@ -1325,6 +1963,97 @@ def _progress(message: str) -> None:
     print(f"[openai-compatible] {message}", file=sys.stderr, flush=True)
 
 
+def _progress_llm_preview(text: str, *, limit: int = 600) -> None:
+    preview = text.replace("\r\n", "\n").replace("\r", "\n")
+    if not preview.strip():
+        return
+    truncated = False
+    if len(preview) > limit:
+        preview = preview[:limit]
+        truncated = True
+    lines = preview.splitlines() or [preview]
+    for line in lines[:8]:
+        print(
+            f"  llm> {_truncate_llm_preview_line(line)}",
+            file=sys.stderr,
+            flush=True,
+        )
+    if truncated or len(lines) > 8:
+        print("  llm> ...", file=sys.stderr, flush=True)
+
+
+def _progress_turn_summary(
+    turn_number: int,
+    *,
+    model_elapsed: float,
+    tool_elapsed: float,
+    model_text_chars: int,
+    turn_tool_calls: int,
+    tool_rounds: int,
+    max_tool_rounds: int,
+    tool_call_count: int,
+) -> None:
+    _progress(
+        f"turn {turn_number} summary: "
+        f"model_time={model_elapsed:.1f}s "
+        f"tool_time={tool_elapsed:.1f}s "
+        f"model_text={model_text_chars} chars "
+        f"tool_calls={turn_tool_calls} "
+        f"tool_budget={tool_rounds}/{max_tool_rounds} "
+        f"calls_total={tool_call_count}"
+    )
+
+
+def _elapsed_s(started_at: float) -> str:
+    return f"{time.monotonic() - started_at:.1f}"
+
+
+def _single_line_preview(text: str, *, limit: int = 180) -> str:
+    if not text.strip():
+        return ""
+    return _truncate_progress_value(text, limit=limit)
+
+
+def _truncate_llm_preview_line(value: str, limit: int = 180) -> str:
+    value = value.rstrip()
+    if len(value) <= limit:
+        return value
+    return value[: limit - 3] + "..."
+
+
+def _event_tool_call_delta_summaries(event: object) -> list[str]:
+    choice = _first_choice(event)
+    if not choice:
+        return []
+    summaries: list[str] = []
+    for container_name in ("delta", "message"):
+        container = choice.get(container_name)
+        if not isinstance(container, dict):
+            continue
+        raw_calls = container.get("tool_calls")
+        if not isinstance(raw_calls, list):
+            continue
+        for offset, raw_call in enumerate(raw_calls):
+            if not isinstance(raw_call, dict):
+                continue
+            index = raw_call.get("index")
+            if not isinstance(index, int):
+                index = offset
+            raw_function = raw_call.get("function")
+            if not isinstance(raw_function, dict):
+                summaries.append(f"index={index}")
+                continue
+            parts = [f"index={index}"]
+            name = raw_function.get("name")
+            if isinstance(name, str) and name:
+                parts.append(f"name={name}")
+            arguments = raw_function.get("arguments")
+            if isinstance(arguments, str):
+                parts.append(f"args_chars={len(arguments)}")
+            summaries.append(" ".join(parts))
+    return summaries
+
+
 def _tool_call_name(tool_call: dict[str, object]) -> str:
     function = tool_call.get("function")
     if not isinstance(function, dict):
@@ -1346,11 +2075,48 @@ def _tool_call_summary(tool_call: dict[str, object]) -> str:
         return "malformed-arguments"
     if not isinstance(arguments, dict):
         return "non-object-arguments"
+    parts: list[str] = []
     for key in ("path", "filePath", "file_path", "url", "query", "pattern"):
         value = arguments.get(key)
         if isinstance(value, str) and value:
-            return _truncate_progress_value(value)
-    return "{}"
+            parts.append(_truncate_progress_value(value))
+            break
+    run_dir = arguments.get("run_dir")
+    if isinstance(run_dir, str) and run_dir:
+        parts.append("run_dir=" + _truncate_progress_value(run_dir, limit=80))
+    source_id = arguments.get("source_id")
+    if isinstance(source_id, str) and source_id:
+        parts.append(f"source_id={source_id}")
+    domain_id = arguments.get("domain_id")
+    if isinstance(domain_id, str) and domain_id:
+        parts.append(f"domain_id={domain_id}")
+    paths = arguments.get("paths")
+    if isinstance(paths, list):
+        string_paths = [item for item in paths if isinstance(item, str) and item]
+        if string_paths:
+            preview = ", ".join(
+                _truncate_progress_value(item, limit=50)
+                for item in string_paths[:3]
+            )
+            if len(string_paths) > 3:
+                preview += f", +{len(string_paths) - 3} more"
+            parts.append(f"paths={len(string_paths)} [{preview}]")
+    for key in (
+        "file_pattern",
+        "max_entries",
+        "max_matches",
+        "max_files",
+        "limit",
+        "limit_per_file",
+        "max_total_chars",
+        "max_chars_per_file",
+        "before",
+        "after",
+    ):
+        value = arguments.get(key)
+        if isinstance(value, (int, str)) and not isinstance(value, bool):
+            parts.append(f"{key}={value}")
+    return " ".join(parts) if parts else "{}"
 
 
 def _tool_result_status(tool_message: dict[str, object]) -> str:
@@ -1369,8 +2135,100 @@ def _tool_result_status(tool_message: dict[str, object]) -> str:
             error = parsed.get("error")
             if isinstance(error, str) and error:
                 return "error " + _truncate_progress_value(error)
-        return status
+        details = _tool_result_details(parsed)
+        return status if not details else f"{status} {details}"
     return "unknown"
+
+
+def _tool_result_details(payload: dict[str, object]) -> str:
+    detail_parts: list[str] = []
+    http_status = payload.get("http_status")
+    if isinstance(http_status, int):
+        detail_parts.append(f"http_status={http_status}")
+    bytes_written = payload.get("bytes")
+    if isinstance(bytes_written, int):
+        detail_parts.append(f"bytes={bytes_written}")
+    path = payload.get("path")
+    if isinstance(path, str) and path:
+        detail_parts.append("path=" + _truncate_progress_value(path, limit=80))
+    line_count = payload.get("line_count")
+    if isinstance(line_count, int):
+        detail_parts.append(f"line_count={line_count}")
+    replacements = payload.get("replacements")
+    if isinstance(replacements, int):
+        detail_parts.append(f"replacements={replacements}")
+    content = payload.get("content")
+    if isinstance(content, str):
+        detail_parts.append(f"chars={len(content)}")
+    for key in ("matches", "results", "entries", "source_files"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            preview = _payload_item_preview(value)
+            if preview:
+                detail_parts.append(f"{key}={len(value)} [{preview}]")
+            else:
+                detail_parts.append(f"{key}={len(value)}")
+    files = payload.get("files")
+    if isinstance(files, dict):
+        preview = _payload_mapping_key_preview(files)
+        if preview:
+            detail_parts.append(f"files={len(files)} [{preview}]")
+        else:
+            detail_parts.append(f"files={len(files)}")
+    elif isinstance(files, list):
+        preview = _payload_item_preview(files)
+        if preview:
+            detail_parts.append(f"files={len(files)} [{preview}]")
+        else:
+            detail_parts.append(f"files={len(files)}")
+    truncated = payload.get("truncated")
+    if isinstance(truncated, bool):
+        detail_parts.append(f"truncated={str(truncated).lower()}")
+    return " ".join(detail_parts)
+
+
+def _payload_item_preview(items: list[object], *, limit: int = 3) -> str:
+    values: list[str] = []
+    for item in items:
+        if isinstance(item, Mapping):
+            path = _mapping_str(item, "path") or _mapping_str(item, "url")
+            if path:
+                line = item.get("line")
+                if isinstance(line, int):
+                    path = f"{path}:{line}"
+                values.append(path)
+                if len(values) >= limit:
+                    break
+                continue
+            title = _mapping_str(item, "title")
+            if title:
+                values.append(title)
+        elif isinstance(item, str) and item:
+            values.append(item)
+        if len(values) >= limit:
+            break
+    return _preview_values(values, total=len(items), limit=limit)
+
+
+def _payload_mapping_key_preview(
+    items: Mapping[str, object],
+    *,
+    limit: int = 3,
+) -> str:
+    return _preview_values(list(items.keys())[:limit], total=len(items), limit=limit)
+
+
+def _preview_values(values: list[str], *, total: int, limit: int) -> str:
+    if not values:
+        return ""
+    preview = ", ".join(
+        _truncate_progress_value(value, limit=50)
+        for value in values
+    )
+    remaining = total - len(values)
+    if remaining > 0:
+        preview += f", +{remaining} more"
+    return preview
 
 
 def _truncate_progress_value(value: str, limit: int = 160) -> str:
@@ -1454,6 +2312,11 @@ def _object_schema(
 def _str_arg(args: dict[str, object], key: str, *, default: str) -> str:
     value = args.get(key)
     return value if isinstance(value, str) and value else default
+
+
+def _mapping_str(value: Mapping[str, object], key: str) -> str:
+    item = value.get(key)
+    return item.strip() if isinstance(item, str) else ""
 
 
 def _int_arg(
