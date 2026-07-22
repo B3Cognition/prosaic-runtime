@@ -42,7 +42,9 @@ _OPENAI_COMPATIBLE_TOOL_GUIDANCE = (
     "source/domain, codegraph_context or perlgraph_context for graph summaries, "
     "grep_context for search with surrounding lines, read_many_files for known "
     "file sets, and list_tree_with_sizes before broad file reads. Keep tool calls "
-    "purposeful and return the final artifact once enough evidence is available."
+    "purposeful and return the final artifact once enough evidence is available. "
+    "The `echelon_result` control payload is final YAML response text, never a tool or "
+    "function call. Once artifacts are complete, stop calling tools and emit that block."
 )
 
 
@@ -203,7 +205,11 @@ class OpenAICompatibleBackend:
         llm = self._config.llm
         assert llm.base_url is not None
         assert llm.model is not None
-        registry = _OpenAIToolRegistry(Path(request.cwd), llm.features)
+        registry = _OpenAIToolRegistry(
+            Path(request.cwd),
+            llm.features,
+            prompt_metadata,
+        )
         transcript = open_provider_transcript(
             Path(request.cwd),
             llm.features,
@@ -924,10 +930,59 @@ class _OpenAITool:
 
 
 class _OpenAIToolRegistry:
-    def __init__(self, cwd: Path, features: dict[str, object]) -> None:
+    def __init__(
+        self,
+        cwd: Path,
+        features: dict[str, object],
+        prompt_metadata: Mapping[str, object] | None = None,
+    ) -> None:
         self._root = cwd.resolve()
         self._features = features
         self._path_filter = OpenAIPathFilter(self._root, features)
+        metadata = prompt_metadata or {}
+        self._read_scope_roots = self._scope_paths(metadata, "tool_read_roots")
+        self._write_scope_paths = self._scope_paths(metadata, "tool_write_paths")
+
+    def _scope_paths(
+        self,
+        metadata: Mapping[str, object],
+        key: str,
+    ) -> tuple[Path, ...]:
+        raw_paths = metadata.get(key)
+        if not isinstance(raw_paths, list):
+            return ()
+        paths: list[Path] = []
+        for raw in raw_paths:
+            if not isinstance(raw, str) or not raw.strip():
+                continue
+            candidate = Path(raw).expanduser()
+            if not candidate.is_absolute():
+                candidate = self._root / candidate
+            resolved = candidate.resolve(strict=False)
+            if not self._inside_root(resolved):
+                raise ValueError(f"{key} escapes provider root: {raw}")
+            paths.append(resolved)
+        return tuple(paths)
+
+    def _inside_read_scope(self, path: Path) -> bool:
+        if not self._read_scope_roots:
+            return True
+        resolved = path.resolve(strict=False)
+        return any(
+            resolved == root or root in resolved.parents
+            for root in self._read_scope_roots
+        )
+
+    def _require_read_scope(self, path: Path) -> None:
+        if not self._inside_read_scope(path):
+            raise ValueError(f"Path is outside dispatch read scope: {self._rel(path)}")
+
+    def _require_write_scope(self, path: Path) -> None:
+        if not self._write_scope_paths:
+            return
+        resolved = path.resolve(strict=False)
+        if resolved not in self._write_scope_paths:
+            raise ValueError(f"Path is outside dispatch write scope: {self._rel(path)}")
 
     def openai_tools(self) -> list[dict[str, object]]:
         return [
@@ -971,6 +1026,15 @@ class _OpenAIToolRegistry:
 
     def _execute(self, name: str, args: dict[str, object]) -> dict[str, object]:
         normalized = name.strip()
+        if normalized == "echelon_result":
+            return {
+                "status": "retry",
+                "code": "result_contract_not_tool",
+                "instruction": (
+                    "echelon_result is not a callable tool. Return it now as the final YAML "
+                    "response block. Do not call more tools and do not add prose around it."
+                ),
+            }
         if normalized == "read_file":
             return self._read_file(args)
         if normalized == "write_file":
@@ -1003,6 +1067,7 @@ class _OpenAIToolRegistry:
 
     def _read_file(self, args: dict[str, object]) -> dict[str, object]:
         path = self._path_arg(args)
+        self._require_read_scope(path)
         if not path.is_file():
             raise ValueError(f"File is not readable: {path}")
         reason = self._path_filter.reason(path)
@@ -1026,6 +1091,7 @@ class _OpenAIToolRegistry:
 
     def _write_file(self, args: dict[str, object]) -> dict[str, object]:
         path = self._path_arg(args)
+        self._require_write_scope(path)
         content = args.get("content")
         if not isinstance(content, str):
             raise ValueError("write_file requires string content")
@@ -1039,6 +1105,7 @@ class _OpenAIToolRegistry:
 
     def _edit_file(self, args: dict[str, object]) -> dict[str, object]:
         path = self._path_arg(args)
+        self._require_write_scope(path)
         old = args.get("old_string")
         new = args.get("new_string")
         replace_all = bool(args.get("replace_all", False))
@@ -1069,7 +1136,10 @@ class _OpenAIToolRegistry:
         files = [
             self._rel(path)
             for path in sorted(self._root.glob(pattern))
-            if path.is_file() and self._inside_root(path) and self._path_filter.visible_file(path)
+            if path.is_file()
+            and self._inside_root(path)
+            and self._inside_read_scope(path)
+            and self._path_filter.visible_file(path)
         ]
         return {
             "status": "ok",
@@ -1093,6 +1163,7 @@ class _OpenAIToolRegistry:
             if (
                 not path.is_file()
                 or not self._inside_root(path)
+                or not self._inside_read_scope(path)
                 or not self._path_filter.visible_file(path)
             ):
                 continue
@@ -1160,6 +1231,13 @@ class _OpenAIToolRegistry:
                     "error": "not a readable file",
                 })
                 continue
+            if not self._inside_read_scope(path):
+                files.append({
+                    "path": self._rel(path),
+                    "status": "skipped",
+                    "error": "outside dispatch read scope",
+                })
+                continue
             reason = self._path_filter.reason(path)
             if reason:
                 files.append({
@@ -1200,6 +1278,7 @@ class _OpenAIToolRegistry:
 
     def _list_tree_with_sizes(self, args: dict[str, object]) -> dict[str, object]:
         path = self._path_arg(args, default=".")
+        self._require_read_scope(path)
         max_entries = _int_arg(
             args,
             "max_entries",
@@ -1244,6 +1323,7 @@ class _OpenAIToolRegistry:
         if not pattern:
             raise ValueError("grep_context requires pattern")
         base = self._path_arg(args, default=".")
+        self._require_read_scope(base)
         file_pattern = _str_arg(args, "file_pattern", default="**/*")
         self._validate_relative_pattern(file_pattern)
         before = _int_arg(args, "before", default=2, minimum=0, maximum=20)
@@ -1260,6 +1340,7 @@ class _OpenAIToolRegistry:
             if (
                 not path.is_file()
                 or not self._inside_root(path)
+                or not self._inside_read_scope(path)
                 or not self._path_filter.visible_file(path)
             ):
                 continue
@@ -1300,6 +1381,7 @@ class _OpenAIToolRegistry:
 
     def _read_re_analysis_pack(self, args: dict[str, object]) -> dict[str, object]:
         run_dir = self._path_arg(args, key="run_dir")
+        self._require_read_scope(run_dir)
         max_chars = _int_arg(
             args,
             "max_chars_per_file",
@@ -1333,6 +1415,7 @@ class _OpenAIToolRegistry:
 
     def _read_domain_pack(self, args: dict[str, object]) -> dict[str, object]:
         run_dir = self._path_arg(args, key="run_dir")
+        self._require_read_scope(run_dir)
         source_id = _str_arg(args, "source_id", default="")
         domain_id = _str_arg(args, "domain_id", default="")
         if not source_id:
@@ -1361,6 +1444,7 @@ class _OpenAIToolRegistry:
         domain_source_root = (source_root / owned_root).resolve(strict=False)
         if not self._inside_root(domain_source_root):
             raise ValueError(f"Domain source root escapes provider root: {owned_root}")
+        self._require_read_scope(domain_source_root)
         source_files = self._tree_files(domain_source_root, max_entries=max_files)
         target_spec = self._file_payload(
             source_run_dir / "specs" / domain_id / "spec.md",
@@ -1406,6 +1490,7 @@ class _OpenAIToolRegistry:
         file_names: list[str],
     ) -> dict[str, object]:
         run_dir = self._path_arg(args, key="run_dir")
+        self._require_read_scope(run_dir)
         source_id = _str_arg(args, "source_id", default="")
         if not source_id:
             raise ValueError("graph context tools require source_id")
