@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -43,6 +44,8 @@ _OPENAI_COMPATIBLE_TOOL_GUIDANCE = (
     "grep_context for search with surrounding lines, read_many_files for known "
     "file sets, and list_tree_with_sizes before broad file reads. Keep tool calls "
     "purposeful and return the final artifact once enough evidence is available. "
+    "Use sha256_file when an artifact requires an exact digest of an on-disk source, "
+    "especially after writing or editing that source. "
     "Treat rejected out-of-scope reads and empty search results as authoritative; do "
     "not retry them or broaden scope. When owned tests are absent, report them as "
     "not-observed instead of searching elsewhere. "
@@ -1091,6 +1094,8 @@ class _OpenAIToolRegistry:
             }
         if normalized == "read_file":
             return self._read_file(args)
+        if normalized == "sha256_file":
+            return self._sha256_file(args)
         if normalized == "write_file":
             return self._write_file(args)
         if normalized == "edit_file":
@@ -1141,6 +1146,22 @@ class _OpenAIToolRegistry:
                 f"{line_no}: {line}"
                 for line_no, line in enumerate(selected, start=offset + 1)
             ),
+        }
+
+    def _sha256_file(self, args: dict[str, object]) -> dict[str, object]:
+        path = self._path_arg(args)
+        self._require_read_scope(path)
+        if not path.is_file():
+            raise ValueError(f"File is not readable: {path}")
+        reason = self._path_filter.reason(path)
+        if reason:
+            raise ValueError(f"{self._rel(path)} ignored by provider filter: {reason}")
+        content = path.read_bytes()
+        return {
+            "status": "ok",
+            "path": self._rel(path),
+            "sha256": hashlib.sha256(content).hexdigest(),
+            "bytes": len(content),
         }
 
     def _write_file(self, args: dict[str, object]) -> dict[str, object]:
@@ -1855,6 +1876,13 @@ class _OpenAIToolRegistry:
                     "path": {"type": "string"},
                     "offset": {"type": "integer", "minimum": 0},
                     "limit": {"type": "integer", "minimum": 1, "maximum": 2000},
+                }, required=["path"]),
+            ),
+            _OpenAITool(
+                "sha256_file",
+                "Calculate the exact SHA-256 digest of a file inside the current Echelon provider read scope.",
+                _object_schema({
+                    "path": {"type": "string"},
                 }, required=["path"]),
             ),
             _OpenAITool(
