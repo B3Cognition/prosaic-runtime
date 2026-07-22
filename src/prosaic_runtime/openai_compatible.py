@@ -19,6 +19,7 @@ from harness.ai_cli_backends.openai_compatible_compaction import (
 )
 from harness.ai_cli_backends.openai_compatible_filters import OpenAIPathFilter
 from harness.ai_cli_backends.openai_compatible_progress import (
+    OpenAIStreamPreview,
     _elapsed_s,
     _event_tool_call_delta_summaries,
     _progress,
@@ -303,8 +304,9 @@ class OpenAICompatibleBackend:
                 f"tokens={turn.token_usage} "
                 f"elapsed={_elapsed_s(turn_started)}s"
             )
+            operator_previewed = turn.previewed
             if turn.text and not turn.streamed:
-                _progress_llm_preview(turn.text)
+                operator_previewed = _progress_llm_preview(turn.text)
             token_usage += turn.token_usage
             if turn.token_usage_details:
                 token_usage_details = _merge_token_usage_details(
@@ -479,7 +481,7 @@ class OpenAICompatibleBackend:
                     metadata,
                     str(incomplete),
                 )
-            if turn.text:
+            if turn.text and not operator_previewed:
                 print(turn.text, flush=True)
             _progress(
                 "final: "
@@ -662,7 +664,7 @@ class OpenAICompatibleBackend:
                 metadata,
                 str(incomplete),
             )
-        if turn.text:
+        if turn.text and not turn.previewed:
             print(turn.text, flush=True)
         return CliRunResult(
             exit_code=0,
@@ -687,6 +689,33 @@ class OpenAICompatibleBackend:
         raw_response_metadata: dict[str, object] = {}
         event_data: list[str] = []
         tool_accumulator = _ToolCallAccumulator()
+        progress_detail = _feature_str(
+            self._config.llm.features,
+            "progress_detail",
+            default="normal",
+        ).lower()
+        stream_debug = progress_detail == "debug"
+        stream_preview = OpenAIStreamPreview(
+            enabled=_feature_enabled(
+                self._config.llm.features,
+                "stream_preview",
+                default=True,
+            ),
+            max_chars=_feature_int(
+                self._config.llm.features,
+                "stream_preview_max_chars",
+                default=1200,
+                minimum=80,
+                maximum=100_000,
+            ),
+            max_lines=_feature_int(
+                self._config.llm.features,
+                "stream_preview_max_lines",
+                default=12,
+                minimum=1,
+                maximum=1_000,
+            ),
+        )
 
         def handle_complete_event() -> CliRunResult | None:
             nonlocal event_data
@@ -719,7 +748,8 @@ class OpenAICompatibleBackend:
                     },
                 )
             for summary in _event_tool_call_delta_summaries(event):
-                _progress(f"stream: tool_call_delta {summary}")
+                if stream_debug:
+                    _progress(f"stream: tool_call_delta {summary}")
             tool_accumulator.add_event(event)
             event_metadata = _raw_response_metadata(event)
             if event_metadata:
@@ -739,11 +769,13 @@ class OpenAICompatibleBackend:
             content = _event_content(event)
             if content:
                 text_parts.append(content)
-                _progress(
-                    "stream: content_delta "
-                    f"chars={len(content)} total_chars={sum(len(part) for part in text_parts)}"
-                )
-                _progress_llm_preview(content)
+                if stream_debug:
+                    _progress(
+                        "stream: content_delta "
+                        f"chars={len(content)} "
+                        f"total_chars={sum(len(part) for part in text_parts)}"
+                    )
+                stream_preview.append(content)
             return None
 
         while True:
@@ -781,6 +813,7 @@ class OpenAICompatibleBackend:
             maybe_result = handle_complete_event()
             if maybe_result is not None:
                 return maybe_result
+        stream_preview.flush()
 
         return _OpenAICompletionTurn(
             text="".join(text_parts),
@@ -793,6 +826,7 @@ class OpenAICompatibleBackend:
             streamed=True,
             http_status=http_status,
             raw_response_headers=raw_response_headers,
+            previewed=stream_preview.emitted,
         )
 
     def _read_sse_body(self, body: str) -> CliRunResult:
@@ -811,6 +845,7 @@ class _OpenAICompletionTurn:
     streamed: bool
     http_status: int | None
     raw_response_headers: dict[str, str]
+    previewed: bool = False
 
 
 class _BodyResponse:

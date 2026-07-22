@@ -7,28 +7,122 @@ import sys
 import time
 from collections.abc import Mapping
 
+_LLM_PREFIX = "  llm | "
+
 
 def _progress(message: str) -> None:
     print(f"[openai-compatible] {message}", file=sys.stderr, flush=True)
 
 
-def _progress_llm_preview(text: str, *, limit: int = 600) -> None:
+def _progress_llm_preview(text: str, *, limit: int = 600) -> bool:
     preview = text.replace("\r\n", "\n").replace("\r", "\n")
     if not preview.strip():
-        return
+        return False
     truncated = False
     if len(preview) > limit:
         preview = preview[:limit]
         truncated = True
     lines = preview.splitlines() or [preview]
     for line in lines[:8]:
-        print(
-            f"  llm> {_truncate_llm_preview_line(line)}",
-            file=sys.stderr,
-            flush=True,
-        )
+        _print_llm_line(line)
     if truncated or len(lines) > 8:
-        print("  llm> ...", file=sys.stderr, flush=True)
+        _print_llm_line("...")
+    return True
+
+
+class OpenAIStreamPreview:
+    def __init__(
+        self,
+        *,
+        enabled: bool = True,
+        flush_chars: int = 500,
+        flush_interval_s: float = 2.0,
+        max_chars: int = 1200,
+        max_lines: int = 12,
+    ) -> None:
+        self._enabled = enabled
+        self._flush_chars = flush_chars
+        self._flush_interval_s = flush_interval_s
+        self._buffer = ""
+        self._last_flush = time.monotonic()
+        self._max_chars = max(1, max_chars)
+        self._max_lines = max(1, max_lines)
+        self._emitted_chars = 0
+        self._emitted_lines = 0
+        self._emitted = False
+        self._truncated = False
+
+    @property
+    def emitted(self) -> bool:
+        return self._emitted
+
+    @property
+    def truncated(self) -> bool:
+        return self._truncated
+
+    def append(self, text: str) -> None:
+        if not self._enabled or self._truncated:
+            return
+        self._buffer += text.replace("\r\n", "\n").replace("\r", "\n")
+        self._flush_complete_lines()
+        if len(self._buffer) >= self._flush_chars:
+            self.flush()
+            return
+        if self._buffer.strip() and time.monotonic() - self._last_flush >= self._flush_interval_s:
+            self.flush()
+
+    def flush(self) -> None:
+        if not self._enabled or self._truncated or not self._buffer:
+            return
+        text = self._buffer
+        self._buffer = ""
+        self._last_flush = time.monotonic()
+        for line in text.splitlines() or [text]:
+            if line.strip():
+                self._emit_line(line)
+            if self._truncated:
+                break
+
+    def _flush_complete_lines(self) -> None:
+        if "\n" not in self._buffer:
+            return
+        lines = self._buffer.split("\n")
+        self._buffer = lines.pop()
+        self._last_flush = time.monotonic()
+        for line in lines:
+            if line.strip():
+                self._emit_line(line)
+            if self._truncated:
+                self._buffer = ""
+                break
+
+    def _emit_line(self, line: str) -> None:
+        if self._truncated:
+            return
+        if self._emitted_lines >= self._max_lines:
+            self._mark_truncated()
+            return
+        rendered = _truncate_llm_preview_line(line)
+        remaining = self._max_chars - self._emitted_chars
+        if len(rendered) > remaining:
+            if not self._emitted and remaining > 0:
+                _print_llm_line(rendered[:remaining])
+                self._emitted = True
+                self._emitted_lines += 1
+                self._emitted_chars += remaining
+            self._mark_truncated()
+            return
+        _print_llm_line(rendered)
+        self._emitted = True
+        self._emitted_lines += 1
+        self._emitted_chars += len(rendered)
+
+    def _mark_truncated(self) -> None:
+        if self._truncated:
+            return
+        self._truncated = True
+        self._buffer = ""
+        _print_llm_line("... preview truncated ...")
 
 
 def _progress_turn_summary(
@@ -241,6 +335,14 @@ def _truncate_llm_preview_line(value: str, limit: int = 180) -> str:
     if len(value) <= limit:
         return value
     return value[: limit - 3] + "..."
+
+
+def _print_llm_line(line: str) -> None:
+    print(
+        f"{_LLM_PREFIX}{_truncate_llm_preview_line(line)}",
+        file=sys.stderr,
+        flush=True,
+    )
 
 
 def _payload_item_preview(items: list[object], *, limit: int = 3) -> str:
