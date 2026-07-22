@@ -9,7 +9,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from html import unescape
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -43,6 +43,9 @@ _OPENAI_COMPATIBLE_TOOL_GUIDANCE = (
     "grep_context for search with surrounding lines, read_many_files for known "
     "file sets, and list_tree_with_sizes before broad file reads. Keep tool calls "
     "purposeful and return the final artifact once enough evidence is available. "
+    "Treat rejected out-of-scope reads and empty search results as authoritative; do "
+    "not retry them or broaden scope. When owned tests are absent, report them as "
+    "not-observed instead of searching elsewhere. "
     "The `echelon_result` control payload is final YAML response text, never a tool or "
     "function call. Once artifacts are complete, stop calling tools and emit that block."
 )
@@ -226,12 +229,23 @@ class OpenAICompatibleBackend:
         tool_rounds = 0
         tool_result_compactions = 0
         tool_result_compaction_saved_chars = 0
+        previous_tool_signature: str | None = None
+        identical_tool_rounds = 0
+        tools_disabled = False
+        tool_no_progress_forced = False
         max_tool_rounds = _feature_int(
             llm.features,
             "max_tool_rounds",
             default=24,
             minimum=1,
             maximum=64,
+        )
+        max_identical_tool_rounds = _feature_int(
+            llm.features,
+            "max_identical_tool_rounds",
+            default=3,
+            minimum=2,
+            maximum=10,
         )
         run_started = time.monotonic()
 
@@ -262,7 +276,7 @@ class OpenAICompatibleBackend:
                 payload_messages,
                 prompt_metadata,
                 streaming=streaming,
-                tools=registry.openai_tools(),
+                tools=[] if tools_disabled else registry.openai_tools(),
             )
             _progress(
                 "turn "
@@ -320,6 +334,21 @@ class OpenAICompatibleBackend:
                     turn.token_usage_details,
                 )
             if turn.tool_calls:
+                if tools_disabled:
+                    return CliRunResult(
+                        exit_code=1,
+                        stdout="",
+                        stderr="model requested tools after no-progress tool shutdown",
+                        token_usage=token_usage,
+                        metadata={
+                            "provider": self.name,
+                            "provider_error_code": "tool_no_progress",
+                            "tool_call_count": tool_call_count,
+                            "tool_rounds": tool_rounds,
+                            "tool_no_progress_forced": True,
+                            **_transcript_metadata(transcript),
+                        },
+                    )
                 tool_rounds += 1
                 if tool_rounds > max_tool_rounds:
                     last_tool_call = turn.tool_calls[-1]
@@ -383,6 +412,12 @@ class OpenAICompatibleBackend:
                     f"calls_total={tool_call_count}"
                 )
                 messages.append(_assistant_tool_message(turn))
+                tool_signature = _tool_round_signature(turn.tool_calls)
+                if tool_signature == previous_tool_signature:
+                    identical_tool_rounds += 1
+                else:
+                    previous_tool_signature = tool_signature
+                    identical_tool_rounds = 1
                 tool_started = time.monotonic()
                 for tool_call in turn.tool_calls:
                     tool_call_count += 1
@@ -408,6 +443,24 @@ class OpenAICompatibleBackend:
                         tool_result=tool_result,
                     )
                     messages.append(tool_message)
+                if identical_tool_rounds >= max_identical_tool_rounds:
+                    tools_disabled = True
+                    tool_no_progress_forced = True
+                    messages.append({
+                        "role": "system",
+                        "content": (
+                            "No progress was made across repeated identical tool calls. "
+                            "Their results are authoritative. Do not call more tools or "
+                            "broaden scope. Complete the artifact and return the required "
+                            "final response using gathered evidence; record absent evidence "
+                            "as not-observed."
+                        ),
+                    })
+                    _progress(
+                        "tool no-progress: repeated identical round "
+                        f"{identical_tool_rounds}/{max_identical_tool_rounds}; "
+                        "tools disabled for final response"
+                    )
                 tool_elapsed = time.monotonic() - tool_started
                 transcript.write(
                     "turn_summary",
@@ -467,6 +520,7 @@ class OpenAICompatibleBackend:
                 "tool_rounds": tool_rounds,
                 "tool_result_compactions": tool_result_compactions,
                 "tool_result_compaction_saved_chars": tool_result_compaction_saved_chars,
+                "tool_no_progress_forced": tool_no_progress_forced,
                 **_transcript_metadata(transcript),
             }
             incomplete = _incomplete_finish_reason(metadata["finish_reason"])
@@ -2021,6 +2075,27 @@ def _feature_int(
     else:
         return default
     return max(minimum, min(maximum, parsed))
+
+
+def _tool_round_signature(tool_calls: Sequence[dict[str, object]]) -> str:
+    """Return a stable signature that ignores provider-generated call IDs."""
+    normalized: list[dict[str, object]] = []
+    for tool_call in tool_calls:
+        function = tool_call.get("function")
+        if not isinstance(function, dict):
+            normalized.append({"name": "", "arguments": ""})
+            continue
+        arguments = function.get("arguments", "")
+        if isinstance(arguments, str):
+            try:
+                arguments = json.loads(arguments)
+            except json.JSONDecodeError:
+                arguments = arguments.strip()
+        normalized.append({
+            "name": str(function.get("name") or "").strip(),
+            "arguments": arguments,
+        })
+    return json.dumps(normalized, sort_keys=True, separators=(",", ":"))
 
 
 def _feature_str(
