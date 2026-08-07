@@ -53,6 +53,13 @@ _OPENAI_COMPATIBLE_TOOL_GUIDANCE = (
     "function call. Once artifacts are complete, stop calling tools and emit that block."
 )
 
+_NO_PROGRESS_FINAL_GUIDANCE = (
+    "No progress was made across repeated identical tool calls. Their results are "
+    "authoritative. Do not call more tools or broaden scope. Complete the artifact "
+    "and return the required final response using gathered evidence; record absent "
+    "evidence as not-observed."
+)
+
 
 class OpenAICompatibleBackend:
     name = "openai-compatible"
@@ -449,16 +456,11 @@ class OpenAICompatibleBackend:
                 if identical_tool_rounds >= max_identical_tool_rounds:
                     tools_disabled = True
                     tool_no_progress_forced = True
-                    messages.append({
-                        "role": "system",
-                        "content": (
-                            "No progress was made across repeated identical tool calls. "
-                            "Their results are authoritative. Do not call more tools or "
-                            "broaden scope. Complete the artifact and return the required "
-                            "final response using gathered evidence; record absent evidence "
-                            "as not-observed."
-                        ),
-                    })
+                    initial_guidance = messages[0].get("content")
+                    assert isinstance(initial_guidance, str)
+                    messages[0]["content"] = (
+                        f"{initial_guidance}\n\n{_NO_PROGRESS_FINAL_GUIDANCE}"
+                    )
                     _progress(
                         "tool no-progress: repeated identical round "
                         f"{identical_tool_rounds}/{max_identical_tool_rounds}; "
