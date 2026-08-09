@@ -72,11 +72,12 @@ class OpenAICompatibleBackend:
         assert llm.base_url is not None
         assert llm.model is not None
         prompt_metadata = _prompt_metadata(request)
+        request_model = _metadata_str(prompt_metadata, "model") or llm.model
         streaming = _feature_enabled(llm.features, "streaming", default=True)
         if _feature_enabled(llm.features, "tool_calls", default=False):
             return self._run_prompt_with_tools(request, prompt_metadata, streaming)
         payload: dict[str, object] = {
-            "model": _metadata_str(prompt_metadata, "model") or llm.model,
+            "model": request_model,
             "messages": [{"role": "user", "content": request.prompt}],
             "temperature": _metadata_float(prompt_metadata, "temperature", llm.temperature),
         }
@@ -123,7 +124,9 @@ class OpenAICompatibleBackend:
                 http_request, timeout=request.timeout_s
             ) as response:
                 if streaming and _is_sse_response(response):
-                    return self._read_sse_response(response, deadline)
+                    return self._read_sse_response(
+                        response, deadline, request_model=request_model
+                    )
                 http_status = _http_status(response)
                 raw_response_headers = _raw_response_headers(response)
                 body = response.read().decode("utf-8", errors="replace")
@@ -178,6 +181,7 @@ class OpenAICompatibleBackend:
         text = _assistant_text(parsed)
         metadata = {
             "provider": self.name,
+            "request_model": request_model,
             "streamed": False,
             "http_status": http_status,
             "raw_response_headers": raw_response_headers,
@@ -513,6 +517,7 @@ class OpenAICompatibleBackend:
             )
             metadata = {
                 "provider": self.name,
+                "request_model": str(payload.get("model") or ""),
                 "streamed": turn.streamed,
                 "http_status": turn.http_status,
                 "raw_response_headers": turn.raw_response_headers,
@@ -701,7 +706,13 @@ class OpenAICompatibleBackend:
             raw_response_headers=raw_response_headers,
         )
 
-    def _read_sse_response(self, response: object, deadline: float) -> CliRunResult:
+    def _read_sse_response(
+        self,
+        response: object,
+        deadline: float,
+        *,
+        request_model: str = "",
+    ) -> CliRunResult:
         llm = self._config.llm
         turn_or_result = self._read_sse_turn(response, deadline)
         if isinstance(turn_or_result, CliRunResult):
@@ -711,6 +722,7 @@ class OpenAICompatibleBackend:
             return _unsupported_tool_calls_result(self.name)
         metadata = {
             "provider": self.name,
+            "request_model": request_model,
             "streamed": True,
             "http_status": turn.http_status,
             "raw_response_headers": turn.raw_response_headers,
