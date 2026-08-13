@@ -1013,6 +1013,10 @@ class _OpenAIToolRegistry:
         metadata = prompt_metadata or {}
         self._read_scope_roots = self._scope_paths(metadata, "tool_read_roots")
         self._write_scope_paths = self._scope_paths(metadata, "tool_write_paths")
+        self._forbidden_scope_roots = self._scope_paths(
+            metadata,
+            "tool_forbidden_roots",
+        )
 
     def _scope_paths(
         self,
@@ -1036,6 +1040,8 @@ class _OpenAIToolRegistry:
         return tuple(paths)
 
     def _inside_read_scope(self, path: Path) -> bool:
+        if self._inside_forbidden_scope(path):
+            return False
         if not self._read_scope_roots:
             return True
         resolved = path.resolve(strict=False)
@@ -1045,15 +1051,30 @@ class _OpenAIToolRegistry:
         )
 
     def _require_read_scope(self, path: Path) -> None:
+        if self._inside_forbidden_scope(path):
+            raise ValueError(
+                f"Path is inside forbidden provider control plane: {self._rel(path)}"
+            )
         if not self._inside_read_scope(path):
             raise ValueError(f"Path is outside dispatch read scope: {self._rel(path)}")
 
     def _require_write_scope(self, path: Path) -> None:
+        if self._inside_forbidden_scope(path):
+            raise ValueError(
+                f"Path is inside forbidden provider control plane: {self._rel(path)}"
+            )
         if not self._write_scope_paths:
             return
         resolved = path.resolve(strict=False)
         if resolved not in self._write_scope_paths:
             raise ValueError(f"Path is outside dispatch write scope: {self._rel(path)}")
+
+    def _inside_forbidden_scope(self, path: Path) -> bool:
+        resolved = path.resolve(strict=False)
+        return any(
+            resolved == root or root in resolved.parents
+            for root in self._forbidden_scope_roots
+        )
 
     def openai_tools(self) -> list[dict[str, object]]:
         return [
@@ -1382,7 +1403,11 @@ class _OpenAIToolRegistry:
             if len(entries) >= max_entries:
                 truncated = True
                 break
-            if not self._inside_root(candidate) or not self._path_filter.visible_tree_entry(candidate):
+            if (
+                not self._inside_root(candidate)
+                or not self._inside_read_scope(candidate)
+                or not self._path_filter.visible_tree_entry(candidate)
+            ):
                 continue
             if candidate.is_dir():
                 entries.append({
