@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 import socket
@@ -11,8 +12,9 @@ import urllib.parse
 import urllib.request
 from html import unescape
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Callable
 
 from harness.ai_cli_backend import CliRunRequest, CliRunResult
 from harness.ai_cli_backends.openai_compatible_compaction import (
@@ -35,6 +37,7 @@ from harness.ai_cli_backends.openai_compatible_transcript import (
     open_provider_transcript,
 )
 from harness.config import HarnessConfig
+from harness.llm_tool_policy import inject_llm_tool_policy_preamble
 
 
 _OPENAI_COMPATIBLE_TOOL_GUIDANCE = (
@@ -60,12 +63,135 @@ _NO_PROGRESS_FINAL_GUIDANCE = (
     "evidence as not-observed."
 )
 
+_SAFE_CONSTRAINED_MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+@-]{0,255}\Z")
+_CONSTRAINED_MESSAGE_KEYS = frozenset(
+    {
+        "role",
+        "content",
+        "refusal",
+        "reasoning_content",
+        "reasoning",
+        "reasoning_text",
+        "reasoning_output",
+        "reasoning_details",
+    }
+)
+
 
 class OpenAICompatibleBackend:
     name = "openai-compatible"
+    constrained_execution_contract_id = "openai-compatible-constrained-prompt-v1"
 
     def __init__(self, config: HarnessConfig) -> None:
         self._config = config
+
+    def model_for_tier(self, tier: str) -> str | None:
+        """Resolve every supported neutral tier to the configured API model."""
+        if not isinstance(tier, str) or tier.strip().lower() not in {
+            "fast",
+            "balanced",
+            "strong",
+            "ultra",
+        }:
+            return None
+        return self._config.llm.model
+
+    def run_constrained_prompt(
+        self,
+        request: CliRunRequest,
+        *,
+        model: str,
+        screen_output: Callable[[bytes], bytes],
+        max_input_bytes: int,
+        max_capture_bytes: int,
+        screen_input: Callable[[bytes], bytes] | None = None,
+    ) -> CliRunResult:
+        llm = self._config.llm
+        assert llm.base_url is not None
+        if not _valid_constrained_request(
+            request,
+            model=model,
+            screen_output=screen_output,
+            screen_input=screen_input,
+            max_input_bytes=max_input_bytes,
+            max_capture_bytes=max_capture_bytes,
+        ):
+            return _constrained_failure("invalid_request")
+        try:
+            safe_policy = replace(
+                llm.tool_policy,
+                allow_unsafe_host_execution=False,
+                approval_reason=None,
+            )
+            prompt_bytes = inject_llm_tool_policy_preamble(
+                request.prompt, safe_policy
+            ).encode("utf-8", errors="strict")
+            if len(prompt_bytes) > max_input_bytes:
+                return _constrained_failure("input_overflow")
+            if not _screened_identical(screen_input or screen_output, prompt_bytes):
+                return _constrained_failure("screen_rejected")
+            prompt = prompt_bytes.decode("utf-8", errors="strict")
+            payload: dict[str, object] = {
+                "model": model,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": llm.temperature,
+                "stream": False,
+            }
+            if llm.max_tokens is not None:
+                payload["max_tokens"] = llm.max_tokens
+            token, token_error = _api_key(
+                llm.api_key_env, llm.api_key_file, request.env
+            )
+            if token_error:
+                return _constrained_failure("credential_error")
+            headers = {"Content-Type": "application/json"}
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+            http_request = urllib.request.Request(
+                f"{llm.base_url.rstrip('/')}/chat/completions",
+                data=json.dumps(payload).encode("utf-8"),
+                headers=headers,
+                method="POST",
+            )
+            with urllib.request.urlopen(
+                http_request, timeout=request.timeout_s
+            ) as response:
+                body = response.read(max_capture_bytes + 1)
+                http_status = _http_status(response)
+        except (TimeoutError, socket.timeout):
+            return _constrained_failure("timeout", timed_out=True)
+        except (OSError, urllib.error.HTTPError, urllib.error.URLError):
+            return _constrained_failure("transport_error")
+        except Exception:
+            return _constrained_failure("invalid_request")
+        if len(body) > max_capture_bytes:
+            return _constrained_failure("capture_overflow")
+        try:
+            parsed = json.loads(body.decode("utf-8", errors="strict"))
+        except (UnicodeError, json.JSONDecodeError):
+            return _constrained_failure("malformed_response")
+        answer, reason = _constrained_answer(parsed)
+        if reason is not None:
+            return _constrained_failure(reason)
+        assert answer is not None
+        answer_bytes = answer.encode("utf-8", errors="strict")
+        if not _screened_identical(screen_output, answer_bytes):
+            return _constrained_failure("screen_rejected")
+        token_usage, usage_details, usage_status = _constrained_usage(parsed)
+        return CliRunResult(
+            exit_code=0,
+            stdout=answer,
+            stderr="",
+            token_usage=token_usage,
+            metadata={
+                "provider": self.name,
+                "request_model": model,
+                "streamed": False,
+                "http_status": http_status,
+                "token_usage_details": usage_details,
+                "token_usage_status": usage_status,
+            },
+        )
 
     def run_prompt(self, request: CliRunRequest) -> CliRunResult:
         llm = self._config.llm
@@ -2645,10 +2771,14 @@ def _choice_has_tool_calls(choice: object) -> bool:
     if not isinstance(choice, dict):
         return False
     message = choice.get("message")
-    if isinstance(message, dict) and message.get("tool_calls"):
+    if isinstance(message, dict) and (
+        message.get("tool_calls") or message.get("function_call")
+    ):
         return True
     delta = choice.get("delta")
-    return isinstance(delta, dict) and bool(delta.get("tool_calls"))
+    return isinstance(delta, dict) and bool(
+        delta.get("tool_calls") or delta.get("function_call")
+    )
 
 
 def _event_has_tool_calls(event: object) -> bool:
@@ -2799,6 +2929,156 @@ def _token_usage_details(parsed: object) -> dict[str, int]:
         if prompt is not None and completion is not None:
             details["total_tokens"] = prompt + completion
     return details
+
+
+def _valid_constrained_request(
+    request: object,
+    *,
+    model: object,
+    screen_output: object,
+    screen_input: object,
+    max_input_bytes: object,
+    max_capture_bytes: object,
+) -> bool:
+    if not isinstance(request, CliRunRequest):
+        return False
+    timeout = request.timeout_s
+    if (
+        isinstance(timeout, bool)
+        or not isinstance(timeout, (int, float))
+        or not math.isfinite(timeout)
+        or timeout <= 0
+        or type(max_input_bytes) is not int
+        or max_input_bytes <= 0
+        or type(max_capture_bytes) is not int
+        or max_capture_bytes <= 0
+        or type(model) is not str
+        or _SAFE_CONSTRAINED_MODEL.fullmatch(model) is None
+        or type(request.prompt) is not str
+        or not request.prompt
+        or not callable(screen_output)
+        or (screen_input is not None and not callable(screen_input))
+        or bool(request.metadata)
+        or not isinstance(request.env, Mapping)
+    ):
+        return False
+    try:
+        root = Path(request.cwd)
+        return (
+            root.is_dir()
+            and not root.is_symlink()
+            and next(root.iterdir(), None) is None
+        )
+    except (OSError, TypeError, ValueError):
+        return False
+
+
+def _screened_identical(
+    screen: Callable[[bytes], bytes], value: bytes
+) -> bool:
+    try:
+        screened = screen(value)
+    except Exception:
+        return False
+    return type(screened) is bytes and screened == value
+
+
+def _constrained_answer(parsed: object) -> tuple[str | None, str | None]:
+    if not isinstance(parsed, dict):
+        return None, "malformed_response"
+    choices = parsed.get("choices")
+    if not isinstance(choices, list) or len(choices) != 1:
+        return None, "malformed_response"
+    choice = choices[0]
+    if not isinstance(choice, dict):
+        return None, "malformed_response"
+    if _choice_has_tool_calls(choice):
+        return None, "tool_event"
+    if choice.get("finish_reason") != "stop":
+        return None, "incomplete_response"
+    message = choice.get("message")
+    if not isinstance(message, dict) or set(message) - _CONSTRAINED_MESSAGE_KEYS:
+        return None, "malformed_response"
+    if message.get("role") not in {None, "assistant"}:
+        return None, "malformed_response"
+    content = message.get("content")
+    if not isinstance(content, str) or not content:
+        return None, "malformed_response"
+    return content, None
+
+
+def _constrained_usage(
+    parsed: object,
+) -> tuple[int | None, dict[str, int], str]:
+    if not isinstance(parsed, dict) or not isinstance(parsed.get("usage"), dict):
+        return None, {}, "unavailable"
+    usage = parsed["usage"]
+    assert isinstance(usage, dict)
+    prompt = _nonnegative_int(usage.get("prompt_tokens"))
+    completion = _nonnegative_int(usage.get("completion_tokens"))
+    total = _nonnegative_int(usage.get("total_tokens"))
+    cached, prompt_unknown = _constrained_detail(
+        usage.get("prompt_tokens_details"), "cached_tokens"
+    )
+    reasoning, completion_unknown = _constrained_detail(
+        usage.get("completion_tokens_details"), "reasoning_tokens"
+    )
+    if (
+        prompt is None
+        or completion is None
+        or total is None
+        or cached is None
+        or reasoning is None
+        or prompt + completion != total
+        or cached > prompt
+        or reasoning > completion
+    ):
+        return total, {}, "untrusted"
+    details = {
+        "input_tokens": prompt,
+        "cached_input_tokens": cached,
+        "output_tokens": completion,
+        "reasoning_output_tokens": reasoning,
+        "total_tokens": total,
+    }
+    known = {
+        "prompt_tokens",
+        "completion_tokens",
+        "total_tokens",
+        "prompt_tokens_details",
+        "completion_tokens_details",
+    }
+    if set(usage) - known or prompt_unknown or completion_unknown:
+        return total, {}, "untrusted"
+    return total, details, "trusted_exact"
+
+
+def _constrained_detail(value: object, field: str) -> tuple[int | None, bool]:
+    if value is None:
+        return 0, False
+    if not isinstance(value, dict):
+        return None, True
+    return _nonnegative_int(value.get(field, 0)), bool(set(value) - {field})
+
+
+def _nonnegative_int(value: object) -> int | None:
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        return None
+    return value
+
+
+def _constrained_failure(
+    reason: str,
+    *,
+    timed_out: bool = False,
+) -> CliRunResult:
+    return CliRunResult(
+        exit_code=124 if timed_out else 125,
+        stdout="",
+        stderr="screened OpenAI-compatible request failed",
+        timed_out=timed_out,
+        metadata={"provider": "openai-compatible", "failure_reason": reason},
+    )
 
 
 def _timeout_result(provider: str, message: str) -> CliRunResult:
