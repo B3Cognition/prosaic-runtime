@@ -12,7 +12,7 @@ def main():
     parser = argparse.ArgumentParser(prog="prosaic-runtime")
     parser.add_argument("artifact", help="Prosaic command or subagent identifier")
     parser.add_argument("--source", default=".prosaic")
-    parser.add_argument("--config", default="prosaic-runtime.toml")
+    parser.add_argument("--config", help="YAML configuration (default: prosaic-runtime.yaml, then prosaic-runtime.yml)")
     parser.add_argument("--arguments", default="")
     parser.add_argument("--cwd", default=".")
     parser.add_argument("--allow-tool", action="append", default=[])

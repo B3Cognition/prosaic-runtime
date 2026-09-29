@@ -18,15 +18,15 @@ cd prosaic-runtime/examples
 ```
 
 All commands below run from this directory. Edit `base_url` and `model` in both
-[prosaic-runtime.toml](prosaic-runtime.toml) and
-[with-tools.toml](with-tools.toml) to match your Chat Completions endpoint.
+[prosaic-runtime.yaml](prosaic-runtime.yaml) and
+[with-tools.yml](with-tools.yml) to match your Chat Completions endpoint.
 The supplied localhost URL and `your-model` are placeholders, not a hosted service.
 If authentication is required, set `LOCAL_LLM_API_KEY` in your environment; do not
 put credentials in the example files. Calls can incur your provider's normal fees.
 
 The tool example requires a model and endpoint that support function calling.
 Both configurations enable streaming. If your endpoint rejects streaming usage,
-set `stream_options = false`; if it does not stream, set `streaming = false`.
+set `stream_options: false`; if it does not stream, set `streaming: false`.
 The summarizer declares `effort: low`; remove that line if your endpoint does not
 accept `reasoning_effort`.
 
@@ -62,7 +62,7 @@ allows only `read_file`, and the invocation grants that tool only within `eviden
 
 ```sh
 prosaic-runtime subagents/reviewer.md \
-  --config with-tools.toml \
+  --config with-tools.yml \
   --arguments 'Review evidence/pilot.md. What do we know, and what remains unknown?' \
   --allow-tool read_file \
   --read-root ./evidence \
@@ -78,7 +78,7 @@ run shell commands, or spawn agents.
 The effective tool grant is the intersection of three independent declarations:
 
 1. Prose: `tools: read` requests read capabilities.
-2. Configuration: `allowed_tools = ["read_file"]` limits available tools.
+2. Configuration: `allowed_tools: [read_file]` limits available tools.
 3. Invocation: `--allow-tool read_file --read-root ./evidence` grants access for this run.
 
 Omitting `--allow-tool` offers no tools. Granting it without `--read-root` offers
@@ -93,7 +93,7 @@ Run this from `examples/` after configuring the same endpoint files:
 ```python
 from prosaic_runtime import ProsaicRuntime, RunPolicy
 
-plain = ProsaicRuntime.from_config("prosaic-runtime.toml")
+plain = ProsaicRuntime.from_config("prosaic-runtime.yaml")
 summary = plain.run(
     "subagents/summarizer.md",
     arguments="S1: 120 requests. S2: Three timeouts. S3: Cause unknown.",
@@ -103,7 +103,7 @@ if summary.exit_code:
     raise RuntimeError(summary.stderr)
 print(summary.stdout)
 
-reader = ProsaicRuntime.from_config("with-tools.toml")
+reader = ProsaicRuntime.from_config("with-tools.yml")
 review = reader.run(
     "subagents/reviewer.md",
     arguments="Review evidence/pilot.md. What remains unknown?",

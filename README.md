@@ -2,12 +2,12 @@
 
 Execute neutral Prosaic commands and agents on OpenAI-compatible Chat Completions endpoints. A Python library and CLI for small, bounded tasks with streaming, tool calls, explicit filesystem permissions, and structured results.
 
-Requires Python 3.11+. Loading artifacts from disk also requires [B3Cognition/prosaic](https://github.com/B3Cognition/prosaic) and Node.js 20+. The Python package has no runtime dependencies. This project uses Prosaic's `inspect` JSON contract; it does not parse an alternative prompt format.
+Requires Python 3.11+. Loading artifacts from disk also requires [B3Cognition/prosaic](https://github.com/B3Cognition/prosaic) and Node.js 20+. The Python package uses PyYAML for configuration. This project uses Prosaic's `inspect` JSON contract; it does not parse an alternative prompt format.
 
 ## Install
 
 ```sh
-python -m pip install 'prosaic-runtime @ git+https://github.com/B3Cognition/prosaic-runtime.git@v0.1.0'
+python -m pip install 'prosaic-runtime @ git+https://github.com/B3Cognition/prosaic-runtime.git@main'
 git clone https://github.com/B3Cognition/prosaic.git
 cd prosaic
 git checkout b6c97013880bd6517d1e5a67b43ed985719af9f1
@@ -35,25 +35,30 @@ effort: low
 Summarize {{args}} in three sentences. Preserve uncertainty and source identifiers.
 ```
 
-Create `prosaic-runtime.toml`:
+Create `prosaic-runtime.yaml`:
 
-```toml
-default_profile = "small"
-allowed_tools = []
+```yaml
+default_profile: small
+allowed_tools: []
 
-[routes]
-fast = "small"
+routes:
+  fast: small
 
-[profiles.small]
-base_url = "http://127.0.0.1:8000/v1"
-model = "your-model"
-api_key_env = "LOCAL_LLM_API_KEY"
-max_tokens = 2048
-
-[profiles.small.features]
-streaming = true
-stream_options = true
+profiles:
+  small:
+    base_url: http://127.0.0.1:8000/v1
+    model: your-model
+    api_key_env: LOCAL_LLM_API_KEY
+    max_tokens: 2048
+    features:
+      streaming: true
+      stream_options: true
 ```
+
+Configuration uses YAML, like Prosaic. The CLI and `ProsaicRuntime.from_config()`
+look for `prosaic-runtime.yaml`, then `prosaic-runtime.yml`, in the current
+directory. Use `--config path/to/config.yml` or pass a path to `from_config()`
+to select another file. Only `.yaml` and `.yml` files are supported.
 
 ```sh
 prosaic-runtime subagents/summarizer.md --arguments 'Text to summarize'
@@ -62,14 +67,14 @@ prosaic-runtime subagents/summarizer.md --arguments 'Text to summarize' --events
 
 The first command emits one JSON result. `--events` emits JSONL events followed by a result. Progress never contaminates the result text. Configuration and invocation errors go to stderr; unsuccessful execution exits nonzero.
 
-For endpoints that do not accept usage streaming, set `stream_options = false`. Set `streaming = false` for ordinary JSON responses. `effort` maps to `reasoning_effort`; omit it when the endpoint does not support it. Compatibility is with the Chat Completions protocol, not every OpenAI API or every optional provider feature.
+For endpoints that do not accept usage streaming, set `stream_options: false`. Set `streaming: false` for ordinary JSON responses. `effort` maps to `reasoning_effort`; omit it when the endpoint does not support it. Compatibility is with the Chat Completions protocol, not every OpenAI API or every optional provider feature.
 
 ## Python
 
 ```python
 from prosaic_runtime import ProsaicRuntime, RunPolicy
 
-runtime = ProsaicRuntime.from_config("prosaic-runtime.toml")
+runtime = ProsaicRuntime.from_config("prosaic-runtime.yaml")
 result = runtime.run(
     "subagents/summarizer.md",
     arguments="Text to summarize",
@@ -90,7 +95,7 @@ Supported declarations are omitted/empty/`none`, `read`, `write`, or a list of s
 
 Read tools: `read_file`, `read_many_files`, `sha256_file`, `list_files`, `list_tree_with_sizes`, `grep_files`, `grep_context`. Write tools: `write_file`, `edit_file`.
 
-For a read agent, set `tools: read` in its Prosaic frontmatter, `allowed_tools = ["read_file"]` in configuration, and invoke:
+For a read agent, set `tools: read` in its Prosaic frontmatter, `allowed_tools: [read_file]` in configuration, and invoke:
 
 ```sh
 prosaic-runtime subagents/reviewer.md --allow-tool read_file --read-root ./evidence

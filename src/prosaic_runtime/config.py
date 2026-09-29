@@ -3,7 +3,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
 import math
-import tomllib
+import yaml
+
+CONFIG_FILENAMES = ("prosaic-runtime.yaml", "prosaic-runtime.yml")
 
 
 @dataclass(frozen=True)
@@ -47,12 +49,30 @@ class RuntimeConfig:
             raise ValueError("route references an unknown profile")
 
     @classmethod
-    def load(cls, path: str | Path):
-        with Path(path).open("rb") as handle:
-            raw = tomllib.load(handle)
-        return cls(
-            profiles={key: EndpointConfig(**value) for key, value in raw["profiles"].items()},
-            routes=raw.get("routes", {}),
-            default_profile=raw["default_profile"],
-            allowed_tools=frozenset(raw.get("allowed_tools", [])),
-        )
+    def load(cls, path: str | Path | None = None):
+        if path is None:
+            path = next((Path(name) for name in CONFIG_FILENAMES if Path(name).exists()), None)
+            if path is None:
+                raise FileNotFoundError(f"No runtime configuration found; expected {' or '.join(CONFIG_FILENAMES)}")
+        path = Path(path)
+        if path.suffix.lower() not in {".yaml", ".yml"}:
+            raise ValueError("Runtime configuration must use .yaml or .yml")
+        try:
+            raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+            if not isinstance(raw, dict):
+                raise ValueError("expected a mapping")
+            if set(raw) - {"profiles", "routes", "default_profile", "allowed_tools"}:
+                raise ValueError("unknown configuration keys")
+            if not isinstance(raw.get("profiles"), dict) or not isinstance(raw.get("routes", {}), dict):
+                raise ValueError("profiles and routes must be mappings")
+            allowed = raw.get("allowed_tools", [])
+            if not isinstance(allowed, list) or not all(isinstance(tool, str) for tool in allowed):
+                raise ValueError("allowed_tools must be a list of tool names")
+            return cls(
+                profiles={key: EndpointConfig(**value) for key, value in raw["profiles"].items()},
+                routes=raw.get("routes", {}),
+                default_profile=raw["default_profile"],
+                allowed_tools=frozenset(allowed),
+            )
+        except (yaml.YAMLError, KeyError, TypeError, ValueError, AttributeError) as exc:
+            raise ValueError(f"Invalid runtime configuration {path}: {exc}") from exc

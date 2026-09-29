@@ -67,7 +67,7 @@ class ProsaicRuntime:
         self.executable = executable
 
     @classmethod
-    def from_config(cls, path, **kwargs):
+    def from_config(cls, path=None, **kwargs):
         return cls(RuntimeConfig.load(path), **kwargs)
 
     def run(self, artifact: str | ProsaicArtifact, arguments: str = "", *,

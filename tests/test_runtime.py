@@ -179,8 +179,8 @@ def test_real_prosaic_inspection_and_cli(server, tmp_path):
         "---\nname: summarizer\ndescription: Summarize input\nexecution: agent\nmodel_tier: fast\neffort: low\n---\nSummarize {{args}}.\n")
     inspected = inspect_artifact("subagents/summarizer.md", source)
     assert inspected.frontmatter["model_tier"] == "fast"
-    config = tmp_path / "runtime.toml"
-    config.write_text(f'default_profile = "small"\n[routes]\nfast = "small"\n[profiles.small]\nbase_url = "{url}"\nmodel = "small"\n[profiles.small.features]\nstreaming = false\n')
+    config = tmp_path / "runtime.yaml"
+    config.write_text(f'default_profile: small\nroutes:\n  fast: small\nprofiles:\n  small:\n    base_url: {url}\n    model: small\n    features:\n      streaming: false\n')
     responses.append(completion())
     import sys
     completed = subprocess.run([sys.executable, "-m", "prosaic_runtime.cli", "subagents/summarizer.md",
@@ -201,9 +201,9 @@ def test_checked_in_examples_through_cli(server, tmp_path, with_tools, grant):
     examples = Path(__file__).resolve().parents[1] / "examples"
     workspace = tmp_path / "examples"
     shutil.copytree(examples, workspace)
-    config = workspace / ("with-tools.toml" if with_tools else "prosaic-runtime.toml")
+    config = workspace / ("with-tools.yml" if with_tools else "prosaic-runtime.yaml")
     config.write_text(config.read_text().replace("http://127.0.0.1:8000/v1", url)
-                      .replace("streaming = true", "streaming = false"))
+                      .replace("streaming: true", "streaming: false"))
     name = "reviewer" if with_tools else "summarizer"
     inspected = inspect_artifact(f"subagents/{name}.md", workspace / ".prosaic")
     assert inspected.frontmatter.get("tools") == ("read" if with_tools else None)
@@ -212,7 +212,9 @@ def test_checked_in_examples_through_cli(server, tmp_path, with_tools, grant):
             "name": "read_file", "arguments": '{"path":"evidence/pilot.md"}'}}]))
     responses.append(completion("example result"))
     args = [sys.executable, "-m", "prosaic_runtime.cli", f"subagents/{name}.md",
-            "--config", config.name, "--arguments", "Review evidence/pilot.md", "--events"]
+            "--arguments", "Review evidence/pilot.md", "--events"]
+    if with_tools:
+        args.extend(["--config", config.name])
     if grant:
         args.extend(["--allow-tool", "read_file", "--read-root", "./evidence"])
     completed = subprocess.run(args, cwd=workspace, capture_output=True, text=True, timeout=15)
