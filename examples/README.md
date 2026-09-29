@@ -94,9 +94,44 @@ the tool but denies file access. Files outside `evidence/` remain inaccessible.
 The agent is instructed to report denied access rather than invent findings;
 following that instruction is model behavior, not an output-validation guarantee.
 
-## Python equivalents
+## Runnable Python sample
 
-Run this from `examples/` after configuring the same endpoint files:
+The complete [run_examples.py](run_examples.py) program runs both examples through
+the public Python API. After setup, run from the repository root:
+
+```sh
+source .venv/bin/activate
+export LOCAL_LLM_API_KEY="$(python -c 'import getpass; print(getpass.getpass("API key: "))')"
+python examples/run_examples.py
+```
+
+For an unauthenticated endpoint, omit the export. This makes real model requests
+and may incur charges. The script finds prose, configuration and evidence relative
+to its own file, so it also works when launched from another directory.
+
+Override the endpoint and model without editing the YAML files:
+
+```sh
+python examples/run_examples.py \
+  --base-url http://127.0.0.1:8000/v1 \
+  --model your-model \
+  --timeout 180 \
+  --events
+```
+
+Replace the placeholder URL/model with your endpoint's values. `--config path/to/local.yml`
+uses one configuration for both examples; it must allow `read_file` for the reviewer.
+Explicit configuration paths are relative to your working directory. Endpoint/model
+overrides are applied only in memory. Otherwise, the script uses the two checked-in
+YAML files and their configured time/round limits.
+
+By default, stdout contains one JSON result per example; status goes to stderr.
+`--events` adds JSONL runtime events tagged with the example name. The script stops
+on the first failure and exits nonzero. Exit 0 means both executions completed;
+it does not guarantee answer quality or prove the model used its tool—use
+`prosaic-runtime smoke --live` for capability assertions. No API key is stored.
+
+To embed the same calls in your application:
 
 ```python
 from prosaic_runtime import ProsaicRuntime, RunPolicy
@@ -105,7 +140,7 @@ plain = ProsaicRuntime.from_config("prosaic-runtime.yaml")
 summary = plain.run(
     "subagents/summarizer.md",
     arguments="S1: 120 requests. S2: Three timeouts. S3: Cause unknown.",
-    policy=RunPolicy(timeout_s=60),
+    policy=RunPolicy(timeout_s=180),
 )
 if summary.exit_code:
     raise RuntimeError(summary.stderr)
@@ -119,7 +154,7 @@ review = reader.run(
     policy=RunPolicy(
         allowed_tools=frozenset({"read_file"}),
         read_roots=("evidence",),
-        timeout_s=60,
+        timeout_s=180,
         max_tool_rounds=4,
     ),
 )

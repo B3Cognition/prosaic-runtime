@@ -297,6 +297,12 @@ to stderr, and exits nonzero. Do not treat a partial answer as a successful resu
 
 ## Python
 
+The complete runnable program is [examples/run_examples.py](examples/run_examples.py).
+From the checkout root, run `python examples/run_examples.py` after configuring the
+example YAML files and setting your API-key environment variable. See its
+[usage instructions](examples/README.md#runnable-python-sample) for endpoint/model
+overrides and streaming events.
+
 ```python
 from prosaic_runtime import ProsaicRuntime, RunPolicy
 
