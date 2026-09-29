@@ -6,4 +6,11 @@ The initial repository history preserves commits touching the five extracted imp
 
 Transport conformance tests were adapted from Echelon's `tests/unit/test_ai_cli_backend.py` at the same commit. Echelon-specific tools and control protocols remain in Echelon.
 
-The original MIT notice, `Copyright (c) 2026 Testimonial`, is preserved in LICENSE. New runtime integration and API work is Copyright (c) 2026 B3 Cognition, under the same MIT terms.
+Prosaic Runtime is distributed under the Apache License, Version 2.0; see LICENSE.
+Runtime integration and API work is Copyright (c) 2026 B3 Cognition.
+
+The extracted code was originally distributed under MIT. Its original notice,
+`Copyright (c) 2026 Testimonial`, and permission text are retained in LICENSE-MIT.
+This historical attribution does not replace the project's Apache-2.0 license.
+Third-party components retain their own licenses. Previously published versions
+and tags retain the license notices shipped with them.

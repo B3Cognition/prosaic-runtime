@@ -8,8 +8,8 @@ version = "0.1.0"
 description = "Bounded execution of neutral Prosaic agents on OpenAI-compatible endpoints"
 requires-python = ">=3.11"
 readme = "README.md"
-license = "MIT"
-license-files = ["LICENSE", "NOTICE.md"]
+license = "Apache-2.0"
+license-files = ["LICENSE", "LICENSE-MIT", "NOTICE.md"]
 authors = [{name = "B3 Cognition"}]
 dependencies = []
 

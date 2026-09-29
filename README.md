@@ -121,4 +121,6 @@ pytest
 
 Tests cover extracted transport edge cases, tool denial, path containment, artifact loading, routing, cancellation, and local HTTP/SSE integration. The end-to-end Prosaic test requires the CLI on PATH; CI installs the pinned Prosaic revision. Tests do not require paid LLM access. Successful conformance tests do not establish model quality; evaluate each agent/model pair against its own acceptance criteria.
 
-MIT licensed. See [LICENSE](LICENSE) and [NOTICE.md](NOTICE.md) for extraction provenance.
+Licensed under the [Apache License, Version 2.0](LICENSE). See [NOTICE.md](NOTICE.md)
+for extraction provenance and [LICENSE-MIT](LICENSE-MIT) for the retained notice
+covering historically MIT-licensed code. Third-party components retain their own licenses.
