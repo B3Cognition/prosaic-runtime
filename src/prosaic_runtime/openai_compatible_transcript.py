@@ -42,8 +42,6 @@ def open_provider_transcript(
         return ProviderTranscript(None)
     base = _configured_dir(features, request_metadata)
     if base is None:
-        base = _detect_run_dir(cwd)
-    if base is None:
         return ProviderTranscript(None)
     label = _safe_label(request_metadata.get("provider_transcript_label"))
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
@@ -71,19 +69,6 @@ def _configured_dir(
     ):
         if isinstance(value, str) and value.strip():
             return Path(value).expanduser().resolve(strict=False)
-    return None
-
-
-def _detect_run_dir(cwd: Path) -> Path | None:
-    resolved = cwd.resolve(strict=False)
-    if (
-        (resolved / "state.json").exists()
-        or (resolved / "re-execution-plan.json").exists()
-        or (resolved / "re-source-index.json").exists()
-    ):
-        return resolved
-    if "runs" in resolved.parts:
-        return resolved
     return None
 
 

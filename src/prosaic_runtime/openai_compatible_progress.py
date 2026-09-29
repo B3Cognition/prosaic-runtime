@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sys
 import time
+from prosaic_runtime.events import print
 from collections.abc import Mapping
 
 _LLM_PREFIX = "  llm | "
