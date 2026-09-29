@@ -1,5 +1,8 @@
 default_profile: small
 allowed_tools: []
+limits:
+  timeout_s: 180
+  max_tool_rounds: 8
 
 routes:
   fast: small

@@ -73,7 +73,8 @@ class ProsaicRuntime:
     def run(self, artifact: str | ProsaicArtifact, arguments: str = "", *,
             cwd: str | Path = ".", policy: RunPolicy | None = None,
             on_event=None, cancelled=None, env=None) -> Result:
-        policy = policy or RunPolicy()
+        policy = policy or RunPolicy(timeout_s=self.config.limits.timeout_s,
+                                     max_tool_rounds=self.config.limits.max_tool_rounds)
         started = time.monotonic()
         with event_context(on_event, cancelled):
             try:

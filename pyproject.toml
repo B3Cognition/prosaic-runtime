@@ -22,6 +22,9 @@ prosaic-runtime = "prosaic_runtime.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+prosaic_runtime = ["smoke_prose/*.md", "smoke_prose/subagents/*.md"]
+
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]

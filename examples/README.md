@@ -26,6 +26,10 @@ If authentication is required, set `LOCAL_LLM_API_KEY` in your environment; do n
 put credentials in the example files. Calls can incur your provider's normal fees.
 
 The tool example requires a model and endpoint that support function calling.
+Run `prosaic-runtime doctor` to check setup without inference. Run
+`prosaic-runtime smoke --live --config with-tools.yml` for the packaged live
+capability test. Both example configurations set a 180-second invocation timeout;
+override it with `--timeout` when needed.
 Both configurations enable streaming. If your endpoint rejects streaming usage,
 set `stream_options: false`; if it does not stream, set `streaming: false`.
 The summarizer declares `effort: low`; remove that line if your endpoint does not
@@ -48,6 +52,9 @@ source identifiers to be preserved, without inventing a timeout cause. Wording
 varies by model. No file-reading or other tool is offered to the model.
 
 Add `--events` to receive JSONL events followed by the final result:
+
+Alternatively, add `--output text` for only the answer. Status stays on stderr;
+`--quiet` suppresses it. Do not combine `--output` with `--events`.
 
 ```sh
 prosaic-runtime subagents/summarizer.md \

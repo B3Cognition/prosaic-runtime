@@ -1,5 +1,8 @@
 default_profile: small
 allowed_tools: [read_file]
+limits:
+  timeout_s: 180
+  max_tool_rounds: 4
 
 routes:
   fast: small

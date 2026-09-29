@@ -563,7 +563,13 @@ class OpenAICompatibleBackend:
                         tool_name=tool_name,
                         tool_summary=tool_summary,
                     )
+                    call_id = str(tool_call.get("id") or "")
+                    call_started = time.monotonic()
+                    emit("tool_started", name=tool_name, call_id=call_id, turn=turn_number)
                     tool_message = registry.execute_message(tool_call)
+                    status = json.loads(tool_message["content"]).get("status", "unknown")
+                    emit("tool_completed", name=tool_name, call_id=call_id, turn=turn_number,
+                         status=status, duration_ms=round((time.monotonic() - call_started) * 1000, 3))
                     tool_result = _tool_result_status(tool_message)
                     _progress(
                         f"tool {tool_name} result: "

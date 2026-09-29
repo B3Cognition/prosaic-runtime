@@ -9,6 +9,16 @@ CONFIG_FILENAMES = ("prosaic-runtime.yaml", "prosaic-runtime.yml")
 
 
 @dataclass(frozen=True)
+class RunLimits:
+    timeout_s: float = 120
+    max_tool_rounds: int = 8
+
+    def __post_init__(self):
+        from .policy import RunPolicy
+        RunPolicy(timeout_s=self.timeout_s, max_tool_rounds=self.max_tool_rounds)
+
+
+@dataclass(frozen=True)
 class EndpointConfig:
     base_url: str
     model: str
@@ -41,6 +51,7 @@ class RuntimeConfig:
     routes: dict[str, str]
     default_profile: str
     allowed_tools: frozenset[str] = frozenset()
+    limits: RunLimits = field(default_factory=RunLimits)
 
     def __post_init__(self):
         if self.default_profile not in self.profiles:
@@ -61,7 +72,7 @@ class RuntimeConfig:
             raw = yaml.safe_load(path.read_text(encoding="utf-8"))
             if not isinstance(raw, dict):
                 raise ValueError("expected a mapping")
-            if set(raw) - {"profiles", "routes", "default_profile", "allowed_tools"}:
+            if set(raw) - {"profiles", "routes", "default_profile", "allowed_tools", "limits"}:
                 raise ValueError("unknown configuration keys")
             if not isinstance(raw.get("profiles"), dict) or not isinstance(raw.get("routes", {}), dict):
                 raise ValueError("profiles and routes must be mappings")
@@ -73,6 +84,7 @@ class RuntimeConfig:
                 routes=raw.get("routes", {}),
                 default_profile=raw["default_profile"],
                 allowed_tools=frozenset(allowed),
+                limits=RunLimits(**raw.get("limits", {})),
             )
         except (yaml.YAMLError, KeyError, TypeError, ValueError, AttributeError) as exc:
             raise ValueError(f"Invalid runtime configuration {path}: {exc}") from exc

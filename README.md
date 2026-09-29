@@ -96,6 +96,9 @@ The no-tool file looks like this:
 ```yaml
 default_profile: small
 allowed_tools: []
+limits:
+  timeout_s: 180
+  max_tool_rounds: 8
 
 routes:
   fast: small
@@ -134,6 +137,17 @@ Run only the credential command appropriate for your endpoint. Do not commit
 credentials. If the endpoint rejects usage streaming, set `stream_options: false`;
 if it does not stream, set `streaming: false`. If it rejects `reasoning_effort`,
 remove `effort: low` from `.prosaic/subagents/summarizer.md`.
+
+Check setup before making a model request:
+
+```sh
+prosaic-runtime doctor --output text
+```
+
+This checks configuration, the Prosaic CLI, configured credentials and authenticated
+model discovery. It does **not** run inference. A server without a `/models` route
+produces a warning; authentication and connectivity failures produce a failed check.
+Model discovery alone does not prove completion or tool support.
 
 ### 5. Run prose without tools
 
@@ -200,6 +214,43 @@ It is JSONL, not a single JSON document. Look for `text_delta` events when the
 endpoint streams text, tool progress, and the final result's `exit_code: 0`.
 Intermediate events are diagnostic; the final result is authoritative.
 
+Without `--events`, status and a five-second elapsed-time heartbeat go to **stderr**,
+including while the model is reasoning silently. They do not contaminate JSON or
+text on stdout. Use `--quiet` to suppress progress; errors remain visible.
+
+### 8. Run the repeatable live smoke test
+
+```sh
+prosaic-runtime smoke --live --config with-tools.yml
+```
+
+`--live` is required: this deliberately makes model requests and may incur charges.
+The installed package includes the same neutral summarizer/reviewer prose and sample
+evidence, so this works without the repository's examples directory when you supply
+a configuration path. It uses `default_profile`, or the profile selected with
+`--profile NAME`, for both probes.
+
+The test creates a temporary directory with synthetic evidence and grants only
+`read_file` within that directory for the reviewer. It never reads your project
+files. This fixed test grant is independent of your configuration's `allowed_tools`;
+`--live` opts into these two narrowly scoped probes, not general agent permissions.
+Timeout and round limits still apply to each probe separately.
+
+The JSON report separates `completion`, observed `streaming`, and `tool_execution`
+for each example. Exit 0 requires both completions and an actual successful file read;
+a model merely claiming it read the file is not enough. Streaming is reported separately
+and is not required for success, because non-streaming endpoints are supported.
+This is a capability smoke test, not a model-quality benchmark.
+
+For a single no-tool inference check instead:
+
+```sh
+prosaic-runtime doctor --inference --timeout 180
+```
+
+Inference is never a fallback for a failed default doctor check: only the explicit
+`--inference` flag enables that request.
+
 ### Troubleshooting
 
 | Symptom | Check or fix |
@@ -231,6 +282,18 @@ See the [examples walkthrough](examples/README.md) for the neutral prose files,
 permission details, and Python equivalents. To create your own agent, add a
 Markdown file under `.prosaic/subagents/` with neutral YAML frontmatter and a body
 using `{{args}}`, following the checked-in summarizer or reviewer.
+
+## Plain-text output
+
+For just the answer in the terminal, use `--output text`:
+
+```sh
+prosaic-runtime subagents/summarizer.md --arguments 'Text to summarize' --output text
+```
+
+JSON remains the default. `--events` emits JSONL and cannot be combined with
+`--output`. On failures, text mode prints any partial answer to stdout, a diagnostic
+to stderr, and exits nonzero. Do not treat a partial answer as a successful result.
 
 ## Python
 
@@ -272,7 +335,26 @@ The CLI provides no shell, web browsing, recursive agents, workflow scheduler, o
 
 Default invocation limits: 120 seconds, 8 tool rounds, 256 KiB input. Endpoint defaults: 4,096 output tokens per turn and 8 MiB captured response per turn. Conversation requests are checked against the input limit before tool-loop turns; oversized responses fail. Old tool results can be compacted. Repeated identical tool rounds disable tools for a final answer.
 
-`on_event` receives `started`, `text_delta`, `progress`, `text`, and `completed` dictionaries. The final `Result` is authoritative; progress and intermediate model text are diagnostic. Event handlers execute synchronously. Keep them fast. The `cancelled` callback is checked between streaming reads, tool-loop operations, and requests. In-flight blocking I/O is bounded by the HTTP timeout; cancellation is cooperative.
+YAML can override time and round defaults:
+
+```yaml
+limits:
+  timeout_s: 180
+  max_tool_rounds: 4
+```
+
+CLI `--timeout` and `--max-tool-rounds` override these values independently.
+The Python API uses YAML limits when `policy` is omitted; an explicit `RunPolicy`
+replaces them. The checked-in examples use 180 seconds to accommodate slower models.
+
+`on_event` receives `started`, `text_delta`, `progress`, `text`, `tool_started`,
+`tool_completed`, and `completed` dictionaries. Tool events contain `name`, `call_id`,
+and `turn`; completion also contains `status` and `duration_ms`. They include denied
+calls and omit arguments and file contents. The older diagnostic `progress` events
+can contain paths or model text, so do not treat the entire event stream as redacted.
+The final `Result` is authoritative. Event handlers execute synchronously; keep them
+fast. The `cancelled` callback is checked between streaming reads, tool-loop operations,
+and requests. In-flight blocking I/O is bounded by the HTTP timeout; cancellation is cooperative.
 
 Usage is reported when supplied by the endpoint. Cost estimation is unavailable in v0.1; `cost_usd = 0` is a legacy compatibility field, not a claim that inference was free. Check `metadata.cost_status`. No retries or model escalation occur automatically. An incomplete or truncated final response is unsuccessful.
 
