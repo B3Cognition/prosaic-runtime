@@ -9,8 +9,9 @@ These examples use the same runtime in two modes:
 
 ## Setup
 
-Install the runtime and Prosaic CLI using the [installation instructions](../README.md#install).
-Clone this repository if you do not already have it, then enter its examples directory:
+For a first installation, follow the complete [first-run guide](../README.md#first-run-from-installation-to-an-answer),
+which brings you into this directory with both CLIs installed and the endpoint configured.
+If you already have both CLIs installed but do not have the example files, clone this repository:
 
 ```sh
 git clone https://github.com/B3Cognition/prosaic-runtime.git

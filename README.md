@@ -2,40 +2,96 @@
 
 Execute neutral Prosaic commands and agents on OpenAI-compatible Chat Completions endpoints. A Python library and CLI for small, bounded tasks with streaming, tool calls, explicit filesystem permissions, and structured results.
 
-Requires Python 3.11+. Loading artifacts from disk also requires [B3Cognition/prosaic](https://github.com/B3Cognition/prosaic) and Node.js 20+. The Python package uses PyYAML for configuration. This project uses Prosaic's `inspect` JSON contract; it does not parse an alternative prompt format.
+## First run: from installation to an answer
 
-## Install
+Follow these steps in order in one terminal. Commands below target macOS, Linux,
+or Windows through WSL, using Bash or Zsh. You need an existing OpenAI-compatible
+Chat Completions endpoint: this runtime does **not** install or host a model.
+Local and hosted endpoints both work; hosted calls may incur provider charges.
+
+### 1. Check prerequisites
+
+Install Git, Python 3.11 or newer (with pip and venv), and Node.js 20 or newer
+(with npm), then check:
 
 ```sh
-python -m pip install 'prosaic-runtime @ git+https://github.com/B3Cognition/prosaic-runtime.git@main'
-git clone https://github.com/B3Cognition/prosaic.git
-cd prosaic
-git checkout b6c97013880bd6517d1e5a67b43ed985719af9f1
+git --version
+python3 --version
+node --version
+npm --version
+```
+
+Use a Python executable that reports 3.11+ throughout. Prosaic itself is a Node.js
+CLI used to inspect neutral prose; the runtime executes that prose in Python.
+
+### 2. Install
+
+Start in a directory where you keep projects. This creates a fresh checkout and
+an isolated Python environment; no sudo or global Python installation is needed:
+
+```sh
+git clone https://github.com/B3Cognition/prosaic-runtime.git
+cd prosaic-runtime
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install .
+```
+
+Install the tested Prosaic revision inside this checkout, and link its CLI into
+the same virtual environment:
+
+```sh
+mkdir -p .tools
+git clone https://github.com/B3Cognition/prosaic.git .tools/prosaic
+cd .tools/prosaic
+git checkout 0f7e187
 npm ci
-npm link
-cd ..
+npm install --global --prefix "$VIRTUAL_ENV" "$PWD"
+cd ../..
 ```
 
-## Run an agent
+Here `--global` uses the explicit virtual-environment prefix, not the system
+installation directory. Keep `.tools/prosaic` in place: the installed CLI links
+to that checkout.
 
-For complete, runnable examples with and without file tools, start with the
-[examples walkthrough](examples/README.md). It includes neutral prose, endpoint
-configuration, sample evidence, CLI commands and Python usage.
+Confirm both commands are available:
 
-Create `.prosaic/subagents/summarizer.md`:
-
-```markdown
----
-name: summarizer
-description: Summarize supplied text
-execution: agent
-model_tier: fast
-effort: low
----
-Summarize {{args}} in three sentences. Preserve uncertainty and source identifiers.
+```sh
+prosaic --help
+prosaic-runtime --help
 ```
 
-Create `prosaic-runtime.yaml`:
+For future terminals, enter the checkout and run `source .venv/bin/activate`
+again. The Python package installs PyYAML automatically.
+
+### 3. Open the ready-made examples
+
+```sh
+cd examples
+```
+
+Stay in this directory for the remaining commands. The checkout already contains:
+
+```text
+examples/
+  .prosaic/subagents/summarizer.md   # prose without tools
+  .prosaic/subagents/reviewer.md     # prose requesting read tools
+  evidence/pilot.md                 # sample input for the reviewer
+  prosaic-runtime.yaml              # no-tool endpoint configuration
+  with-tools.yml                   # read-tool endpoint configuration
+```
+
+There are no files to create before the first run. The neutral Markdown prose
+uses YAML frontmatter; runtime configuration uses YAML too.
+
+### 4. Configure your endpoint and credentials
+
+Open `prosaic-runtime.yaml` and `with-tools.yml` in your editor. In **both** files,
+replace `base_url` and `model` with values supplied by your endpoint operator.
+Keep the different `allowed_tools` values: `[]` for the first example and
+`[read_file]` for the second.
+
+The no-tool file looks like this:
 
 ```yaml
 default_profile: small
@@ -55,19 +111,126 @@ profiles:
       stream_options: true
 ```
 
-Configuration uses YAML, like Prosaic. The CLI and `ProsaicRuntime.from_config()`
-look for `prosaic-runtime.yaml`, then `prosaic-runtime.yml`, in the current
-directory. Use `--config path/to/config.yml` or pass a path to `from_config()`
-to select another file. Only `.yaml` and `.yml` files are supported.
+The localhost URL and `your-model` are placeholders. Start your local model server
+separately, or use your hosted endpoint's URL. Supply the API base (often ending
+in `/v1`), **not** the full `/chat/completions` URL: the runtime appends that path.
+Use the endpoint's exact model identifier. The tool example additionally needs
+function-calling support.
+
+If your endpoint requires a Bearer API key, enter it without putting it in shell
+history or a configuration file:
 
 ```sh
-prosaic-runtime subagents/summarizer.md --arguments 'Text to summarize'
-prosaic-runtime subagents/summarizer.md --arguments 'Text to summarize' --events
+export LOCAL_LLM_API_KEY="$(python -c 'import getpass; print(getpass.getpass("Endpoint API key: "))')"
 ```
 
-The first command emits one JSON result. `--events` emits JSONL events followed by a result. Progress never contaminates the result text. Configuration and invocation errors go to stderr; unsuccessful execution exits nonzero.
+For an unauthenticated local endpoint, leave that variable unset:
 
-For endpoints that do not accept usage streaming, set `stream_options: false`. Set `streaming: false` for ordinary JSON responses. `effort` maps to `reasoning_effort`; omit it when the endpoint does not support it. Compatibility is with the Chat Completions protocol, not every OpenAI API or every optional provider feature.
+```sh
+unset LOCAL_LLM_API_KEY
+```
+
+Run only the credential command appropriate for your endpoint. Do not commit
+credentials. If the endpoint rejects usage streaming, set `stream_options: false`;
+if it does not stream, set `streaming: false`. If it rejects `reasoning_effort`,
+remove `effort: low` from `.prosaic/subagents/summarizer.md`.
+
+### 5. Run prose without tools
+
+```sh
+prosaic-runtime subagents/summarizer.md \
+  --arguments 'S1: The pilot processed 120 requests. S2: Three requests timed out. S3: The cause has not been established.' \
+  > summary.json
+```
+
+Check the result and print the answer:
+
+```sh
+python -c 'import json; r=json.load(open("summary.json")); print(r["stdout"]); print("exit_code:", r["exit_code"]); assert r["exit_code"] == 0, r["stderr"]'
+```
+
+An illustrative answer is:
+
+```text
+The pilot processed 120 requests (S1). Three requests timed out (S2).
+The cause has not been established (S3).
+exit_code: 0
+```
+
+Wording varies by model. `summary.json` contains a result object with
+`event: "result"`, `exit_code`, `stdout`, `stderr`, usage, and metadata. No tool is offered
+to this agent. Execution success does not establish factual correctness—compare
+the answer against the supplied input.
+
+### 6. Run prose with a read-only tool
+
+```sh
+prosaic-runtime subagents/reviewer.md \
+  --config with-tools.yml \
+  --arguments 'Review evidence/pilot.md. What do we know, and what remains unknown?' \
+  --allow-tool read_file \
+  --read-root ./evidence \
+  > review.json
+python -c 'import json; r=json.load(open("review.json")); print(r["stdout"]); print("exit_code:", r["exit_code"]); assert r["exit_code"] == 0, r["stderr"]'
+```
+
+Expect a read of `evidence/pilot.md`, followed by **Observed**, **Unknown**, and
+**Next check** sections. Findings should cite that path and source IDs: 120 requests,
+three timeouts, correctness not evaluated, timeout cause unknown, and no comparison
+against another endpoint. A suggested next check is collecting server logs, not
+claiming a diagnosis.
+
+The tool must be requested by prose, allowed in configuration, **and** granted by
+the invocation. Reads are limited to `evidence/`; this example cannot write files,
+execute shell commands, or spawn agents.
+
+### 7. Watch streaming events
+
+```sh
+prosaic-runtime subagents/reviewer.md \
+  --config with-tools.yml \
+  --arguments 'Review evidence/pilot.md.' \
+  --allow-tool read_file \
+  --read-root ./evidence \
+  --events
+```
+
+This prints one JSON object per line: events followed by a final `result` object.
+It is JSONL, not a single JSON document. Look for `text_delta` events when the
+endpoint streams text, tool progress, and the final result's `exit_code: 0`.
+Intermediate events are diagnostic; the final result is authoritative.
+
+### Troubleshooting
+
+| Symptom | Check or fix |
+| --- | --- |
+| `python3`, `node`, or `npm` missing | Install the prerequisites from step 1; on some Linux systems, Python venv is a separate OS package. |
+| npm reports audit or deprecation warnings | These refer to Prosaic's pinned dependency tree. Review `npm audit` in `.tools/prosaic`; do not blindly apply forced dependency upgrades. Warnings alone do not prove installation failed—check both CLI help commands. |
+| `prosaic-runtime` not found | Activate `.venv` from the checkout root and rerun `python -m pip install .`. |
+| `prosaic` not found | Activate `.venv`, enter `.tools/prosaic`, and rerun `npm install --global --prefix "$VIRTUAL_ENV" "$PWD"`. |
+| No configuration or artifact found | Run from `examples/`; otherwise pass `--config` and `--source` explicitly. |
+| YAML error | Use spaces for indentation and preserve the nested structure shown above. |
+| Connection refused or timeout | Start the local endpoint or check its host, port, connectivity, and availability. |
+| HTTP 401/403 | Check the API key, its permissions, and `api_key_env`; do not print the key in logs. |
+| HTTP 404 or model error | Check the API base path and exact model ID; do not include `/chat/completions` in `base_url`. |
+| Unsupported request field | Disable `stream_options` or `streaming`, or remove prose `effort`, as described in step 4. |
+| Tool unavailable or read denied | Check all three grants and `--read-root`; use a function-calling model and a path inside `evidence/`. |
+| Nonzero exit or incomplete output | Read the result's `stderr` and `metadata`; check token/round limits before retrying. Setup errors are printed to terminal stderr instead. |
+
+The runtime exits nonzero on failure. Files such as `summary.json` can be empty
+when configuration fails before execution; inspect the terminal error first.
+There are no automatic retries or paid-model quality guarantees.
+
+## Configuration and further examples
+
+Configuration discovery checks `prosaic-runtime.yaml`, then `prosaic-runtime.yml`,
+in the current directory. Use `--config path/to/config.yml` or pass a path to
+`ProsaicRuntime.from_config()` to select another file. Only YAML/YML is supported.
+
+See the [examples walkthrough](examples/README.md) for the neutral prose files,
+permission details, and Python equivalents. To create your own agent, add a
+Markdown file under `.prosaic/subagents/` with neutral YAML frontmatter and a body
+using `{{args}}`, following the checked-in summarizer or reviewer.
 
 ## Python
 
