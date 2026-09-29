@@ -18,6 +18,10 @@ cd ..
 
 ## Run an agent
 
+For complete, runnable examples with and without file tools, start with the
+[examples walkthrough](examples/README.md). It includes neutral prose, endpoint
+configuration, sample evidence, CLI commands and Python usage.
+
 Create `.prosaic/subagents/summarizer.md`:
 
 ```markdown

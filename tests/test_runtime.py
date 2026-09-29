@@ -191,6 +191,48 @@ def test_real_prosaic_inspection_and_cli(server, tmp_path):
     assert "Summarize findings." in requests[0]["messages"][0]["content"]
 
 
+@pytest.mark.parametrize("with_tools,grant", [(False, False), (True, True), (True, False)])
+def test_checked_in_examples_through_cli(server, tmp_path, with_tools, grant):
+    """Exercise shipped prose/configuration, not a parallel synthetic example."""
+    if not shutil.which("prosaic"):
+        pytest.skip("Prosaic CLI is required for example conformance")
+    import sys
+    url, requests, responses = server
+    examples = Path(__file__).resolve().parents[1] / "examples"
+    workspace = tmp_path / "examples"
+    shutil.copytree(examples, workspace)
+    config = workspace / ("with-tools.toml" if with_tools else "prosaic-runtime.toml")
+    config.write_text(config.read_text().replace("http://127.0.0.1:8000/v1", url)
+                      .replace("streaming = true", "streaming = false"))
+    name = "reviewer" if with_tools else "summarizer"
+    inspected = inspect_artifact(f"subagents/{name}.md", workspace / ".prosaic")
+    assert inspected.frontmatter.get("tools") == ("read" if with_tools else None)
+    if grant:
+        responses.append(completion("", [{"id": "read", "type": "function", "function": {
+            "name": "read_file", "arguments": '{"path":"evidence/pilot.md"}'}}]))
+    responses.append(completion("example result"))
+    args = [sys.executable, "-m", "prosaic_runtime.cli", f"subagents/{name}.md",
+            "--config", config.name, "--arguments", "Review evidence/pilot.md", "--events"]
+    if grant:
+        args.extend(["--allow-tool", "read_file", "--read-root", "./evidence"])
+    completed = subprocess.run(args, cwd=workspace, capture_output=True, text=True, timeout=15)
+    assert completed.returncode == 0, completed.stderr
+    events = [json.loads(line) for line in completed.stdout.splitlines()]
+    assert events[-1]["event"] == "result"
+    assert events[-1]["stdout"] == "example result"
+    assert any("Review evidence/pilot.md" in message["content"]
+               for message in requests[0]["messages"] if message["role"] == "user")
+    if grant:
+        assert [tool["function"]["name"] for tool in requests[0]["tools"]] == ["read_file"]
+        results = [message for message in requests[1]["messages"] if message["role"] == "tool"]
+        assert len(results) == 1
+        assert "120 requests" in results[0]["content"]
+        assert "Response correctness was not evaluated" in results[0]["content"]
+    else:
+        assert "tools" not in requests[0]
+        assert len(requests) == 1
+
+
 @pytest.mark.parametrize("streaming", [False, True])
 def test_response_budget_enforced(server, streaming):
     url, _, responses = server
