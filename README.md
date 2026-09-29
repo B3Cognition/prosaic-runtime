@@ -8,7 +8,12 @@ Requires Python 3.11+. Loading artifacts from disk also requires [B3Cognition/pr
 
 ```sh
 python -m pip install 'prosaic-runtime @ git+https://github.com/B3Cognition/prosaic-runtime.git@v0.1.0'
-npm install -g 'git+https://github.com/B3Cognition/prosaic.git#b6c9701'
+git clone https://github.com/B3Cognition/prosaic.git
+cd prosaic
+git checkout b6c97013880bd6517d1e5a67b43ed985719af9f1
+npm ci
+npm link
+cd ..
 ```
 
 ## Run an agent

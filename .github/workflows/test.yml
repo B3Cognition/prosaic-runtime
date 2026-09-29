@@ -16,7 +16,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - run: npm install -g 'git+https://github.com/B3Cognition/prosaic.git#b6c9701'
+      - uses: actions/checkout@v4
+        with:
+          repository: B3Cognition/prosaic
+          ref: b6c97013880bd6517d1e5a67b43ed985719af9f1
+          path: .ci-prosaic
+      - run: npm ci
+        working-directory: .ci-prosaic
+      - run: npm link
+        working-directory: .ci-prosaic
       - run: python -m pip install -e '.[test]' build
       - run: pytest
       - run: python -m build
