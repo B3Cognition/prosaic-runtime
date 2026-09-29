@@ -32,6 +32,7 @@ an isolated Python environment; no sudo or global Python installation is needed:
 ```sh
 git clone https://github.com/B3Cognition/prosaic-runtime.git
 cd prosaic-runtime
+git checkout v0.2.0
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install .
@@ -362,7 +363,7 @@ The final `Result` is authoritative. Event handlers execute synchronously; keep 
 fast. The `cancelled` callback is checked between streaming reads, tool-loop operations,
 and requests. In-flight blocking I/O is bounded by the HTTP timeout; cancellation is cooperative.
 
-Usage is reported when supplied by the endpoint. Cost estimation is unavailable in v0.1; `cost_usd = 0` is a legacy compatibility field, not a claim that inference was free. Check `metadata.cost_status`. No retries or model escalation occur automatically. An incomplete or truncated final response is unsuccessful.
+Usage is reported when supplied by the endpoint. Cost estimation is unavailable in v0.2; `cost_usd = 0` is a legacy compatibility field, not a claim that inference was free. Check `metadata.cost_status`. No retries or model escalation occur automatically. An incomplete or truncated final response is unsuccessful.
 
 ## Echelon integration
 
