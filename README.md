@@ -342,6 +342,37 @@ An orchestrator can pass `ProsaicArtifact.from_inspection(inspect_json)` to avoi
 
 ## Tools and authority
 
+### Opt-in acquisition (development branch)
+
+Pass `acquisition="subagents/acquire-pilot.md"` to `runtime.run()` to send a
+short neutral Prosaic artifact first. The final artifact body, resources and
+arguments are withheld until the explicitly selected native tool succeeds.
+Both artifacts use one model, conversation, deadline and tool-round budget.
+The acquisition declaration cannot broaden final prose/host/config grants;
+it must declare `policy.initial_tool`. Its tier/effort must match the final
+artifact or be omitted. Acquisition receives **no final arguments**; put the
+needed path in its own prose. First-turn JSON response formatting is withheld
+too, then restored for analysis. Subsequent tool selection is automatic.
+
+A missing/substituted/extra first call blocks with `tool_choice_not_honored`;
+a failed required tool blocks with `acquisition_failed`. Neither failure retries
+nor switches to preloading. `acquisition_v1` advertises support. Existing calls
+without this option retain their behavior. These changes are not in v0.3.0 yet.
+
+Run the complete staged and no-tool examples from this checkout:
+
+```sh
+python examples/run_acquisition.py --config examples/tokenproxy.yml --profile qwen
+```
+
+Set `TOKENPROXY_KEY` first. Use `--mode staged` or `--mode preloaded` to choose
+explicitly, `--no-stream` for non-streaming, or another configured profile.
+The preloaded mode reads a fixed example file on the host and supplies its text
+to tool-free Markdown prose; it does not fabricate native tool receipts.
+See [examples/README.md](examples/README.md#staged-acquisition-and-explicit-preloading).
+This program demonstrates execution, not factual validation; the Harness
+companion supplies schema and source/quote admission checks.
+
 Tools are enabled only by the intersection of the artifact's declaration, configuration `allowed_tools`, and invocation `RunPolicy.allowed_tools`. Filesystem tools also require explicit roots or exact output paths. Missing and empty grants deny access. Prose and provider responses cannot expand the grant.
 
 Supported declarations are omitted/empty/`none`, `read`, `write`, or a list of supported tool names in an inspection snapshot. `write` requests both read and write tools. `full` is rejected because this runtime does not implement arbitrary shell execution or delegation.
@@ -382,6 +413,11 @@ can contain paths or model text, so do not treat the entire event stream as reda
 The final `Result` is authoritative. Event handlers execute synchronously; keep them
 fast. The `cancelled` callback is checked between streaming reads, tool-loop operations,
 and requests. In-flight blocking I/O is bounded by the HTTP timeout; cancellation is cooperative.
+Staged invocations additionally emit `acquisition_completed` after the required
+tool succeeds. If a later turn is cancelled, times out or exceeds an input/
+response limit, already reported completed-turn usage is retained and marked
+`usage_scope: reported_completed_turns`; it is not an estimate of an unfinished
+request's usage.
 
 Usage is reported when supplied by the endpoint. Cost estimation is unavailable in v0.2; `cost_usd = 0` is a legacy compatibility field, not a claim that inference was free. Check `metadata.cost_status`. No retries or model escalation occur automatically. An incomplete or truncated final response is unsuccessful.
 

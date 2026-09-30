@@ -38,6 +38,7 @@ class _BoundedBackend(OpenAICompatibleBackend):
     def __init__(self, endpoint, max_input_bytes):
         super().__init__(endpoint)
         self.max_input_bytes = max_input_bytes
+        self.reported_token_usage = None
 
     def read_response(self, response):
         check_cancelled()
@@ -57,11 +58,14 @@ class _BoundedBackend(OpenAICompatibleBackend):
             return Result(1, "", "invocation deadline exceeded", timed_out=True)
         if len(json.dumps(payload).encode()) > self.max_input_bytes:
             raise LimitExceeded("conversation exceeds max_input_bytes")
-        return super()._post_chat_turn(payload, request, deadline, streaming)
+        turn = super()._post_chat_turn(payload, request, deadline, streaming)
+        if not isinstance(turn, Result) and turn.token_usage_details:
+            self.reported_token_usage = (self.reported_token_usage or 0) + turn.token_usage
+        return turn
 
 
 class ProsaicRuntime:
-    capabilities = frozenset({'read_receipts_v1', 'initial_tool_v1', 'initial_tool_enforcement_v1'})
+    capabilities = frozenset({'read_receipts_v1', 'initial_tool_v1', 'initial_tool_enforcement_v1', 'acquisition_v1'})
     def __init__(self, config: RuntimeConfig, *, source=".prosaic", executable="prosaic"):
         self.config = config
         self.source = Path(source)
@@ -73,10 +77,12 @@ class ProsaicRuntime:
 
     def run(self, artifact: str | ProsaicArtifact, arguments: str = "", *,
             cwd: str | Path = ".", policy: RunPolicy | None = None,
-            on_event=None, cancelled=None, env=None) -> Result:
+            on_event=None, cancelled=None, env=None,
+            acquisition: str | ProsaicArtifact | None = None) -> Result:
         policy = policy or RunPolicy(timeout_s=self.config.limits.timeout_s,
                                      max_tool_rounds=self.config.limits.max_tool_rounds)
         started = time.monotonic()
+        backend = None
         with event_context(on_event, cancelled):
             try:
                 check_cancelled()
@@ -94,6 +100,25 @@ class ProsaicRuntime:
                 tools = requested & self.config.allowed_tools & frozenset(policy.allowed_tools)
                 if policy.initial_tool is not None and policy.initial_tool not in tools:
                     raise ValueError('initial_tool must be granted by prose, runtime and host')
+                if acquisition is not None:
+                    if isinstance(acquisition, str):
+                        remaining = policy.timeout_s - (time.monotonic() - started)
+                        if remaining <= 0:
+                            return Result(1, '', 'invocation deadline exceeded', timed_out=True)
+                        acquisition = inspect_artifact(acquisition, self.source, executable=self.executable,
+                                                       timeout_s=min(30, remaining))
+                    if not isinstance(acquisition, ProsaicArtifact):
+                        raise TypeError('acquisition must be a Prosaic artifact identifier or inspection artifact')
+                    acquisition = ProsaicArtifact.from_inspection({
+                        'id': acquisition.id, 'type': acquisition.type, 'frontmatter': acquisition.frontmatter,
+                        'body': acquisition.body, 'resources': list(acquisition.resources)})
+                    acquisition_tools = requested_tools(acquisition.frontmatter.get('tools'))
+                    if acquisition_tools - requested or policy.initial_tool not in acquisition_tools:
+                        raise ValueError('acquisition requires an explicit initial_tool and tools granted by final prose, runtime and host')
+                    acquisition_tools &= tools
+                    for key in ('model_tier', 'effort'):
+                        if key in acquisition.frontmatter and acquisition.frontmatter[key] != artifact.frontmatter.get(key):
+                            raise ValueError(f'acquisition {key} must match final prose or be omitted')
                 tier = artifact.frontmatter.get("model_tier")
                 if tier is not None and tier not in self.config.routes:
                     raise ValueError(f"no endpoint route for model_tier: {tier}")
@@ -116,23 +141,37 @@ class ProsaicRuntime:
                 prompt = artifact.render(arguments)
                 if len(prompt.encode()) > policy.max_input_bytes:
                     raise ValueError("artifact and arguments exceed max_input_bytes")
+                if acquisition is not None:
+                    metadata['final_prompt'] = prompt
+                    metadata['acquisition_tools'] = sorted(acquisition_tools)
+                    prompt = acquisition.render()
+                    if len(prompt.encode()) > policy.max_input_bytes:
+                        raise ValueError('acquisition exceeds max_input_bytes')
                 remaining = policy.timeout_s - (time.monotonic() - started)
                 if remaining <= 0:
                     return Result(1, "", "invocation deadline exceeded", timed_out=True)
                 emit("started", artifact_id=artifact.id, artifact_sha256=artifact.digest, profile=profile,
                      model=endpoint.model, tools=sorted(tools))
-                result = _BoundedBackend(endpoint, policy.max_input_bytes).run_prompt(Invocation(
+                backend = _BoundedBackend(endpoint, policy.max_input_bytes)
+                result = backend.run_prompt(Invocation(
                     str(Path(cwd).resolve()), prompt, dict(os.environ if env is None else env), remaining,
                     {"prompt_metadata": metadata}))
+                if result.exit_code and result.token_usage is None and backend.reported_token_usage is not None:
+                    result.token_usage = backend.reported_token_usage
+                    result.metadata['usage_scope'] = 'reported_completed_turns'
                 if result.exit_code == 0 and result.metadata.get("finish_reason") != "stop":
                     result.exit_code = 1
                     result.stderr = "endpoint did not confirm a complete response"
                     result.metadata["failure_reason"] = "incomplete_response"
                 result.metadata.update(artifact_id=artifact.id, artifact_sha256=artifact.digest, profile=profile,
                                        cost_status="unavailable")
+                if acquisition is not None:
+                    result.metadata.update(acquisition_id=acquisition.id, acquisition_sha256=acquisition.digest)
                 emit("completed", exit_code=result.exit_code, token_usage=result.token_usage)
                 return result
             except Cancelled as exc:
-                return Result(130, "", str(exc), metadata={"failure_reason": "cancelled"})
+                return Result(130, "", str(exc), token_usage=backend.reported_token_usage if backend else None,
+                              metadata={"failure_reason": "cancelled", 'usage_scope': 'reported_completed_turns'})
             except LimitExceeded as exc:
-                return Result(1, "", str(exc), metadata={"failure_reason": "budget_exceeded"})
+                return Result(1, "", str(exc), token_usage=backend.reported_token_usage if backend else None,
+                              metadata={"failure_reason": "budget_exceeded", 'usage_scope': 'reported_completed_turns'})

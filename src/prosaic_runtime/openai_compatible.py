@@ -412,6 +412,11 @@ class OpenAICompatibleBackend:
                 tools=[] if tools_disabled else registry.openai_tools(),
             )
             initial_tool = _metadata_str(prompt_metadata, 'initial_tool')
+            acquiring = turn_number == 1 and 'final_prompt' in prompt_metadata
+            if acquiring:
+                payload.pop('response_format', None)
+                payload['tools'] = [tool for tool in payload.get('tools', [])
+                                    if tool['function']['name'] in prompt_metadata['acquisition_tools']]
             if turn_number == 1 and initial_tool and payload.get('tools'):
                 payload['tool_choice'] = {'type': 'function', 'function': {'name': initial_tool}}
             _progress(
@@ -616,6 +621,17 @@ class OpenAICompatibleBackend:
                         tool_result=tool_result,
                     )
                     messages.append(tool_message)
+                    if acquiring and status != 'ok':
+                        return CliRunResult(
+                            exit_code=1, stdout='', stderr='required acquisition tool failed',
+                            token_usage=token_usage, metadata={
+                                'provider': self.name, 'failure_reason': 'acquisition_failed',
+                                'provider_error_code': 'acquisition_failed', 'tool_call_count': tool_call_count,
+                                'tool_rounds': tool_rounds, 'token_usage_details': token_usage_details,
+                                **_transcript_metadata(transcript)})
+                if acquiring:
+                    messages.append({'role': 'user', 'content': prompt_metadata['final_prompt']})
+                    emit('acquisition_completed', tool=initial_tool, turn=turn_number)
                 if identical_tool_rounds >= max_identical_tool_rounds:
                     tools_disabled = True
                     tool_no_progress_forced = True

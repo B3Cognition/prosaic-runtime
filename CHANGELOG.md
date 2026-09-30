@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Opt-in Prosaic `acquisition` artifact: perform an explicitly granted first
+  native tool call before disclosing full agent prose, resources and arguments.
+  One conversation/model/deadline/tool budget; failed acquisition blocks with
+  no fallback. `acquisition_v1` capability, HTTP/SSE ordering and denial tests,
+  staged and explicit no-tool preloading examples. Completed-turn reported usage
+  is retained when a later cancellation, input limit or timeout stops execution.
+
 - An explicit initial tool choice now fails with `tool_choice_not_honored` if
   the endpoint omits, substitutes or adds first-turn calls. No returned call is
   executed on a mismatch and no automatic retry is made. Reported usage is kept.

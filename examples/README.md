@@ -1,5 +1,33 @@
 # Run Prosaic prose with and without tools
 
+## Staged acquisition and explicit preloading
+
+This opt-in API is on the development branch, not the published v0.3.0 package.
+Install this checkout into your environment first (`python -m pip install -e .`),
+with the Prosaic CLI on PATH as described in the root README. Export
+`TOKENPROXY_KEY` from your shell configuration; no key belongs in YAML.
+
+```sh
+python examples/run_acquisition.py --config examples/tokenproxy.yml --profile qwen
+python examples/run_acquisition.py --config examples/tokenproxy.yml --profile ornith --mode staged --no-stream
+python examples/run_acquisition.py --config examples/tokenproxy.yml --profile deepseek --mode preloaded
+python examples/run_acquisition.py --config examples/tokenproxy.yml --profile nemotron --mode staged
+```
+
+The default `both` mode runs two independent examples. The staged invocation
+first sends `acquire-pilot.md`; after a successful native `read_file`, it appends
+`acquired-reviewer.md` and final arguments to the same conversation. No final
+prose/arguments reach the endpoint before acquisition. Its policy permits only
+reading `evidence/pilot.md`, with one shared timeout and tool-round budget.
+The preloaded invocation explicitly reads the fixed sample file on the host and
+passes its text to `preloaded-reviewer.md` with no tools. It does not pretend a
+native read occurred, and is never used automatically after a staged failure.
+
+For your own endpoint, configure `with-tools.yml`, or use `--base-url` and
+`--model` overrides. The script prints a result JSON object per example and
+stops on an unsuccessful result. Success confirms transport completion, not
+answer truth; use the companion Harness examples for schema/source admission.
+
 These examples use the same runtime in two modes:
 
 | Example | Input | Granted tools | Output |
