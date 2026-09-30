@@ -77,6 +77,10 @@ class OpenAICompatibleBackend:
     def read_response(self, response):
         return response.read().decode("utf-8", errors="replace")
 
+    def validate_payload(self, payload):
+        """Host-specific guards may reject a request before transport."""
+        pass
+
     def prepare_constrained_prompt(self, request: CliRunRequest) -> str:
         return request.prompt
 
@@ -220,6 +224,7 @@ class OpenAICompatibleBackend:
             payload["stream"] = True
             if _feature_enabled(llm.features, "stream_options", default=True):
                 payload["stream_options"] = {"include_usage": True}
+        self.validate_payload(payload)
         data = json.dumps(payload).encode("utf-8")
         headers = {"Content-Type": "application/json"}
         token, token_error = _api_key(llm.api_key_env, llm.api_key_file, request.env)

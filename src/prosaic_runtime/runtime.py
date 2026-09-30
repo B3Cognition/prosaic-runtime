@@ -60,12 +60,16 @@ class _BoundedBackend(OpenAICompatibleBackend):
             response = _BoundedStream(response, self._config.max_response_bytes)
         return super()._read_sse_turn(response, deadline)
 
+    def validate_payload(self, payload):
+        check_cancelled()
+        if len(json.dumps(payload).encode()) > self.max_input_bytes:
+            raise LimitExceeded("conversation exceeds max_input_bytes")
+
     def _post_chat_turn(self, payload, request, deadline, streaming):
         check_cancelled()
         if time.monotonic() >= deadline:
             return Result(1, "", "invocation deadline exceeded", timed_out=True)
-        if len(json.dumps(payload).encode()) > self.max_input_bytes:
-            raise LimitExceeded("conversation exceeds max_input_bytes")
+        self.validate_payload(payload)
         turn = super()._post_chat_turn(payload, request, deadline, streaming)
         if not isinstance(turn, Result):
             self.turns += 1

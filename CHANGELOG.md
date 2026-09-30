@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- No-tool HTTP requests now enforce the serialized input-byte limit, including
+  request overhead, just like tool-loop requests.
+
 - Public usage totals stay unknown when any completed turn lacks complete,
   nonnegative integer usage. Genuine reported zero remains zero; known partial
   sums are diagnostic metadata, not a complete invocation total.
