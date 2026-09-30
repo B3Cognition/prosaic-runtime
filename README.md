@@ -1,5 +1,13 @@
 # Prosaic Runtime
 
+Version 0.3.0 harness support: `tool_completed` events for successful `read_file`
+now include `read_receipts` with path, SHA-256 of the bytes actually read, offset,
+lines_read and line_count. Events contain no file text or raw tool arguments.
+`RunPolicy(initial_tool="read_file", ...)` requests that granted function on the
+first turn only; prose, runtime and host grants must all allow it. This cannot
+elevate permissions or guarantee an endpoint honors tool choice. Consumers must
+still validate the observed events. Defaults remain unchanged.
+
 Execute neutral Prosaic commands and agents on OpenAI-compatible Chat Completions endpoints. A Python library and CLI for small, bounded tasks with streaming, tool calls, explicit filesystem permissions, and structured results.
 
 ## First run: from installation to an answer
@@ -32,7 +40,7 @@ an isolated Python environment; no sudo or global Python installation is needed:
 ```sh
 git clone https://github.com/B3Cognition/prosaic-runtime.git
 cd prosaic-runtime
-git checkout v0.2.0
+git checkout v0.3.0
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install .
@@ -242,6 +250,11 @@ for each example. Exit 0 requires both completions and an actual successful file
 a model merely claiming it read the file is not enough. Streaming is reported separately
 and is not required for success, because non-streaming endpoints are supported.
 This is a capability smoke test, not a model-quality benchmark.
+
+For a larger demonstration, see the [four-tier launch dossier example](examples/README.md#four-tier-launch-dossier-demo):
+four neutral Markdown subagents, a synthetic 5,100-word dossier, YAML model-tier
+routing, scoped read-only tools, and a runnable program with text or JSONL output.
+Its documented live results distinguish successful execution from answer quality.
 
 For a single no-tool inference check instead:
 

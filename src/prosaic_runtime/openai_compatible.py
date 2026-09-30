@@ -411,6 +411,9 @@ class OpenAICompatibleBackend:
                 streaming=streaming,
                 tools=[] if tools_disabled else registry.openai_tools(),
             )
+            initial_tool = _metadata_str(prompt_metadata, 'initial_tool')
+            if turn_number == 1 and initial_tool and payload.get('tools'):
+                payload['tool_choice'] = {'type': 'function', 'function': {'name': initial_tool}}
             _progress(
                 "turn "
                 f"{turn_number}: request "
@@ -567,9 +570,15 @@ class OpenAICompatibleBackend:
                     call_started = time.monotonic()
                     emit("tool_started", name=tool_name, call_id=call_id, turn=turn_number)
                     tool_message = registry.execute_message(tool_call)
-                    status = json.loads(tool_message["content"]).get("status", "unknown")
+                    tool_payload = json.loads(tool_message["content"])
+                    status = tool_payload.get("status", "unknown")
+                    read_receipts = []
+                    if tool_name == "read_file" and status == "ok":
+                        read_receipts = [{key: tool_payload[key] for key in
+                                          ("path", "sha256", "offset", "lines_read", "line_count")}]
                     emit("tool_completed", name=tool_name, call_id=call_id, turn=turn_number,
-                         status=status, duration_ms=round((time.monotonic() - call_started) * 1000, 3))
+                         status=status, duration_ms=round((time.monotonic() - call_started) * 1000, 3),
+                         read_receipts=read_receipts)
                     tool_result = _tool_result_status(tool_message)
                     _progress(
                         f"tool {tool_name} result: "
@@ -1278,12 +1287,15 @@ class _OpenAIToolRegistry:
             raise ValueError(f"{self._rel(path)} ignored by provider filter: {reason}")
         offset = _int_arg(args, "offset", default=0, minimum=0, maximum=1_000_000)
         limit = _int_arg(args, "limit", default=400, minimum=1, maximum=2_000)
-        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        content = path.read_bytes()
+        lines = content.decode("utf-8", errors="replace").splitlines()
         selected = lines[offset : offset + limit]
         return {
             "status": "ok",
             "path": self._rel(path),
             "offset": offset,
+            "sha256": hashlib.sha256(content).hexdigest(),
+            "lines_read": len(selected),
             "line_count": len(lines),
             "truncated": offset + limit < len(lines),
             "content": "\n".join(

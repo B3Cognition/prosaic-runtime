@@ -61,6 +61,7 @@ class _BoundedBackend(OpenAICompatibleBackend):
 
 
 class ProsaicRuntime:
+    capabilities = frozenset({'read_receipts_v1', 'initial_tool_v1'})
     def __init__(self, config: RuntimeConfig, *, source=".prosaic", executable="prosaic"):
         self.config = config
         self.source = Path(source)
@@ -91,6 +92,8 @@ class ProsaicRuntime:
                 if requested - BUILTIN_TOOLS:
                     raise ValueError(f"unsupported tools: {sorted(requested - BUILTIN_TOOLS)}")
                 tools = requested & self.config.allowed_tools & frozenset(policy.allowed_tools)
+                if policy.initial_tool is not None and policy.initial_tool not in tools:
+                    raise ValueError('initial_tool must be granted by prose, runtime and host')
                 tier = artifact.frontmatter.get("model_tier")
                 if tier is not None and tier not in self.config.routes:
                     raise ValueError(f"no endpoint route for model_tier: {tier}")
@@ -103,6 +106,8 @@ class ProsaicRuntime:
                             "tool_read_roots": list(policy.read_roots),
                             "tool_write_paths": list(policy.write_paths),
                             "tool_forbidden_roots": list(policy.forbidden_roots)}
+                if policy.initial_tool is not None:
+                    metadata['initial_tool'] = policy.initial_tool
                 effort = artifact.frontmatter.get("effort")
                 if effort is not None:
                     if effort not in {"low", "medium", "high"}:

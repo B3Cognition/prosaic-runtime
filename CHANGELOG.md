@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.3.0 — 2026-09-30
+
+- Successful `read_file` results and events bind the file path, byte SHA-256,
+  offset, lines read and total line count. Structural events omit file content
+  and raw arguments.
+- `RunPolicy.initial_tool` requests a granted function on the first turn only;
+  permission intersection remains unchanged. Capability flags let consumers
+  require read provenance and initial-tool support explicitly.
+- Four-tier Markdown examples, a larger synthetic launch dossier, TokenProxy
+  YAML profiles and `examples/run_tiers.py` demonstrate independent bounded
+  agents with and without read tools. This is not recursive agent execution.
+- Live basic native-read probes passed for all four TokenProxy model IDs with
+  streaming on/off and automatic/explicit tool choice (16 combinations).
+- Known limitation: some richer reader prompts returned text without the
+  explicitly requested tool call. This version requests tool choice but does
+  not itself reject its omission; consumers must verify tool execution/events.
+  A successful read does not establish answer correctness.
+
 ## 0.2.0 — 2026-09-29
 
 ### Breaking changes

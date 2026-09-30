@@ -35,6 +35,140 @@ set `stream_options: false`; if it does not stream, set `streaming: false`.
 The summarizer declares `effort: low`; remove that line if your endpoint does not
 accept `reasoning_effort`.
 
+## TokenProxy endpoint
+
+[tokenproxy.yml](tokenproxy.yml) configures the private-network endpoint
+`http://10.16.81.27:8080/v1` and reads credentials from `TOKENPROXY_KEY`.
+Run these commands from the **repository root**, using its virtual environment
+explicitly to avoid picking up an older runtime installed with another application:
+
+```sh
+source ~/.zshrc
+export TOKENPROXY_KEY
+
+.venv/bin/prosaic-runtime doctor --config examples/tokenproxy.yml --output text
+.venv/bin/python examples/run_examples.py --config examples/tokenproxy.yml --events
+.venv/bin/prosaic-runtime smoke --live --config examples/tokenproxy.yml --output text
+```
+
+The sample runs both no-tool and read-only-tool prose. The smoke command additionally
+asserts that the tool example actually executes `read_file`. No key is stored in YAML.
+
+The profiles are `qwen` (agents/tools), `ornith` (general chat/code), `nemotron`
+(operator-recommended for contexts over 262,144 tokens), and `deepseek` (comparison
+only). These use cases come from the endpoint operator, not runtime benchmarks.
+The experimental tier mapping is:
+
+| Prose tier | Profile | Model |
+| --- | --- | --- |
+| `fast` | `ornith` | `ornith-1.5-35b` |
+| `balanced` | `qwen` | `qwen36-35b-a3b` |
+| `strong` | `deepseek` | `deepseek-v4-flash` |
+| `ultra` | `nemotron` | `nemotron-3.5-lightning` |
+
+This is a configurable policy, not a verified speed/quality ranking or automatic
+escalation. `ultra` selects the largest advertised context window, not proven
+strongest reasoning; the operator recommends Nemotron only for contexts over
+262,144 tokens. `strong` uses the operator's comparison-only DeepSeek pool.
+The existing examples both declare `fast`, so both now select Ornith. Prose without
+a tier still defaults to Qwen. Diagnostics and smoke tests use `default_profile`
+(Qwen) unless you pass `--profile ornith`, `--profile deepseek`, or `--profile nemotron`.
+
+For an explicit comparison run, override the model for both examples:
+
+```sh
+.venv/bin/python examples/run_examples.py --config examples/tokenproxy.yml \
+  --model ornith-1.5-35b --events
+```
+
+`--model` overrides every profile for that sample run, so omit it when testing tier
+routing. Alternative model IDs are listed in the YAML. Tool/reasoning/streaming
+compatibility must be verified per model; Qwen is the previously live-tested model.
+Advertised context sizes are comments only: they do not raise runtime safety limits,
+and `max_tokens` limits output, not the model's context window.
+
+## Four-tier launch dossier demo
+
+[run_tiers.py](run_tiers.py) runs four independent Prosaic Markdown subagents against
+a fictional, approximately 5,100-word launch dossier in [evidence/launch](evidence/launch).
+It includes a proposal, measurements, interviews, incident notes, conflicting
+headlines, a quoted instruction to ignore, and late evidence affecting the decision.
+All content is synthetic; no workplace files are sent to the endpoint.
+
+| Tier | Markdown subagent | Input and capabilities |
+| --- | --- | --- |
+| `fast` | [launch-briefer](.prosaic/subagents/launch-briefer.md) | Supplied proposal (~1,700 words); no tools |
+| `balanced` | [launch-analyst](.prosaic/subagents/launch-analyst.md) | Reads the three dossier files; computes rates and reports limitations |
+| `strong` | [launch-skeptic](.prosaic/subagents/launch-skeptic.md) | Reads the dossier; checks competing claims and missing evidence |
+| `ultra` | [launch-decision](.prosaic/subagents/launch-decision.md) | Full dossier supplied directly; synthesizes a conditional decision without tools |
+
+From the **repository root**, with both Prosaic and the runtime installed:
+
+```sh
+source ~/.zshrc
+export TOKENPROXY_KEY
+
+# All four models, sequentially. Makes real requests and may incur charges.
+.venv/bin/python examples/run_tiers.py
+
+# A single tier, or JSONL events including streamed text and final results.
+.venv/bin/python examples/run_tiers.py --tier balanced
+.venv/bin/python examples/run_tiers.py --tier strong --events --timeout 180
+```
+
+The default config is `examples/tokenproxy.yml`, resolved relative to the script.
+Use `--config path/to/config.yml` for another endpoint; paths supplied explicitly
+are relative to your working directory. There is deliberately no model override:
+the Markdown tier selects a YAML route. The runner prints the actual selected
+profile/model, answer, elapsed time, reported token usage (or `None` if unavailable),
+observed streaming, and whether a read tool executed. `--events` reserves stdout
+for JSONL. The timeout applies separately to each agent, including its tool loop.
+
+Balanced and strong have only `read_file` access under `evidence/launch`; fast
+and ultra have no tools. Config permission alone does not grant a tool: prose,
+configuration, and invocation permissions must all agree. Runs are independent,
+not recursive agents or a chain that passes one model's answer into another.
+No file-writing or shell tools are granted. Execution stops on the first failed
+run; use `--tier` to test another model independently after a failure.
+
+Exit zero requires nonempty completed answers and at least one successful
+`read_file` for each tool-based example. This checks execution, **not answer
+quality or proof that every requested source was read**. Inspect the answers:
+
+- Metrics should distinguish the 2.5% timeout rate, 3.5% combined failure rate,
+  and misleading 99% headline (M01–M02).
+- Reviews should retain sample/denominator caveats, not double-count F04, and
+  reject the quoted instruction in F09 as authority.
+- Full-dossier synthesis should account for the late rollback correction and
+  unassigned evening coverage (F14–F15), without inventing approval.
+
+These are different jobs, not a controlled quality/speed comparison. Nemotron's
+`ultra` route demonstrates configuration, not superior reasoning or a million-token
+capacity test. The dossier is far smaller than 262,144 tokens; the operator's
+recommendation to reserve Nemotron for very large contexts still applies outside
+this explicit demo. A larger advertised context does not increase runtime limits.
+
+### Live verification snapshot (2026-09-30)
+
+One sequential run against the configured TokenProxy endpoint completed all four
+jobs with observed streaming. These are single-run observations, not benchmarks:
+
+| Tier/model | Elapsed | Reported tokens | Successful file reads |
+| --- | --- | --- | --- |
+| fast / Ornith | 1.83 s | 2,740 | 0 (no tools) |
+| balanced / Qwen | 4.01 s | 10,891 | 3 |
+| strong / DeepSeek | 12.30 s | 10,368 | 3 |
+| ultra / Nemotron | 14.14 s | 10,236 | 0 (full text supplied) |
+
+Manual review found important quality limitations despite successful execution:
+DeepSeek described the 1% versus 3.5% failure comparison as approximately 2.5×
+(the ratio is 3.5×; the difference is 2.5 percentage points), and had an incorrect
+source prefix. Nemotron exceeded the requested 600-word limit and described some
+proposed gates as mandatory, despite the instruction to preserve proposal status.
+It did incorporate the late F14/F15 evidence. Neither tool-based model followed
+every citation-format instruction. Human review remains necessary; the runner
+does not validate arithmetic, citations, word limits, or policy interpretation.
+
 ## 1. Prose without tools
 
 The [summarizer prose](.prosaic/subagents/summarizer.md) receives all its input

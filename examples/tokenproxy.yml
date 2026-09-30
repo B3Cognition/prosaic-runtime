@@ -1,0 +1,43 @@
+# Private-network endpoint; requires network access and TOKENPROXY_KEY.
+# Model use cases follow the TokenProxy operator's guidance, not benchmarks.
+default_profile: qwen
+allowed_tools: [read_file]
+limits:
+  timeout_s: 180
+  max_tool_rounds: 4
+
+# Experimental tier policy, not a benchmarked speed/quality ranking.
+# Ultra selects the largest context window, not proven strongest reasoning.
+# DeepSeek remains comparison-only per operator guidance.
+routes:
+  fast: ornith
+  balanced: qwen
+  strong: deepseek
+  ultra: nemotron
+
+profiles:
+  # Agents, tools, and long files. Advertised context: 262,144 tokens.
+  qwen: &tokenproxy
+    base_url: http://10.16.81.27:8080/v1
+    api_key_env: TOKENPROXY_KEY
+    model: qwen36-35b-a3b
+    max_tokens: 4096
+    features:
+      streaming: true
+      stream_options: true
+
+  # General chat and code; largest pool. Context: 262,144 tokens.
+  ornith:
+    <<: *tokenproxy
+    model: ornith-1.5-35b
+
+  # Operator recommends only for >262,144-token contexts. Context: 1,048,576.
+  # This profile alone does not increase the runtime's input/response limits.
+  nemotron:
+    <<: *tokenproxy
+    model: nemotron-3.5-lightning
+
+  # Comparison only: slower, four concurrent slots. Context: 262,144 tokens.
+  deepseek:
+    <<: *tokenproxy
+    model: deepseek-v4-flash
