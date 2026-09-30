@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Public usage totals stay unknown when any completed turn lacks complete,
+  nonnegative integer usage. Genuine reported zero remains zero; known partial
+  sums are diagnostic metadata, not a complete invocation total.
+
 - Opt-in Prosaic `acquisition` artifact: perform an explicitly granted first
   native tool call before disclosing full agent prose, resources and arguments.
   One conversation/model/deadline/tool budget; failed acquisition blocks with

@@ -17,6 +17,12 @@ class LimitExceeded(ValueError):
     pass
 
 
+def _reported_usage(details):
+    if not isinstance(details, dict) or any(type(v) is not int or v < 0 for v in details.values()):
+        return None
+    return details.get('total_tokens')
+
+
 class _BoundedStream:
     def __init__(self, response, limit):
         self.response = response
@@ -39,6 +45,8 @@ class _BoundedBackend(OpenAICompatibleBackend):
         super().__init__(endpoint)
         self.max_input_bytes = max_input_bytes
         self.reported_token_usage = None
+        self.usage_complete = True
+        self.turns = 0
 
     def read_response(self, response):
         check_cancelled()
@@ -59,8 +67,13 @@ class _BoundedBackend(OpenAICompatibleBackend):
         if len(json.dumps(payload).encode()) > self.max_input_bytes:
             raise LimitExceeded("conversation exceeds max_input_bytes")
         turn = super()._post_chat_turn(payload, request, deadline, streaming)
-        if not isinstance(turn, Result) and turn.token_usage_details:
-            self.reported_token_usage = (self.reported_token_usage or 0) + turn.token_usage
+        if not isinstance(turn, Result):
+            self.turns += 1
+            usage = _reported_usage(turn.token_usage_details)
+            if usage is None:
+                self.usage_complete = False
+            else:
+                self.reported_token_usage = (self.reported_token_usage or 0) + usage
         return turn
 
 
@@ -156,8 +169,13 @@ class ProsaicRuntime:
                 result = backend.run_prompt(Invocation(
                     str(Path(cwd).resolve()), prompt, dict(os.environ if env is None else env), remaining,
                     {"prompt_metadata": metadata}))
-                if result.exit_code and result.token_usage is None and backend.reported_token_usage is not None:
-                    result.token_usage = backend.reported_token_usage
+                if backend.turns:
+                    result.token_usage = backend.reported_token_usage if backend.usage_complete else None
+                    result.metadata['reported_token_usage'] = backend.reported_token_usage
+                elif result.exit_code == 0:
+                    result.token_usage = _reported_usage(result.metadata.get('token_usage_details'))
+                result.metadata['token_usage_status'] = 'unknown' if result.token_usage is None else 'reported'
+                if result.exit_code and backend.turns:
                     result.metadata['usage_scope'] = 'reported_completed_turns'
                 if result.exit_code == 0 and result.metadata.get("finish_reason") != "stop":
                     result.exit_code = 1
@@ -170,8 +188,8 @@ class ProsaicRuntime:
                 emit("completed", exit_code=result.exit_code, token_usage=result.token_usage)
                 return result
             except Cancelled as exc:
-                return Result(130, "", str(exc), token_usage=backend.reported_token_usage if backend else None,
+                return Result(130, "", str(exc), token_usage=backend.reported_token_usage if backend and backend.usage_complete else None,
                               metadata={"failure_reason": "cancelled", 'usage_scope': 'reported_completed_turns'})
             except LimitExceeded as exc:
-                return Result(1, "", str(exc), token_usage=backend.reported_token_usage if backend else None,
+                return Result(1, "", str(exc), token_usage=backend.reported_token_usage if backend and backend.usage_complete else None,
                               metadata={"failure_reason": "budget_exceeded", 'usage_scope': 'reported_completed_turns'})
