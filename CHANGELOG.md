@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- An explicit initial tool choice now fails with `tool_choice_not_honored` if
+  the endpoint omits, substitutes or adds first-turn calls. No returned call is
+  executed on a mismatch and no automatic retry is made. Reported usage is kept.
+  Automatic tool selection remains optional. `initial_tool_enforcement_v1`
+  advertises the stricter contract.
+
 ## 0.3.0 — 2026-09-30
 
 - Successful `read_file` results and events bind the file path, byte SHA-256,

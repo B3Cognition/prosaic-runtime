@@ -469,6 +469,31 @@ class OpenAICompatibleBackend:
                     token_usage_details,
                     turn.token_usage_details,
                 )
+            if turn_number == 1 and initial_tool and payload.get('tools'):
+                names = [_tool_call_name(call) for call in turn.tool_calls]
+                if names != [initial_tool]:
+                    transcript.write('final', finish_reason='tool_choice_not_honored',
+                                     expected_tool=initial_tool, token_usage=token_usage,
+                                     tool_call_count=0, tool_rounds=0)
+                    return CliRunResult(
+                        exit_code=1, stdout='',
+                        stderr=f'endpoint did not honor explicit first-tool choice: {initial_tool}',
+                        token_usage=token_usage,
+                        metadata={
+                            'provider': self.name,
+                            'request_model': str(payload.get('model') or ''),
+                            'provider_error_code': 'tool_choice_not_honored',
+                            'failure_reason': 'tool_choice_not_honored',
+                            'expected_tool': initial_tool,
+                            'observed_tool_call_count': len(names),
+                            'tool_call_count': 0, 'tool_rounds': 0,
+                            'streamed': turn.streamed,
+                            'finish_reason': turn.finish_reason,
+                            'http_status': turn.http_status,
+                            'token_usage_details': token_usage_details,
+                            **_transcript_metadata(transcript),
+                        },
+                    )
             if turn.tool_calls:
                 if tools_disabled:
                     return CliRunResult(

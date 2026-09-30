@@ -10,6 +10,13 @@ still validate the observed events. Defaults remain unchanged.
 
 Execute neutral Prosaic commands and agents on OpenAI-compatible Chat Completions endpoints. A Python library and CLI for small, bounded tasks with streaming, tool calls, explicit filesystem permissions, and structured results.
 
+Unreleased hardening: explicit `initial_tool` selections now reject omitted,
+substituted or additional first-turn tool calls before executing any of them.
+Failure is `tool_choice_not_honored`, with reported token usage retained and no
+automatic retry. This does not prove successful tool execution or correct tool
+arguments; consumers must still validate receipts. Stream deltas are provisional
+until the final result succeeds. This behavior is not in the v0.3.0 release.
+
 ## First run: from installation to an answer
 
 Follow these steps in order in one terminal. Commands below target macOS, Linux,

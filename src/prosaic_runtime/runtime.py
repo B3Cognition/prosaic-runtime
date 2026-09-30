@@ -61,7 +61,7 @@ class _BoundedBackend(OpenAICompatibleBackend):
 
 
 class ProsaicRuntime:
-    capabilities = frozenset({'read_receipts_v1', 'initial_tool_v1'})
+    capabilities = frozenset({'read_receipts_v1', 'initial_tool_v1', 'initial_tool_enforcement_v1'})
     def __init__(self, config: RuntimeConfig, *, source=".prosaic", executable="prosaic"):
         self.config = config
         self.source = Path(source)
