@@ -4,6 +4,7 @@ from pathlib import Path
 import os
 import time
 import json
+import urllib.request
 
 from .artifacts import ProsaicArtifact, inspect_artifact
 from .config import RuntimeConfig
@@ -15,6 +16,11 @@ from .types import Invocation, Result
 
 class LimitExceeded(ValueError):
     pass
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
 
 
 def _reported_usage(details):
@@ -47,6 +53,9 @@ class _BoundedBackend(OpenAICompatibleBackend):
         self.reported_token_usage = None
         self.usage_complete = True
         self.turns = 0
+
+    def open_http(self, request, *, timeout):
+        return urllib.request.build_opener(_NoRedirect()).open(request, timeout=timeout)
 
     def read_response(self, response):
         check_cancelled()

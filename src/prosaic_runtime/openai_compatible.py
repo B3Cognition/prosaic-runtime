@@ -81,6 +81,9 @@ class OpenAICompatibleBackend:
         """Host-specific guards may reject a request before transport."""
         pass
 
+    def open_http(self, request, *, timeout):
+        return urllib.request.urlopen(request, timeout=timeout)
+
     def prepare_constrained_prompt(self, request: CliRunRequest) -> str:
         return request.prompt
 
@@ -154,7 +157,7 @@ class OpenAICompatibleBackend:
                 headers=headers,
                 method="POST",
             )
-            with urllib.request.urlopen(
+            with self.open_http(
                 http_request, timeout=request.timeout_s
             ) as response:
                 body = response.read(max_capture_bytes + 1)
@@ -248,7 +251,7 @@ class OpenAICompatibleBackend:
         )
         deadline = time.monotonic() + max(0.001, request.timeout_s)
         try:
-            with urllib.request.urlopen(
+            with self.open_http(
                 http_request, timeout=request.timeout_s
             ) as response:
                 if streaming and _is_sse_response(response):
@@ -823,7 +826,7 @@ class OpenAICompatibleBackend:
         )
         timeout = max(0.001, min(request.timeout_s, deadline - time.monotonic()))
         try:
-            with urllib.request.urlopen(http_request, timeout=timeout) as response:
+            with self.open_http(http_request, timeout=timeout) as response:
                 if streaming and _is_sse_response(response):
                     _progress("stream: connected; waiting for model deltas")
                     return self._read_sse_turn(response, deadline)

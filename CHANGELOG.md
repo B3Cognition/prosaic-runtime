@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Public Runtime inference rejects HTTP redirects rather than forwarding
+  endpoint bearer credentials to another destination. Diagnostics already
+  rejected redirects; real two-server tests cover tool and no-tool inference.
+
 - No-tool HTTP requests now enforce the serialized input-byte limit, including
   request overhead, just like tool-loop requests.
 
