@@ -151,6 +151,19 @@ def test_expired_inspection_budget_does_not_start_second_inspection(monkeypatch)
     assert result.timed_out and result.exit_code == 1
 
 
+@pytest.mark.parametrize('phase', ['final', 'acquisition'])
+def test_inspection_timeout_is_a_runtime_result_not_an_uncaught_exception(tmp_path, phase):
+    executable = tmp_path / 'slow-prosaic'
+    executable.write_text('#!/usr/bin/env python3\nimport time\ntime.sleep(1)\n')
+    executable.chmod(0o700)
+    engine = runtime(executable=str(executable))
+    result = engine.run('subagents/slow.md' if phase == 'final' else artifact('read'),
+        acquisition='subagents/slow.md' if phase == 'acquisition' else None,
+        policy=policy(timeout_s=0.05))
+    assert result.exit_code == 1 and result.timed_out
+    assert result.metadata['failure_reason'] == 'inspection_timeout'
+
+
 @pytest.mark.parametrize('key,value', [('model_tier', 'strong'), ('effort', 'high')])
 def test_acquisition_cannot_reroute_or_override_final_effort(key, value):
     with pytest.raises(ValueError, match=f'acquisition {key}'):

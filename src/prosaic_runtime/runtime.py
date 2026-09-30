@@ -4,6 +4,7 @@ from pathlib import Path
 import os
 import time
 import json
+import subprocess
 import urllib.request
 
 from .artifacts import ProsaicArtifact, inspect_artifact
@@ -203,6 +204,9 @@ class ProsaicRuntime:
             except Cancelled as exc:
                 return Result(130, "", str(exc), token_usage=backend.reported_token_usage if backend and backend.usage_complete else None,
                               metadata={"failure_reason": "cancelled", 'usage_scope': 'reported_completed_turns'})
+            except subprocess.TimeoutExpired:
+                return Result(1, '', 'Prosaic inspection timed out', timed_out=True,
+                              metadata={'failure_reason': 'inspection_timeout'})
             except LimitExceeded as exc:
                 return Result(1, "", str(exc), token_usage=backend.reported_token_usage if backend and backend.usage_complete else None,
                               metadata={"failure_reason": "budget_exceeded", 'usage_scope': 'reported_completed_turns'})

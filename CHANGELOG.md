@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Prosaic inspection deadlines return an unsuccessful `inspection_timeout`
+  result instead of leaking a subprocess timeout exception from `run()`.
+
 - Public Runtime inference rejects HTTP redirects rather than forwarding
   endpoint bearer credentials to another destination. Diagnostics already
   rejected redirects; real two-server tests cover tool and no-tool inference.

@@ -427,6 +427,14 @@ The shared transport, stream parser, tool loop, compaction and filtering origina
 
 ## Development
 
+Unreleased hardening: HTTP inference rejects redirects to protect endpoint
+credentials. No-tool and tool-loop requests both obey the serialized byte bound.
+Prosaic inspection timeouts return a failed `Result`. Public usage totals remain
+unknown (`None`) when any completed turn lacks complete, nonnegative integer
+usage. `token_usage_status` distinguishes unknown from reported totals; real
+reported zero remains zero. Known partial sums are diagnostic
+`reported_token_usage`, not a complete total for a consumer token budget.
+
 ```sh
 python -m pip install -e '.[test]'
 pytest
