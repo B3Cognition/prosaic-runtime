@@ -1,8 +1,8 @@
 # Custom command-line tools: discover, preflight, execute
 
-This feature requires Runtime v0.5.0+, Prosaic v0.2.0+ for catalogue discovery,
-and Harness v0.4.0+ for workflow integration. Runtime does not require the
-new Prosaic catalogue command to execute tools: it validates trusted manifests
+The current setup uses Runtime v0.5.1+, Python Prosaic v0.3.0 (installed
+automatically), and Harness v0.4.1+ for workflow integration. Runtime does not
+require the Prosaic catalogue command to execute tools: it validates trusted manifests
 itself. Agent Markdown is still parsed exclusively through `prosaic inspect`.
 
 ## Who does what?
@@ -100,12 +100,14 @@ prosaic tools --source examples/.prosaic
 prosaic tools --directory /absolute/path/to/tool-manifests
 ```
 
-If your installed Prosaic CLI is older, build the companion source checkout
-(`npm install`, then `npm run build` in that checkout) and invoke its compiled CLI
-directly. With sibling checkouts, from the Runtime repository root:
+If another application's older Prosaic CLI is on PATH, activate the Runtime
+environment and reinstall the package with its pinned Python dependency:
 
 ```sh
-node ../prosaic/dist/cli/index.js tools --source examples/.prosaic
+source .venv/bin/activate
+python -m pip install .
+prosaic --version
+prosaic tools --source examples/.prosaic
 ```
 
 This does not replace the Prosaic installation used by another application.

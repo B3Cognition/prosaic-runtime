@@ -5,7 +5,7 @@
 See the [step-by-step CLI-tool guide](../docs/cli-tools.md) for installation,
 manifest discovery, Markdown declarations, offline preflight, execution, failure
 behavior, and the optional actual Understanding CLI adapter. This feature needs
-Runtime v0.5.0+; catalogue discovery uses Prosaic v0.2.0+.
+Runtime v0.5.1+; Python Prosaic v0.3.0 is installed automatically.
 
 From this repository root, with the updated checkout installed:
 

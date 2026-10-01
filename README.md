@@ -1,5 +1,11 @@
 # Prosaic Runtime
 
+Version 0.5.1 installs Python Prosaic 0.3.0 automatically at an immutable Git
+revision. Installation and CI no longer require Node.js or npm.
+
+See the [prompt-injection audit and remaining isolation gaps](docs/security.md)
+before granting tools access to sensitive workspaces.
+
 Version 0.5.0 adds [custom CLI tools, discovery and offline preflight](docs/cli-tools.md),
 with a complete runnable CLI and an optional Understanding adapter.
 
@@ -34,18 +40,15 @@ Local and hosted endpoints both work; hosted calls may incur provider charges.
 
 ### 1. Check prerequisites
 
-Install Git, Python 3.11 or newer (with pip and venv), and Node.js 20 or newer
-(with npm), then check:
+Install Git and Python 3.11 or newer (with pip and venv), then check:
 
 ```sh
 git --version
 python3 --version
-node --version
-npm --version
 ```
 
-Use a Python executable that reports 3.11+ throughout. Prosaic itself is a Node.js
-CLI used to inspect neutral prose; the runtime executes that prose in Python.
+Use a Python executable that reports 3.11+ throughout. Prosaic 0.3.0 and the
+runtime are Python packages; Node.js and npm are not required.
 
 ### 2. Install
 
@@ -55,28 +58,16 @@ an isolated Python environment; no sudo or global Python installation is needed:
 ```sh
 git clone https://github.com/B3Cognition/prosaic-runtime.git
 cd prosaic-runtime
-git checkout v0.5.0
+git checkout v0.5.1
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install .
 ```
 
-Install the tested Prosaic revision inside this checkout, and link its CLI into
-the same virtual environment:
-
-```sh
-mkdir -p .tools
-git clone https://github.com/B3Cognition/prosaic.git .tools/prosaic
-cd .tools/prosaic
-git checkout v0.2.0
-npm ci
-npm install --global --prefix "$VIRTUAL_ENV" "$PWD"
-cd ../..
-```
-
-Here `--global` uses the explicit virtual-environment prefix, not the system
-installation directory. Keep `.tools/prosaic` in place: the installed CLI links
-to that checkout.
+The package automatically installs Python Prosaic v0.3.0 at immutable commit
+`cdc9acddf3e58e5563cef06e0db918b5e3729148` into the same environment. No global
+installation or retained TypeScript checkout is needed. Older Runtime release
+tags retain their historical installation docs.
 
 Confirm both commands are available:
 
@@ -86,7 +77,7 @@ prosaic-runtime --help
 ```
 
 For future terminals, enter the checkout and run `source .venv/bin/activate`
-again. The Python package installs PyYAML automatically.
+again. The Python package installs Prosaic, PyYAML and jsonschema automatically.
 
 ### 3. Open the ready-made examples
 
@@ -284,10 +275,9 @@ Inference is never a fallback for a failed default doctor check: only the explic
 
 | Symptom | Check or fix |
 | --- | --- |
-| `python3`, `node`, or `npm` missing | Install the prerequisites from step 1; on some Linux systems, Python venv is a separate OS package. |
-| npm reports audit or deprecation warnings | These refer to Prosaic's pinned dependency tree. Review `npm audit` in `.tools/prosaic`; do not blindly apply forced dependency upgrades. Warnings alone do not prove installation failed—check both CLI help commands. |
+| `python3` missing | Install the prerequisites from step 1; on some Linux systems, Python venv is a separate OS package. |
 | `prosaic-runtime` not found | Activate `.venv` from the checkout root and rerun `python -m pip install .`. |
-| `prosaic` not found | Activate `.venv`, enter `.tools/prosaic`, and rerun `npm install --global --prefix "$VIRTUAL_ENV" "$PWD"`. |
+| `prosaic` not found | Activate `.venv` and repeat the pinned Python Prosaic installation in step 2. |
 | No configuration or artifact found | Run from `examples/`; otherwise pass `--config` and `--source` explicitly. |
 | YAML error | Use spaces for indentation and preserve the nested structure shown above. |
 | Connection refused or timeout | Start the local endpoint or check its host, port, connectivity, and availability. |
