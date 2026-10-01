@@ -2,8 +2,8 @@
 
 ## Staged acquisition and explicit preloading
 
-This opt-in API is on the development branch, not the published v0.3.0 package.
-Install this checkout into your environment first (`python -m pip install -e .`),
+This opt-in API requires Runtime v0.4.0 or newer.
+Install this checkout into your environment first (`python -m pip install .`),
 with the Prosaic CLI on PATH as described in the root README. Export
 `TOKENPROXY_KEY` from your shell configuration; no key belongs in YAML.
 

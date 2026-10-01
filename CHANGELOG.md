@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 — 2026-10-01
 
 - Prosaic inspection deadlines return an unsuccessful `inspection_timeout`
   result instead of leaking a subprocess timeout exception from `run()`.

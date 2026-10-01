@@ -10,12 +10,13 @@ still validate the observed events. Defaults remain unchanged.
 
 Execute neutral Prosaic commands and agents on OpenAI-compatible Chat Completions endpoints. A Python library and CLI for small, bounded tasks with streaming, tool calls, explicit filesystem permissions, and structured results.
 
-Unreleased hardening: explicit `initial_tool` selections now reject omitted,
+Version 0.4.0 hardening: explicit `initial_tool` selections now reject omitted,
 substituted or additional first-turn tool calls before executing any of them.
 Failure is `tool_choice_not_honored`, with reported token usage retained and no
 automatic retry. This does not prove successful tool execution or correct tool
 arguments; consumers must still validate receipts. Stream deltas are provisional
-until the final result succeeds. This behavior is not in the v0.3.0 release.
+until the final result succeeds. Version 0.4.0 also adds opt-in acquisition prose
+and the bounded execution fixes described below.
 
 ## First run: from installation to an answer
 
@@ -47,7 +48,7 @@ an isolated Python environment; no sudo or global Python installation is needed:
 ```sh
 git clone https://github.com/B3Cognition/prosaic-runtime.git
 cd prosaic-runtime
-git checkout v0.3.0
+git checkout v0.4.0
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install .
@@ -342,7 +343,7 @@ An orchestrator can pass `ProsaicArtifact.from_inspection(inspect_json)` to avoi
 
 ## Tools and authority
 
-### Opt-in acquisition (development branch)
+### Opt-in acquisition (v0.4.0+)
 
 Pass `acquisition="subagents/acquire-pilot.md"` to `runtime.run()` to send a
 short neutral Prosaic artifact first. The final artifact body, resources and
@@ -357,7 +358,7 @@ too, then restored for analysis. Subsequent tool selection is automatic.
 A missing/substituted/extra first call blocks with `tool_choice_not_honored`;
 a failed required tool blocks with `acquisition_failed`. Neither failure retries
 nor switches to preloading. `acquisition_v1` advertises support. Existing calls
-without this option retain their behavior. These changes are not in v0.3.0 yet.
+without this option retain their behavior. Acquisition requires Runtime v0.4.0+.
 
 Run the complete staged and no-tool examples from this checkout:
 
@@ -427,7 +428,7 @@ The shared transport, stream parser, tool loop, compaction and filtering origina
 
 ## Development
 
-Unreleased hardening: HTTP inference rejects redirects to protect endpoint
+Version 0.4.0 hardening: HTTP inference rejects redirects to protect endpoint
 credentials. No-tool and tool-loop requests both obey the serialized byte bound.
 Prosaic inspection timeouts return a failed `Result`. Public usage totals remain
 unknown (`None`) when any completed turn lacks complete, nonnegative integer
