@@ -1,0 +1,22 @@
+# Operator trust: inspect these manifests and their executables before enabling.
+tool_directories: [.prosaic/tools]
+allowed_tools: [analyze_spec]
+default_profile: qwen
+routes: {balanced: qwen}
+limits: {timeout_s: 180, max_tool_rounds: 4}
+profiles:
+  qwen: &endpoint
+    base_url: http://10.16.81.27:8080/v1
+    api_key_env: TOKENPROXY_KEY
+    model: qwen36-35b-a3b
+    max_tokens: 2048
+    features: {streaming: true, stream_options: true}
+  ornith:
+    <<: *endpoint
+    model: ornith-1.5-35b
+  deepseek:
+    <<: *endpoint
+    model: deepseek-v4-flash
+  nemotron:
+    <<: *endpoint
+    model: nemotron-3.5-lightning

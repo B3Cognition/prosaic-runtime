@@ -13,10 +13,16 @@ from .diagnostics import doctor, smoke, failure_hint
 
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
-    mode = argv.pop(0) if argv and argv[0] in {"doctor", "smoke"} else "run"
+    mode = argv.pop(0) if argv and argv[0] in {"doctor", "smoke", "preflight"} else "run"
     parser = argparse.ArgumentParser(prog="prosaic-runtime")
     if mode == "run":
         parser.add_argument("artifact", help="Prosaic artifact identifier (also: doctor or smoke subcommands)")
+    if mode == 'preflight':
+        target = parser.add_mutually_exclusive_group(required=True)
+        target.add_argument('--agent', help='Prosaic artifact identifier to check without inference')
+        target.add_argument('--all-tools', action='store_true', help='check every registered/configured tool')
+    if mode == 'run':
+        parser.add_argument('--initial-tool', help='require this granted tool as the first native call')
     parser.add_argument("--source", default=".prosaic")
     parser.add_argument("--config", help="YAML configuration (default: prosaic-runtime.yaml, then prosaic-runtime.yml)")
     parser.add_argument("--arguments", default="")
@@ -45,9 +51,20 @@ def main(argv=None):
         policy = RunPolicy(frozenset(args.allow_tool), tuple(args.read_root), tuple(args.write_path),
                            tuple(args.forbid_root),
                            args.timeout if args.timeout is not None else config.limits.timeout_s,
-                           args.max_tool_rounds if args.max_tool_rounds is not None else config.limits.max_tool_rounds)
+                           args.max_tool_rounds if args.max_tool_rounds is not None else config.limits.max_tool_rounds,
+                           initial_tool=getattr(args, 'initial_tool', None))
         with Progress(args.quiet or args.events) as progress:
             sink = emit if args.events else progress
+            if mode == 'preflight':
+                runtime = ProsaicRuntime(config, source=args.source)
+                report = runtime.preflight(args.agent, all_tools=args.all_tools, cwd=args.cwd, policy=policy)
+                if args.output == 'text':
+                    print(f"preflight: {'passed' if report['ok'] else 'failed'}")
+                    for name, check in report['checks'].items():
+                        print(f"{name}: {check['status']} — {check['message']}")
+                else:
+                    emit(report)
+                return 0 if report['ok'] else 1
             if mode != "run":
                 profile = args.profile or config.default_profile
                 if profile not in config.profiles:

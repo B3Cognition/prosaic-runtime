@@ -1,0 +1,20 @@
+# Optional application-owned executable. This does not install Echelon.
+schema_version: 1
+name: understanding
+tool_version: "adapter-1"
+description: Analyze a specification using the installed Understanding CLI and return its JSON report.
+executable: understanding
+argv: ["scan", "{spec}", "--basic", "--json"]
+parameters:
+  type: object
+  additionalProperties: false
+  required: [spec]
+  properties:
+    spec:
+      type: string
+      description: Specification file inside the host-granted read roots.
+path_parameters: {spec: read}
+version_probe: ["--version"]
+output_format: json
+timeout_s: 60
+max_output_bytes: 1048576

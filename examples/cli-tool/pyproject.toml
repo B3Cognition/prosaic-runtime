@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "prosaic-example-analyzer"
+version = "1.0.0"
+description = "Synthetic CLI-tool example, not the Echelon Understanding analyzer"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+
+[project.scripts]
+prosaic-example-analyzer = "prosaic_example_analyzer:main"
+
+[tool.setuptools]
+py-modules = ["prosaic_example_analyzer"]

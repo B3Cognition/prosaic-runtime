@@ -15,6 +15,17 @@ class ToolDeadlineExceeded(TimeoutError):
     """The shared invocation deadline expired at a callback boundary."""
 
 
+class ToolExecutionError(RuntimeError):
+    """A safe machine code, never raw subprocess output or exception text."""
+    def __init__(self, code):
+        if code not in {'cli_unavailable', 'cli_environment', 'cli_timeout', 'cli_output_limit',
+                        'cli_path_denied', 'cli_context', 'cli_arguments', 'cli_exit',
+                        'cli_invalid_output', 'cli_version'}:
+            raise ValueError('unknown tool error code')
+        self.code = code
+        super().__init__(code)
+
+
 def depth(value):
     """Validate finite JSON data, bounding traversal before serialization."""
     stack = [(value, 0, frozenset())]
@@ -172,6 +183,9 @@ def execute_custom_tool(tool, raw_arguments, *, check_boundary):
         value = tool.handler(deepcopy(arguments))
     except (Cancelled, ToolDeadlineExceeded):
         raise
+    except ToolExecutionError as exc:
+        check_boundary()
+        return {'status': 'error', 'error': exc.code}
     except Exception:
         check_boundary()
         return {'status': 'error', 'error': 'handler_error'}

@@ -14,7 +14,8 @@ from .events import Cancelled, check_cancelled, event_context, emit
 from .openai_compatible import OpenAICompatibleBackend
 from .policy import RunPolicy, requested_tools, BUILTIN_TOOLS
 from .types import Invocation, Result
-from .tools import validate_custom_tools, custom_descriptors, ToolDeadlineExceeded
+from .tools import validate_custom_tools, custom_descriptors, ToolDeadlineExceeded, ToolExecutionError
+from .cli_tools import load_cli_tools, cli_tool_context
 from .tool_registry import BoundedToolRegistry
 
 
@@ -118,20 +119,70 @@ class _BoundedBackend(OpenAICompatibleBackend):
 
 
 class ProsaicRuntime:
-    capabilities = frozenset({'read_receipts_v1', 'initial_tool_v1', 'initial_tool_enforcement_v1', 'acquisition_v1', 'custom_tools_v1'})
+    capabilities = frozenset({'read_receipts_v1', 'initial_tool_v1', 'initial_tool_enforcement_v1', 'acquisition_v1', 'custom_tools_v1', 'cli_tools_v1'})
     def __init__(self, config: RuntimeConfig, *, source=".prosaic", executable="prosaic", custom_tools=None):
         self.config = config
         self.source = Path(source)
         self.executable = executable
         self._custom_tools = validate_custom_tools(custom_tools)
+        self._cli_tools = load_cli_tools(config.tool_directories)
+        if self._custom_tools.keys() & self._cli_tools.keys():
+            raise ValueError('duplicate custom tool registration and CLI manifest')
+        self._custom_tools.update({name: tool.custom_tool() for name, tool in self._cli_tools.items()})
 
     @property
     def tool_descriptors(self):
         return MappingProxyType(custom_descriptors(self._custom_tools))
 
+    @property
+    def cli_tool_names(self):
+        return frozenset(self._cli_tools)
+
     @classmethod
     def from_config(cls, path=None, **kwargs):
         return cls(RuntimeConfig.load(path), **kwargs)
+
+    def _preflight_names(self, names, cwd, policy, env, deadline):
+        checks = {}
+        for name in sorted(names):
+            error = None
+            if name not in BUILTIN_TOOLS and name not in self._custom_tools:
+                error = 'not_registered'
+            elif name not in self.config.allowed_tools or name not in policy.allowed_tools:
+                error = 'not_granted'
+            elif name in self._cli_tools:
+                try:
+                    self._cli_tools[name].preflight(cwd, policy, env, deadline)
+                except ToolExecutionError as exc:
+                    error = exc.code
+            else:
+                from .policy import READ_TOOLS, WRITE_TOOLS
+                if name in READ_TOOLS and not policy.read_roots:
+                    error = 'missing_read_roots'
+                elif name in WRITE_TOOLS and not policy.write_paths:
+                    error = 'missing_write_paths'
+            checks[name] = {'status': 'error' if error else 'ok',
+                            'message': error or ('registration_available' if name not in self._cli_tools else 'cli_available')}
+        return {'ok': all(c['status'] == 'ok' for c in checks.values()), 'checks': checks,
+                'inference': False}
+
+    def preflight(self, artifact=None, *, all_tools=False, cwd='.', policy=None, env=None):
+        """Offline tool availability/authority check; trusted probes may execute, never inference."""
+        policy = policy or RunPolicy(timeout_s=self.config.limits.timeout_s,
+                                     max_tool_rounds=self.config.limits.max_tool_rounds)
+        deadline = time.monotonic() + policy.timeout_s
+        if all_tools and artifact is not None:
+            raise ValueError('choose an artifact or all_tools, not both')
+        if not all_tools and artifact is None:
+            raise ValueError('preflight requires an artifact or all_tools')
+        if isinstance(artifact, str):
+            artifact = inspect_artifact(artifact, self.source, executable=self.executable,
+                                        timeout_s=min(30, policy.timeout_s))
+        if artifact is not None and not isinstance(artifact, ProsaicArtifact):
+            raise TypeError('preflight requires a Prosaic artifact')
+        names = (self._custom_tools.keys() | self.config.allowed_tools) if all_tools else requested_tools(artifact.frontmatter.get('tools'))
+        return self._preflight_names(names, str(Path(cwd).resolve()), policy,
+                                     dict(os.environ if env is None else env), deadline)
 
     def run(self, artifact: str | ProsaicArtifact, arguments: str = "", *,
             cwd: str | Path = ".", policy: RunPolicy | None = None,
@@ -141,7 +192,8 @@ class ProsaicRuntime:
                                      max_tool_rounds=self.config.limits.max_tool_rounds)
         started = time.monotonic()
         backend = None
-        with event_context(on_event, cancelled):
+        invocation_env = dict(os.environ if env is None else env)
+        with event_context(on_event, cancelled), cli_tool_context(cwd, policy, invocation_env, started + policy.timeout_s):
             try:
                 check_cancelled()
                 if isinstance(artifact, str):
@@ -156,6 +208,13 @@ class ProsaicRuntime:
                 unsupported = requested - BUILTIN_TOOLS - self._custom_tools.keys()
                 if unsupported:
                     raise ValueError(f"unsupported tools: {sorted(unsupported)}")
+                cli_requested = requested & self._cli_tools.keys()
+                if cli_requested:
+                    report = self._preflight_names(cli_requested, str(Path(cwd).resolve()), policy,
+                                                   invocation_env, started + policy.timeout_s)
+                    if not report['ok']:
+                        failed = {name: check['message'] for name, check in report['checks'].items() if check['status'] != 'ok'}
+                        raise ValueError(f'CLI tool preflight failed: {failed}')
                 tools = requested & self.config.allowed_tools & frozenset(policy.allowed_tools)
                 if policy.initial_tool is not None and policy.initial_tool not in tools:
                     raise ValueError('initial_tool must be granted by prose, runtime and host')
@@ -213,7 +272,7 @@ class ProsaicRuntime:
                      model=endpoint.model, tools=sorted(tools))
                 backend = _BoundedBackend(endpoint, policy.max_input_bytes, self._custom_tools, started + policy.timeout_s)
                 result = backend.run_prompt(Invocation(
-                    str(Path(cwd).resolve()), prompt, dict(os.environ if env is None else env), remaining,
+                    str(Path(cwd).resolve()), prompt, invocation_env, remaining,
                     {"prompt_metadata": metadata}))
                 if backend.turns:
                     result.token_usage = backend.reported_token_usage if backend.usage_complete else None

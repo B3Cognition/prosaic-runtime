@@ -52,12 +52,15 @@ class RuntimeConfig:
     default_profile: str
     allowed_tools: frozenset[str] = frozenset()
     limits: RunLimits = field(default_factory=RunLimits)
+    tool_directories: tuple[str, ...] = ()
 
     def __post_init__(self):
         if self.default_profile not in self.profiles:
             raise ValueError("default_profile does not name a configured profile")
         if any(profile not in self.profiles for profile in self.routes.values()):
             raise ValueError("route references an unknown profile")
+        if not isinstance(self.tool_directories, tuple) or any(not isinstance(p, str) or not p for p in self.tool_directories):
+            raise ValueError('tool_directories must contain explicit trusted directory paths')
 
     @classmethod
     def load(cls, path: str | Path | None = None):
@@ -72,19 +75,23 @@ class RuntimeConfig:
             raw = yaml.safe_load(path.read_text(encoding="utf-8"))
             if not isinstance(raw, dict):
                 raise ValueError("expected a mapping")
-            if set(raw) - {"profiles", "routes", "default_profile", "allowed_tools", "limits"}:
+            if set(raw) - {"profiles", "routes", "default_profile", "allowed_tools", "limits", "tool_directories"}:
                 raise ValueError("unknown configuration keys")
             if not isinstance(raw.get("profiles"), dict) or not isinstance(raw.get("routes", {}), dict):
                 raise ValueError("profiles and routes must be mappings")
             allowed = raw.get("allowed_tools", [])
             if not isinstance(allowed, list) or not all(isinstance(tool, str) for tool in allowed):
                 raise ValueError("allowed_tools must be a list of tool names")
+            directories = raw.get('tool_directories', [])
+            if not isinstance(directories, list) or any(not isinstance(p, str) or not p for p in directories):
+                raise ValueError('tool_directories must be a list of trusted paths')
             return cls(
                 profiles={key: EndpointConfig(**value) for key, value in raw["profiles"].items()},
                 routes=raw.get("routes", {}),
                 default_profile=raw["default_profile"],
                 allowed_tools=frozenset(allowed),
                 limits=RunLimits(**raw.get("limits", {})),
+                tool_directories=tuple(str((path.resolve().parent / p).resolve()) for p in directories),
             )
         except (yaml.YAMLError, KeyError, TypeError, ValueError, AttributeError) as exc:
             raise ValueError(f"Invalid runtime configuration {path}: {exc}") from exc

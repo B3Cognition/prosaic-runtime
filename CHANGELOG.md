@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## 0.5.0 — 2026-10-01
+
+- Operator-trusted YAML CLI-tool manifests, fixed executable/argv execution
+  without a shell, explicit environment grants, read-root validation, bounded
+  subprocess output/time, cancellation and offline availability/version preflight.
+  Runtime `preflight` checks an agent or all tools without model requests.
+- Complete installable CLI analyzer, neutral Markdown, HTTP/SSE runner and optional
+  actual Understanding adapter; host Python callback and CLI-tool guides.
+- CLI descriptors bind manifest semantics and resolved executable paths; relative
+  PATH lookup is canonicalized before changing the tool's working directory.
+  Tools remain trusted host code, not an OS sandbox or complete injection defense.
+- Release verification: 265 Runtime tests pass, including native HTTP/SSE and
+  CLI boundary cases; source distribution and wheel build successfully. The
+  earlier development campaign results below are retained as dated observations.
+
 - Immutable host-registered `CustomTool` API, strict closed-schema validation,
   finite JSON/result bounds, authorization predicate, native HTTP/SSE execution,
   versioned structural events, and a runnable catalogue example. Registration

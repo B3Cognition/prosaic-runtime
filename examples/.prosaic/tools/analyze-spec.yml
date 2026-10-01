@@ -1,0 +1,20 @@
+schema_version: 1
+name: analyze_spec
+tool_version: "1.0"
+description: Count synthetic REQ lines and report explicitly vague wording. Not a full quality gate.
+executable: prosaic-example-analyzer
+argv: ["{spec}", "--json"]
+parameters:
+  type: object
+  additionalProperties: false
+  required: [spec]
+  properties:
+    spec:
+      type: string
+      description: Specification file inside the host-granted read roots.
+path_parameters: {spec: read}
+version_probe: ["--version"]
+version_contains: prosaic-example-analyzer 1.0
+output_format: json
+timeout_s: 10
+max_output_bytes: 65536

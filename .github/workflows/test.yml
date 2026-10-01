@@ -19,7 +19,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: B3Cognition/prosaic
-          ref: b6c97013880bd6517d1e5a67b43ed985719af9f1
+          ref: 5e0423a289342547d1666db484330ac6adb4743a
           path: .ci-prosaic
       - run: npm ci
         working-directory: .ci-prosaic

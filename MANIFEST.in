@@ -1,2 +1,5 @@
 recursive-include examples *.md *.yml *.yaml *.json *.py
+include examples/cli-tool/pyproject.toml
+include docs/cli-tools.md
+prune examples/cli-tool/build
 global-exclude *.local.yml *.local.yaml

@@ -1,8 +1,11 @@
 # Prosaic Runtime
 
-Development-only: [host-registered custom tools](examples/README.md#host-registered-custom-tools)
-add validated Python callbacks with native function calling. Install this feature
-checkout; published v0.4.0 does not yet contain this API.
+Version 0.5.0 adds [custom CLI tools, discovery and offline preflight](docs/cli-tools.md),
+with a complete runnable CLI and an optional Understanding adapter.
+
+Version 0.5.0 also adds [host-registered custom tools](examples/README.md#host-registered-custom-tools):
+validated Python callbacks with native function calling. Both APIs are opt-in;
+tools execute trusted host code, not sandboxed code.
 
 Version 0.3.0 harness support: `tool_completed` events for successful `read_file`
 now include `read_receipts` with path, SHA-256 of the bytes actually read, offset,
@@ -52,7 +55,7 @@ an isolated Python environment; no sudo or global Python installation is needed:
 ```sh
 git clone https://github.com/B3Cognition/prosaic-runtime.git
 cd prosaic-runtime
-git checkout v0.4.0
+git checkout v0.5.0
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install .
@@ -65,7 +68,7 @@ the same virtual environment:
 mkdir -p .tools
 git clone https://github.com/B3Cognition/prosaic.git .tools/prosaic
 cd .tools/prosaic
-git checkout 0f7e187
+git checkout v0.2.0
 npm ci
 npm install --global --prefix "$VIRTUAL_ENV" "$PWD"
 cd ../..
@@ -392,7 +395,10 @@ prosaic-runtime subagents/reviewer.md --allow-tool read_file --read-root ./evide
 
 Paths are relative to `--cwd` (the current directory by default) and must resolve inside it. `--write-path` grants one exact path; `--forbid-root` excludes a path and its descendants. An edit grant allows reading the target as part of replacing its contents. Resolved symlink escapes are rejected. These guards are for the provided file tools; they are not an OS sandbox against concurrent hostile filesystem changes.
 
-The CLI provides no shell, web browsing, recursive agents, workflow scheduler, or application state writer. Hosts retain their output validation, workflow decisions and publication rules.
+The CLI provides no general-purpose shell, web browsing, recursive agents,
+workflow scheduler, or application state writer. Explicitly trusted CLI manifests
+can execute fixed application commands; these processes are not sandboxed.
+Hosts retain their output validation, workflow decisions and publication rules.
 
 ## Limits and events
 

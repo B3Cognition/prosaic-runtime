@@ -1,10 +1,33 @@
 # Run Prosaic prose with and without tools
 
+## Custom command-line tools
+
+See the [step-by-step CLI-tool guide](../docs/cli-tools.md) for installation,
+manifest discovery, Markdown declarations, offline preflight, execution, failure
+behavior, and the optional actual Understanding CLI adapter. This feature needs
+Runtime v0.5.0+; catalogue discovery uses Prosaic v0.2.0+.
+
+From this repository root, with the updated checkout installed:
+
+```sh
+source .venv/bin/activate
+python -m pip install -e examples/cli-tool
+prosaic-example-analyzer examples/evidence/requirements.md --json
+prosaic tools --source examples/.prosaic
+python examples/run_cli_tool.py                  # offline, no model request
+python examples/run_cli_tool.py --live --profile qwen
+```
+
+`prosaic tools` requires the updated Prosaic CLI. With a uv environment without
+pip, use `uv pip install --python .venv/bin/python -e examples/cli-tool`.
+The executable is a normal installed CLI; no Python callback registration is
+needed. Only operator-trusted directories in `tool_directories` are loaded, and
+prose, Runtime YAML and host permissions must all grant the tool.
+
 ## Host-registered custom tools
 
-This development example requires this feature checkout, Python 3.11+ and the
-Prosaic CLI installed using the root first-run guide. Do not checkout the release
-tag for this example. From the repository root:
+This example requires Runtime v0.5.0+, Python 3.11+ and the Prosaic CLI installed
+using the root first-run guide. From the repository root:
 
 ```sh
 source .venv/bin/activate
