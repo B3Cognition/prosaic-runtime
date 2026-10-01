@@ -14,6 +14,11 @@
   both modes; 6/8 Runtime invocations and 6/8 Harness cases succeeded/admitted.
   Explicit-first-tool failures and fabricated no-tool answers stayed blocked;
   no admission rule was relaxed. Wider adversarial hardening/MCP remain queued.
+- Fresh review fixes: preserve malformed custom-call shapes through HTTP/SSE
+  parsing (including invalid stream fragments), and redact callback cancellation
+  messages while retaining exit 130/known usage. Final source tests: 220 Runtime /
+  101 Harness. A second unchanged-policy all-model matrix succeeded in 5/8 Runtime
+  cases and admitted 6/8 Harness cases; zero-call endpoint misses stayed blocked.
 
 ## 0.4.0 — 2026-10-01
 
