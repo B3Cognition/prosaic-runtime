@@ -1,6 +1,7 @@
 # Host-registered custom tools and security boundaries
 
-Status: proposed design, awaiting written-spec approval. No implementation yet.
+Status: stage 1 approved in chat on 2026-10-01; implementation awaits plan review.
+Stages 2 (adversarial hardening) and 3 (MCP evaluation) remain queued.
 
 ## Intent and delivery order
 
@@ -101,6 +102,8 @@ bounded `status: error` tool results with categories `not_granted`,
 or `result_limit`. Do not forward arbitrary exception messages, argument contents
 or secrets. Preserve the normal
 bounded tool loop; do not introduce automatic retries or model escalation.
+Fixed error envelopes are independently bounded to 256 bytes, not truncated
+into invalid JSON when a successful-result limit is smaller than the envelope.
 An explicit initial-tool mismatch still blocks before any call; a failed
 acquisition still blocks before final analysis. Successful custom acquisition
 uses the same existing deadline, model, conversation and shared tool-round limit.
