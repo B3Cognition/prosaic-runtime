@@ -183,3 +183,24 @@ def test_sse_invalid_fragment_cannot_be_dropped_before_valid_arguments(server, t
     ProsaicRuntime(config, custom_tools={'lookup_catalog': tool}).run(
         artifact(['lookup_catalog']), cwd=tmp_path, policy=RunPolicy(allowed_tools=frozenset({'lookup_catalog'})))
     assert seen == []
+
+
+@pytest.mark.parametrize('position', ['handler', 'authorize'])
+def test_callback_cancellation_does_not_leak_exception_text(server, tmp_path, position):
+    from prosaic_runtime.events import Cancelled
+    url, requests, responses = server
+    seen, events = [], []
+    config, _ = setup(url, seen)
+    def cancel(args):
+        raise Cancelled('synthetic-private-key')
+    kwargs = {'authorize': cancel} if position == 'authorize' else {}
+    tool = CustomTool('lookup_catalog', 'Lookup', SCHEMA,
+        cancel if position == 'handler' else lambda a: seen.append(a), 'v1', **kwargs)
+    responses.extend([completion('', [call()]), completion('done')])
+    result = ProsaicRuntime(config, custom_tools={'lookup_catalog': tool}).run(
+        artifact(['lookup_catalog']), cwd=tmp_path, policy=RunPolicy(allowed_tools=frozenset({'lookup_catalog'})),
+        on_event=events.append)
+    assert result.exit_code == 130 and result.token_usage == 7 and len(requests) == 1
+    assert result.stderr == 'invocation cancelled'
+    assert 'synthetic-private-key' not in json.dumps(events) + json.dumps(result.metadata) + result.stderr
+    assert seen == []

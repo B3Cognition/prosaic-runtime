@@ -233,8 +233,8 @@ class ProsaicRuntime:
                     result.metadata.update(acquisition_id=acquisition.id, acquisition_sha256=acquisition.digest)
                 emit("completed", exit_code=result.exit_code, token_usage=result.token_usage)
                 return result
-            except Cancelled as exc:
-                return Result(130, "", str(exc), token_usage=backend.reported_token_usage if backend and backend.usage_complete else None,
+            except Cancelled:
+                return Result(130, "", 'invocation cancelled', token_usage=backend.reported_token_usage if backend and backend.usage_complete else None,
                               metadata={"failure_reason": "cancelled", 'usage_scope': 'reported_completed_turns'})
             except subprocess.TimeoutExpired:
                 return Result(1, '', 'Prosaic inspection timed out', timed_out=True,
