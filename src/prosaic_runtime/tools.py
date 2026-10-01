@@ -1,0 +1,181 @@
+"""Validated host tools. Callbacks are trusted code, not sandboxed or preemptible."""
+from collections.abc import Mapping, Callable
+from copy import deepcopy
+from dataclasses import dataclass
+import json
+import math
+import re
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import ValidationError, SchemaError
+from .events import Cancelled
+from .policy import BUILTIN_TOOLS
+
+
+class ToolDeadlineExceeded(TimeoutError):
+    """The shared invocation deadline expired at a callback boundary."""
+
+
+def depth(value):
+    """Validate finite JSON data, bounding traversal before serialization."""
+    stack = [(value, 0, frozenset())]
+    maximum = 0
+    while stack:
+        child, level, ancestors = stack.pop()
+        if type(child) in (dict, list):
+            level += 1
+            if level > 64 or id(child) in ancestors:
+                raise ValueError('JSON nesting or cycle')
+            maximum = max(maximum, level)
+            if type(child) is dict and any(type(k) is not str for k in child):
+                raise ValueError('JSON keys must be strings')
+            ancestors = ancestors | {id(child)}
+            stack.extend((v, level, ancestors) for v in
+                         (child.values() if type(child) is dict else child))
+        elif child is not None and type(child) not in (str, bool, int, float):
+            raise ValueError('not JSON data')
+        elif type(child) is float and not math.isfinite(child):
+            raise ValueError('nonfinite number')
+    return maximum
+
+
+def _reject_refs(value):
+    if isinstance(value, dict):
+        if {'$ref', '$dynamicRef'} & value.keys():
+            raise ValueError('tool schemas cannot use references')
+        for child in value.values():
+            _reject_refs(child)
+    elif isinstance(value, list):
+        for child in value:
+            _reject_refs(child)
+
+
+@dataclass(frozen=True, init=False)
+class CustomTool:
+    """Immutable definition; version must change when handler semantics/data change."""
+    name: str
+    description: str
+    _schema_json: str
+    handler: Callable
+    version: str
+    max_argument_bytes: int
+    max_result_bytes: int
+    authorize: Callable | None
+
+    def __init__(self, name, description, parameters, handler, version, *,
+                 max_argument_bytes=16384, max_result_bytes=65536, authorize=None):
+        if not isinstance(name, str) or not re.fullmatch(r'[A-Za-z][A-Za-z0-9_-]{0,63}', name) or name in BUILTIN_TOOLS:
+            raise ValueError('invalid or reserved custom tool name')
+        for label, value, limit in [('description', description, 4096), ('version', version, 128)]:
+            if not isinstance(value, str) or not value.strip() or len(value.encode('utf-8')) > limit:
+                raise ValueError(f'invalid tool {label}')
+        for value in (max_argument_bytes, max_result_bytes):
+            if type(value) is not int or value <= 0:
+                raise ValueError('tool byte limits must be positive integers')
+        if not callable(handler) or (authorize is not None and not callable(authorize)):
+            raise ValueError('handler and authorizer must be callable')
+        try:
+            depth(parameters)
+            if type(parameters) is not dict or parameters.get('type') != 'object' or parameters.get('additionalProperties') is not False:
+                raise ValueError('tool parameters must be a closed object schema')
+            _reject_refs(parameters)
+            schema_json = json.dumps(parameters, sort_keys=True, allow_nan=False)
+            Draft202012Validator.check_schema(json.loads(schema_json))
+        except (TypeError, SchemaError, RecursionError, OverflowError) as exc:
+            raise ValueError('invalid tool schema') from exc
+        for key, value in dict(name=name, description=description, _schema_json=schema_json,
+                               handler=handler, version=version, max_argument_bytes=max_argument_bytes,
+                               max_result_bytes=max_result_bytes, authorize=authorize).items():
+            object.__setattr__(self, key, value)
+
+    @property
+    def parameters(self):
+        return json.loads(self._schema_json)
+
+    @property
+    def descriptor(self):
+        return dict(name=self.name, description=self.description, parameters=self.parameters,
+                    version=self.version, max_argument_bytes=self.max_argument_bytes,
+                    max_result_bytes=self.max_result_bytes, authorization_required=self.authorize is not None)
+
+
+def validate_custom_tools(tools):
+    if tools is None:
+        return {}
+    if not isinstance(tools, Mapping):
+        raise ValueError('custom_tools must be a mapping')
+    snapshot = {}
+    for key, tool in tools.items():
+        if type(tool) is not CustomTool or key != tool.name or key in snapshot:
+            raise ValueError('custom tool registry key mismatch or invalid definition')
+        snapshot[key] = tool
+    return snapshot
+
+
+def custom_descriptors(tools):
+    return {name: tool.descriptor for name, tool in tools.items()}
+
+
+def unique_pairs(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError('duplicate JSON key')
+        result[key] = value
+    return result
+
+
+def reject_constant(value):
+    raise ValueError('nonfinite number')
+
+
+def parse_arguments(raw, schema, maximum):
+    if not isinstance(raw, str) or len(raw.encode('utf-8')) > maximum:
+        raise ValueError('argument limit')
+    arguments = json.loads(raw, object_pairs_hook=unique_pairs, parse_constant=reject_constant)
+    if type(arguments) is not dict:
+        raise ValueError('arguments must be an object')
+    depth(arguments)
+    Draft202012Validator(schema).validate(arguments)
+    return arguments
+
+
+def bounded_result(value, maximum):
+    try:
+        depth(value)
+        envelope = {'status': 'ok', 'result': value}
+        text = json.dumps(envelope, allow_nan=False)
+        if len(text.encode('utf-8')) > maximum:
+            return {'status': 'error', 'error': 'result_limit'}
+        return json.loads(text)
+    except (TypeError, ValueError, RecursionError, OverflowError):
+        return {'status': 'error', 'error': 'invalid_result'}
+
+
+def execute_custom_tool(tool, raw_arguments, *, check_boundary):
+    check_boundary()
+    try:
+        arguments = parse_arguments(raw_arguments, tool.parameters, tool.max_argument_bytes)
+    except (TypeError, ValueError, RecursionError, OverflowError, ValidationError):
+        return {'status': 'error', 'error': 'invalid_arguments'}
+    if tool.authorize is not None:
+        try:
+            allowed = tool.authorize(deepcopy(arguments)) is True
+        except (Cancelled, ToolDeadlineExceeded):
+            raise
+        except Exception:
+            allowed = False
+        check_boundary()
+        if not allowed:
+            return {'status': 'error', 'error': 'authorization_denied'}
+    check_boundary()
+    try:
+        value = tool.handler(deepcopy(arguments))
+    except (Cancelled, ToolDeadlineExceeded):
+        raise
+    except Exception:
+        check_boundary()
+        return {'status': 'error', 'error': 'handler_error'}
+    check_boundary()
+    result = bounded_result(value, tool.max_result_bytes)
+    check_boundary()
+    return result
