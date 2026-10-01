@@ -90,6 +90,12 @@ class OpenAICompatibleBackend:
     def make_registry(self, cwd, features, metadata):
         return _OpenAIToolRegistry(cwd, features, metadata)
 
+    def tool_call_summary(self, tool_call):
+        return _tool_call_summary(tool_call)
+
+    def tool_event_metadata(self, name):
+        return {}
+
     def open_transcript(self, request):
         return open_provider_transcript(Path(request.cwd), self._config.features, request.metadata)
 
@@ -527,7 +533,7 @@ class OpenAICompatibleBackend:
                 if tool_rounds > max_tool_rounds:
                     last_tool_call = turn.tool_calls[-1]
                     last_tool_name = _tool_call_name(last_tool_call)
-                    last_tool_summary = _tool_call_summary(last_tool_call)
+                    last_tool_summary = self.tool_call_summary(last_tool_call)
                     last_model_preview = _single_line_preview(turn.text)
                     failure_detail = (
                         "OpenAI-compatible provider exceeded "
@@ -596,7 +602,7 @@ class OpenAICompatibleBackend:
                 for tool_call in turn.tool_calls:
                     tool_call_count += 1
                     tool_name = _tool_call_name(tool_call)
-                    tool_summary = _tool_call_summary(tool_call)
+                    tool_summary = self.tool_call_summary(tool_call)
                     _progress(f"tool {tool_name}: {tool_summary}")
                     transcript.write(
                         "tool_call",
@@ -606,7 +612,8 @@ class OpenAICompatibleBackend:
                     )
                     call_id = str(tool_call.get("id") or "")
                     call_started = time.monotonic()
-                    emit("tool_started", name=tool_name, call_id=call_id, turn=turn_number)
+                    emit("tool_started", name=tool_name, call_id=call_id, turn=turn_number,
+                         **self.tool_event_metadata(tool_name))
                     tool_message = registry.execute_message(tool_call)
                     tool_payload = json.loads(tool_message["content"])
                     status = tool_payload.get("status", "unknown")
@@ -616,7 +623,7 @@ class OpenAICompatibleBackend:
                                           ("path", "sha256", "offset", "lines_read", "line_count")}]
                     emit("tool_completed", name=tool_name, call_id=call_id, turn=turn_number,
                          status=status, duration_ms=round((time.monotonic() - call_started) * 1000, 3),
-                         read_receipts=read_receipts)
+                         read_receipts=read_receipts, **self.tool_event_metadata(tool_name))
                     tool_result = _tool_result_status(tool_message)
                     _progress(
                         f"tool {tool_name} result: "

@@ -6,6 +6,7 @@ import time
 import json
 import subprocess
 import urllib.request
+from types import MappingProxyType
 
 from .artifacts import ProsaicArtifact, inspect_artifact
 from .config import RuntimeConfig
@@ -13,6 +14,8 @@ from .events import Cancelled, check_cancelled, event_context, emit
 from .openai_compatible import OpenAICompatibleBackend
 from .policy import RunPolicy, requested_tools, BUILTIN_TOOLS
 from .types import Invocation, Result
+from .tools import validate_custom_tools, custom_descriptors, ToolDeadlineExceeded
+from .tool_registry import BoundedToolRegistry
 
 
 class LimitExceeded(ValueError):
@@ -48,12 +51,32 @@ class _BoundedStream:
 
 
 class _BoundedBackend(OpenAICompatibleBackend):
-    def __init__(self, endpoint, max_input_bytes):
+    def __init__(self, endpoint, max_input_bytes, custom_tools, deadline):
         super().__init__(endpoint)
         self.max_input_bytes = max_input_bytes
         self.reported_token_usage = None
         self.usage_complete = True
         self.turns = 0
+        self.custom_tools = custom_tools
+        self.deadline = deadline
+
+    def check_boundary(self):
+        check_cancelled()
+        if time.monotonic() >= self.deadline:
+            raise ToolDeadlineExceeded('invocation deadline exceeded')
+
+    def make_registry(self, cwd, features, metadata):
+        return BoundedToolRegistry(super().make_registry(cwd, features, metadata),
+                                   self.custom_tools, metadata.get('allowed_tools', ()), self.check_boundary)
+
+    def tool_call_summary(self, tool_call):
+        function = tool_call.get('function')
+        if isinstance(function, dict) and function.get('name') in self.custom_tools:
+            return 'host-registered tool (arguments omitted)'
+        return super().tool_call_summary(tool_call)
+
+    def tool_event_metadata(self, name):
+        return {'tool_version': self.custom_tools[name].version} if name in self.custom_tools else {}
 
     def open_http(self, request, *, timeout):
         return urllib.request.build_opener(_NoRedirect()).open(request, timeout=timeout)
@@ -92,11 +115,16 @@ class _BoundedBackend(OpenAICompatibleBackend):
 
 
 class ProsaicRuntime:
-    capabilities = frozenset({'read_receipts_v1', 'initial_tool_v1', 'initial_tool_enforcement_v1', 'acquisition_v1'})
-    def __init__(self, config: RuntimeConfig, *, source=".prosaic", executable="prosaic"):
+    capabilities = frozenset({'read_receipts_v1', 'initial_tool_v1', 'initial_tool_enforcement_v1', 'acquisition_v1', 'custom_tools_v1'})
+    def __init__(self, config: RuntimeConfig, *, source=".prosaic", executable="prosaic", custom_tools=None):
         self.config = config
         self.source = Path(source)
         self.executable = executable
+        self._custom_tools = validate_custom_tools(custom_tools)
+
+    @property
+    def tool_descriptors(self):
+        return MappingProxyType(custom_descriptors(self._custom_tools))
 
     @classmethod
     def from_config(cls, path=None, **kwargs):
@@ -122,8 +150,9 @@ class ProsaicRuntime:
                     "id": artifact.id, "type": artifact.type, "frontmatter": artifact.frontmatter,
                     "body": artifact.body, "resources": list(artifact.resources)})
                 requested = requested_tools(artifact.frontmatter.get("tools"))
-                if requested - BUILTIN_TOOLS:
-                    raise ValueError(f"unsupported tools: {sorted(requested - BUILTIN_TOOLS)}")
+                unsupported = requested - BUILTIN_TOOLS - self._custom_tools.keys()
+                if unsupported:
+                    raise ValueError(f"unsupported tools: {sorted(unsupported)}")
                 tools = requested & self.config.allowed_tools & frozenset(policy.allowed_tools)
                 if policy.initial_tool is not None and policy.initial_tool not in tools:
                     raise ValueError('initial_tool must be granted by prose, runtime and host')
@@ -179,7 +208,7 @@ class ProsaicRuntime:
                     return Result(1, "", "invocation deadline exceeded", timed_out=True)
                 emit("started", artifact_id=artifact.id, artifact_sha256=artifact.digest, profile=profile,
                      model=endpoint.model, tools=sorted(tools))
-                backend = _BoundedBackend(endpoint, policy.max_input_bytes)
+                backend = _BoundedBackend(endpoint, policy.max_input_bytes, self._custom_tools, started + policy.timeout_s)
                 result = backend.run_prompt(Invocation(
                     str(Path(cwd).resolve()), prompt, dict(os.environ if env is None else env), remaining,
                     {"prompt_metadata": metadata}))
@@ -207,6 +236,10 @@ class ProsaicRuntime:
             except subprocess.TimeoutExpired:
                 return Result(1, '', 'Prosaic inspection timed out', timed_out=True,
                               metadata={'failure_reason': 'inspection_timeout'})
+            except ToolDeadlineExceeded:
+                return Result(1, '', 'invocation deadline exceeded', timed_out=True,
+                              token_usage=backend.reported_token_usage if backend and backend.usage_complete else None,
+                              metadata={'failure_reason': 'invocation_timeout', 'usage_scope': 'reported_completed_turns'})
             except LimitExceeded as exc:
                 return Result(1, "", str(exc), token_usage=backend.reported_token_usage if backend and backend.usage_complete else None,
                               metadata={"failure_reason": "budget_exceeded", 'usage_scope': 'reported_completed_turns'})
