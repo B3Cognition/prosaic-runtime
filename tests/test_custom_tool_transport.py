@@ -140,3 +140,46 @@ def test_initial_tool_mismatch_and_cross_invocation_grants(server, tmp_path):
     runtime.run(artifact(['lookup_catalog']), cwd=tmp_path, policy=RunPolicy(allowed_tools=frozenset({'lookup_catalog'})))
     runtime.run(artifact(['lookup_catalog']), cwd=tmp_path)
     assert len(seen) == 1
+
+
+@pytest.mark.parametrize('streaming', [False, True])
+@pytest.mark.parametrize('shape', ['object', 'null', 'missing', 'wrong_type', 'missing_type'])
+def test_malformed_call_shape_cannot_be_normalized_into_custom_execution(server, tmp_path, streaming, shape):
+    url, requests, responses = server
+    seen, events = [], []
+    config, _ = setup(url, seen, streaming)
+    tool = CustomTool('lookup_catalog', 'Optional arguments', {'type': 'object', 'additionalProperties': False},
+                      lambda a: seen.append(a) or {'found': True}, 'v1')
+    malformed = call('{}')
+    if shape == 'object':
+        malformed['function']['arguments'] = {'unexpected': 'ignored'}
+    elif shape == 'null':
+        malformed['function']['arguments'] = None
+    elif shape == 'missing':
+        malformed['function'].pop('arguments')
+    elif shape == 'wrong_type':
+        malformed['type'] = 'not-a-function'
+    else:
+        malformed.pop('type')
+    responses.extend([reply('', [malformed], streaming), reply('done', streaming=streaming)])
+    result = ProsaicRuntime(config, custom_tools={'lookup_catalog': tool}).run(
+        artifact(['lookup_catalog']), cwd=tmp_path,
+        policy=RunPolicy(allowed_tools=frozenset({'lookup_catalog'})), on_event=events.append)
+    assert seen == []
+    assert not any(e['event'] == 'tool_completed' and e['status'] == 'ok' for e in events)
+
+
+def test_sse_invalid_fragment_cannot_be_dropped_before_valid_arguments(server, tmp_path):
+    url, requests, responses = server
+    seen = []
+    config, _ = setup(url, seen, True)
+    tool = CustomTool('lookup_catalog', 'Optional', {'type': 'object', 'additionalProperties': False},
+                      lambda a: seen.append(a), 'v1')
+    chunks = [{'choices': [{'delta': {'tool_calls': [dict(call(None), index=0)]}, 'finish_reason': None}]},
+              {'choices': [{'delta': {'tool_calls': [{'index': 0, 'function': {'arguments': '{}'}}]}, 'finish_reason': 'tool_calls'}]},
+              {'choices': [], 'usage': {'total_tokens': 7}}]
+    responses.extend([('text/event-stream', (''.join('data: ' + json.dumps(c) + '\n\n' for c in chunks) + 'data: [DONE]\n\n').encode()),
+                      reply('done', streaming=True)])
+    ProsaicRuntime(config, custom_tools={'lookup_catalog': tool}).run(
+        artifact(['lookup_catalog']), cwd=tmp_path, policy=RunPolicy(allowed_tools=frozenset({'lookup_catalog'})))
+    assert seen == []

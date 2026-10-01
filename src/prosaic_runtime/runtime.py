@@ -78,6 +78,9 @@ class _BoundedBackend(OpenAICompatibleBackend):
     def tool_event_metadata(self, name):
         return {'tool_version': self.custom_tools[name].version} if name in self.custom_tools else {}
 
+    def strict_tool_names(self):
+        return frozenset(self.custom_tools)
+
     def open_http(self, request, *, timeout):
         return urllib.request.build_opener(_NoRedirect()).open(request, timeout=timeout)
 

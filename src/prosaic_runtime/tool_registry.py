@@ -23,7 +23,7 @@ class BoundedToolRegistry:
         if isinstance(name, str) and name not in self.custom:
             return self.builtin.execute_message(tool_call)
         payload = {'status': 'error', 'error': 'not_granted'}
-        if isinstance(name, str) and name in self.allowed and tool_call.get('type', 'function') == 'function':
+        if isinstance(name, str) and name in self.allowed and tool_call.get('type') == 'function':
             payload = execute_custom_tool(self.custom[name], function.get('arguments'),
                                           check_boundary=self.check_boundary)
         return {'role': 'tool', 'tool_call_id': str(tool_call.get('id') or ''),

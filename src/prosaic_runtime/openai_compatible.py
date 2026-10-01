@@ -96,6 +96,10 @@ class OpenAICompatibleBackend:
     def tool_event_metadata(self, name):
         return {}
 
+    def strict_tool_names(self):
+        """Tools whose raw call shape must survive compatibility normalization."""
+        return frozenset()
+
     def open_transcript(self, request):
         return open_provider_transcript(Path(request.cwd), self._config.features, request.metadata)
 
@@ -894,6 +898,7 @@ class OpenAICompatibleBackend:
             streamed=False,
             http_status=http_status,
             raw_response_headers=raw_response_headers,
+            strict_tool_names=self.strict_tool_names(),
         )
 
     def _read_sse_response(
@@ -955,7 +960,7 @@ class OpenAICompatibleBackend:
         reasoning_content_observed = False
         raw_response_metadata: dict[str, object] = {}
         event_data: list[str] = []
-        tool_accumulator = _ToolCallAccumulator()
+        tool_accumulator = _ToolCallAccumulator(self.strict_tool_names())
         progress_detail = _feature_str(
             self._config.features,
             "progress_detail",
@@ -1129,8 +1134,9 @@ class _BodyResponse:
 
 
 class _ToolCallAccumulator:
-    def __init__(self) -> None:
+    def __init__(self, strict_tool_names=frozenset()) -> None:
         self._calls: dict[int, dict[str, object]] = {}
+        self._strict_tool_names = strict_tool_names
 
     def add_event(self, event: object) -> None:
         choice = _first_choice(event)
@@ -1161,6 +1167,10 @@ class _ToolCallAccumulator:
                 if isinstance(call_id, str) and call_id:
                     call["id"] = call_id
                 call_type = raw_call.get("type")
+                if self._strict_tool_names and 'type' in raw_call:
+                    call['_type_seen'] = True
+                    if call_type != 'function':
+                        call['_invalid_shape'] = True
                 if isinstance(call_type, str) and call_type:
                     call["type"] = call_type
                 raw_function = raw_call.get("function")
@@ -1173,16 +1183,26 @@ class _ToolCallAccumulator:
                     if isinstance(name, str) and name:
                         function["name"] = name
                     arguments = raw_function.get("arguments")
+                    if self._strict_tool_names and 'arguments' in raw_function and not isinstance(arguments, str):
+                        call['_invalid_arguments'] = True
                     if isinstance(arguments, str):
                         function["arguments"] = str(function.get("arguments") or "") + arguments
 
     def tool_calls(self) -> list[dict[str, object]]:
-        return [
-            call
-            for _, call in sorted(self._calls.items())
-            if isinstance(call.get("function"), dict)
-            and str(call["function"].get("name") or "")
-        ]
+        result = []
+        for _, call in sorted(self._calls.items()):
+            function = call.get('function')
+            if not isinstance(function, dict) or not function.get('name'):
+                continue
+            normalized = {key: value for key, value in call.items() if not key.startswith('_')}
+            if function['name'] in self._strict_tool_names:
+                normalized['function'] = dict(function)
+                if call.get('_invalid_arguments'):
+                    normalized['function']['arguments'] = None
+                if call.get('_invalid_shape') or not call.get('_type_seen'):
+                    normalized['type'] = None
+            result.append(normalized)
+        return result
 
 
 @dataclass(frozen=True)
@@ -2101,6 +2121,7 @@ def _completion_turn_from_parsed(
     streamed: bool,
     http_status: int | None,
     raw_response_headers: dict[str, str],
+    strict_tool_names=frozenset(),
 ) -> _OpenAICompletionTurn:
     return _OpenAICompletionTurn(
         text=_assistant_text(parsed),
@@ -2109,7 +2130,7 @@ def _completion_turn_from_parsed(
         token_usage_details=_token_usage_details(parsed),
         raw_response_metadata=_raw_response_metadata(parsed),
         reasoning_content_observed=_has_reasoning_content(parsed),
-        tool_calls=_message_tool_calls(parsed),
+        tool_calls=_message_tool_calls(parsed, strict_tool_names=strict_tool_names),
         streamed=streamed,
         http_status=http_status,
         raw_response_headers=raw_response_headers,
@@ -2123,7 +2144,7 @@ def _transcript_metadata(transcript: object) -> dict[str, object]:
     return {}
 
 
-def _message_tool_calls(parsed: object) -> list[dict[str, object]]:
+def _message_tool_calls(parsed: object, *, strict_tool_names=frozenset()) -> list[dict[str, object]]:
     if not isinstance(parsed, dict):
         return []
     choices = parsed.get("choices")
@@ -2149,12 +2170,12 @@ def _message_tool_calls(parsed: object) -> list[dict[str, object]]:
         if not isinstance(name, str) or not name:
             continue
         arguments = function.get("arguments")
-        if not isinstance(arguments, str):
+        if not isinstance(arguments, str) and name not in strict_tool_names:
             arguments = "{}"
         call_id = raw_call.get("id")
         calls.append({
             "id": call_id if isinstance(call_id, str) and call_id else f"call_{index}",
-            "type": "function",
+            "type": raw_call.get('type') if name in strict_tool_names else "function",
             "function": {"name": name, "arguments": arguments},
         })
     return calls
