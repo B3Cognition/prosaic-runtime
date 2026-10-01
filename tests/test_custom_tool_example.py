@@ -66,5 +66,8 @@ def test_catalogue_module_fixed_contract():
     assert tool.handler({'sku': 'SKU-001'}) == {'found': True, 'item': RECORD}
     assert tool.parameters == {'type': 'object', 'required': ['sku'], 'properties': {
         'sku': {'type': 'string', 'pattern': '^SKU-[0-9]{3}$'}}, 'additionalProperties': False}
-    assert tool.descriptor['max_argument_bytes'] == 16384 and tool.descriptor['max_result_bytes'] == 65536
-    assert tool.descriptor['authorization_required'] is False
+    assert tool.descriptor == {'name': 'lookup_catalog', 'description': 'Look up a synthetic catalogue item.',
+        'parameters': {'type': 'object', 'required': ['sku'], 'properties': {
+            'sku': {'type': 'string', 'pattern': '^SKU-[0-9]{3}$'}}, 'additionalProperties': False},
+        'version': 'catalog-03584de4ade271921ab8742822edcffd2d4d99300e24798507aa21dcc0d208f6',
+        'max_argument_bytes': 16384, 'max_result_bytes': 65536, 'authorization_required': False}

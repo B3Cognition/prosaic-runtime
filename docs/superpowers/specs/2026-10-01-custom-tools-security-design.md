@@ -1,6 +1,6 @@
 # Host-registered custom tools and security boundaries
 
-Status: stage 1 approved in chat on 2026-10-01; implementation awaits plan review.
+Status: stage 1 plan approved in chat on 2026-10-01; native implementation and verification completed, final review pending.
 Stages 2 (adversarial hardening) and 3 (MCP evaluation) remain queued.
 
 ## Intent and delivery order

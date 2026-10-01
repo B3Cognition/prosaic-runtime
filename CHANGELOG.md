@@ -9,6 +9,11 @@
 - Callbacks are trusted synchronous code, not sandboxed or forcibly preemptible.
   Fixed safe error envelopes have an independent 256-byte ceiling, even when
   the configured successful-result bound is smaller.
+- Stage-1 source verification: 207 Runtime / 101 Harness tests, real local
+  HTTP/SSE examples, both package builds. All four TokenProxy models tested in
+  both modes; 6/8 Runtime invocations and 6/8 Harness cases succeeded/admitted.
+  Explicit-first-tool failures and fabricated no-tool answers stayed blocked;
+  no admission rule was relaxed. Wider adversarial hardening/MCP remain queued.
 
 ## 0.4.0 — 2026-10-01
 
