@@ -1,5 +1,48 @@
 # Run Prosaic prose with and without tools
 
+## Host-registered custom tools
+
+This development example requires this feature checkout, Python 3.11+ and the
+Prosaic CLI installed using the root first-run guide. Do not checkout the release
+tag for this example. From the repository root:
+
+```sh
+source .venv/bin/activate
+python -m pip install -e .
+source ~/.zshrc
+export TOKENPROXY_KEY
+python examples/run_custom_tool.py --live --config examples/custom-tools.yml --profile qwen
+python examples/run_custom_tool.py --live --profile ornith --no-stream
+python examples/run_custom_tool.py --live --profile deepseek
+python examples/run_custom_tool.py --live --profile nemotron
+python examples/run_custom_tool.py --live --sku SKU-999
+```
+
+The fixed [catalog_tools.py](catalog_tools.py) registers `lookup_catalog` over
+[catalog.json](catalog.json). A version includes the exact catalogue byte hash.
+YAML is configuration, not an importer: `tools: [lookup_catalog]` in neutral prose,
+`allowed_tools: [lookup_catalog]` in YAML and `RunPolicy.allowed_tools` on the host
+must all grant it. Registration alone grants nothing. `read`/`write` aliases
+expand builtins only. For another endpoint use `--base-url`/`--model`, or edit a
+copy of the YAML; credentials stay in the named environment variable.
+
+The program explicitly requests lookup_catalog on the first model turn and
+prints final Result plus structural versioned events. Missing grants/registration
+fail before execution; bad SKU/unknown arguments return `invalid_arguments`,
+denied authorization returns `authorization_denied`, callback exceptions return
+`handler_error` without exception text. An absent valid SKU returns `found:false`.
+Transport success does not prove a correct final answer; the Harness companion
+adds deterministic catalogue admission and an explicit human choice.
+
+Handlers return data inside a Runtime-owned `status`/`result` envelope. Default
+argument/result limits are 16/64 KiB with finite JSON and at most 64 container
+levels. Fixed error envelopes remain valid JSON independently (under 256 bytes).
+Callbacks are trusted in-process Python, not a sandbox: boundary checks cannot
+kill a hung handler, undo its effects or guarantee exactly-once execution.
+Consequential handlers need a real host approval predicate; never trust an
+`approved` field supplied by the model. Change the tool version whenever semantics
+or fixed data change; version is a host assertion, not automatic source hashing.
+
 ## Staged acquisition and explicit preloading
 
 This opt-in API requires Runtime v0.4.0 or newer.

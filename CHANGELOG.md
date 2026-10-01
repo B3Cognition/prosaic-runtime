@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Immutable host-registered `CustomTool` API, strict closed-schema validation,
+  finite JSON/result bounds, authorization predicate, native HTTP/SSE execution,
+  versioned structural events, and a runnable catalogue example. Registration
+  grants no authority; prose, YAML and host policy must agree.
+- Callbacks are trusted synchronous code, not sandboxed or forcibly preemptible.
+  Fixed safe error envelopes have an independent 256-byte ceiling, even when
+  the configured successful-result bound is smaller.
+
 ## 0.4.0 — 2026-10-01
 
 - Prosaic inspection deadlines return an unsuccessful `inspection_timeout`

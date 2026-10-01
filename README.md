@@ -1,5 +1,9 @@
 # Prosaic Runtime
 
+Development-only: [host-registered custom tools](examples/README.md#host-registered-custom-tools)
+add validated Python callbacks with native function calling. Install this feature
+checkout; published v0.4.0 does not yet contain this API.
+
 Version 0.3.0 harness support: `tool_completed` events for successful `read_file`
 now include `read_receipts` with path, SHA-256 of the bytes actually read, offset,
 lines_read and line_count. Events contain no file text or raw tool arguments.
