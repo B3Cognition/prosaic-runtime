@@ -1,7 +1,10 @@
 # Prosaic Runtime
 
-Version 0.5.2 installs Python Prosaic 0.3.0 automatically at an immutable Git
+Version 0.5.3 installs Python Prosaic 0.3.1 automatically at an immutable Git
 revision. Installation and CI no longer require Node.js or npm.
+
+Version 0.5.3 retains trusted macOS framework Python startup probes using their
+declared sandbox working directory and pins the updated permission documentation.
 
 See the [prompt-injection audit and remaining isolation gaps](docs/security.md)
 before granting tools access to sensitive workspaces.
@@ -97,14 +100,14 @@ an isolated Python environment; no sudo or global Python installation is needed:
 ```sh
 git clone https://github.com/B3Cognition/prosaic-runtime.git
 cd prosaic-runtime
-git checkout v0.5.2
+git checkout v0.5.3
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install .
 ```
 
-The package automatically installs Python Prosaic v0.3.0 at immutable commit
-`cdc9acddf3e58e5563cef06e0db918b5e3729148` into the same environment. No global
+The package automatically installs Python Prosaic v0.3.1 at immutable commit
+`ee145ef29a62dbcf7f5e8abdf1d979749398718d` into the same environment. No global
 installation or retained TypeScript checkout is needed. Older Runtime release
 tags retain their historical installation docs.
 
