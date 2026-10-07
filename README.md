@@ -1,6 +1,6 @@
 # Prosaic Runtime
 
-Version 0.5.1 installs Python Prosaic 0.3.0 automatically at an immutable Git
+Version 0.5.2 installs Python Prosaic 0.3.0 automatically at an immutable Git
 revision. Installation and CI no longer require Node.js or npm.
 
 See the [prompt-injection audit and remaining isolation gaps](docs/security.md)
@@ -446,3 +446,10 @@ Tests cover extracted transport edge cases, tool denial, path containment, artif
 Licensed under the [Apache License, Version 2.0](LICENSE). See [NOTICE.md](NOTICE.md)
 for extraction provenance and [LICENSE-MIT](LICENSE-MIT) for the retained notice
 covering historically MIT-licensed code. Third-party components retain their own licenses.
+
+## Structured JSON tool transport
+
+For endpoints where the host deliberately chooses JSON tool requests, use the
+shared [`StructuredToolLoop`](docs/structured-tools.md). It reuses registered
+`CustomTool` contracts and bounded execution, with application-owned final-result
+admission. Harness can drive each turn without embedding product rules in Runtime.

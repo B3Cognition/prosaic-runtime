@@ -7,3 +7,7 @@ from .types import Result
 from .tools import CustomTool
 
 __all__ = ["ProsaicArtifact", "EndpointConfig", "RuntimeConfig", "RunLimits", "RunPolicy", "ProsaicRuntime", "Result", "CustomTool"]
+
+from .structured_tools import Completion, StructuredToolError, StructuredToolLoop, ToolRequest
+
+__all__ += ["Completion", "StructuredToolError", "StructuredToolLoop", "ToolRequest"]
