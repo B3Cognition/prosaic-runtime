@@ -27,7 +27,29 @@ jobs:
           meson compile -C "$RUNNER_TEMP/bubblewrap/_build"
           sudo meson install -C "$RUNNER_TEMP/bubblewrap/_build"
       - name: Require an operational sandbox (no skipped Linux security gate)
-        run: python -c "from prosaic_runtime import CliSandboxConfig; from prosaic_runtime.sandbox import require_backend; require_backend(CliSandboxConfig(mode='required'))"
+        run: |
+          python - <<'PY'
+          import os, subprocess, sys, tempfile
+          from pathlib import Path
+          from types import SimpleNamespace
+          from prosaic_runtime import CliSandboxConfig
+          from prosaic_runtime.sandbox import require_backend, _linux_command
+          try:
+              require_backend(CliSandboxConfig(mode='required'))
+          except Exception:
+              if sys.platform == 'linux':
+                  subprocess.run(['/usr/bin/bwrap', '--version'], check=False)
+                  with tempfile.TemporaryDirectory() as temporary:
+                      root = Path(temporary).resolve()
+                      args = _linux_command([sys.executable, '-c', 'pass'], '/',
+                          SimpleNamespace(read_roots=(), forbidden_roots=()),
+                          SimpleNamespace(runtime_roots=()), root, root)
+                      result = subprocess.run(args, capture_output=True, text=True,
+                          env={'PATH': '/usr/bin:/bin', 'PYTHONDONTWRITEBYTECODE': '1', 'PYTHONNOUSERSITE': '1'})
+                      print('Sandbox probe exit:', result.returncode)
+                      print(result.stderr)
+              raise
+          PY
       - run: prosaic --version
       - run: pytest
       - run: python -m build
