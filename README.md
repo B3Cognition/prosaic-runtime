@@ -12,14 +12,14 @@ with a complete runnable CLI and an optional Understanding adapter.
 Version 0.5.0 also adds [host-registered custom tools](examples/README.md#host-registered-custom-tools):
 validated Python callbacks with native function calling. Both APIs are opt-in;
 Python callbacks execute trusted host code and are not sandboxed. CLI subprocesses
-are also unsandboxed by default; the development-only opt-in below isolates them.
+are also unsandboxed by default; the opt-in below isolates them.
 
-## Development: tool permissions and CLI isolation
+## Tool permissions and CLI isolation
 
-**Unreleased:** the working tree adds `cli_sandbox_v1`. Released Runtime 0.5.1
-does not include it. Install a development checkout containing this feature;
-upgrading Prosaic alone does not enable isolation. Start with the
-[sandboxed CLI walkthrough](examples/README.md#sandboxed-cli-tools-development)
+Runtime **0.5.2** includes `cli_sandbox_v1` and opt-in CLI isolation.
+Versions 0.5.1 and earlier do not include it; upgrading Prosaic alone does not
+enable isolation. Start with the
+[sandboxed CLI walkthrough](examples/README.md#sandboxed-cli-tools-runtime-052)
 and its [complete configuration](examples/cli-tools-sandboxed.yml).
 
 Markdown requests capabilities; it does not grant host authority:
@@ -97,7 +97,7 @@ an isolated Python environment; no sudo or global Python installation is needed:
 ```sh
 git clone https://github.com/B3Cognition/prosaic-runtime.git
 cd prosaic-runtime
-git checkout v0.5.1
+git checkout v0.5.2
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install .
@@ -427,7 +427,7 @@ Paths are relative to `--cwd` (the current directory by default) and must resolv
 The CLI provides no general-purpose shell, web browsing, recursive agents,
 workflow scheduler, or application state writer. Explicitly trusted CLI manifests
 can execute fixed application commands. They are unsandboxed in the default
-`off` mode; development `required` mode adds the CLI OS boundary described above.
+`off` mode; `required` mode adds the CLI OS boundary described above.
 Hosts retain their output validation, workflow decisions and publication rules.
 
 ## Limits and events

@@ -1,0 +1,8 @@
+# Disposable Ubuntu CI runner setup only. Allow this specific namespace broker
+# to create user namespaces; retain host-wide AppArmor restrictions.
+abi <abi/4.0>,
+include <tunables/global>
+
+profile prosaic-ci-bwrap /usr/bin/bwrap flags=(unconfined) {
+  userns,
+}

@@ -6,6 +6,7 @@ jobs:
   test:
     runs-on: '${{ matrix.os }}'
     strategy:
+      fail-fast: false
       matrix:
         os: ['ubuntu-24.04', 'ubuntu-24.04-arm', 'macos-latest']
         python: ['3.11', '3.12', '3.13']
@@ -26,6 +27,10 @@ jobs:
           meson setup "$RUNNER_TEMP/bubblewrap/_build" "$RUNNER_TEMP/bubblewrap" --prefix=/usr -Dman=disabled -Dtests=false
           meson compile -C "$RUNNER_TEMP/bubblewrap/_build"
           sudo meson install -C "$RUNNER_TEMP/bubblewrap/_build"
+          # Ubuntu restricts unconfined userns capabilities. Permit only the
+          # trusted broker on this disposable runner; never disable the sysctl.
+          sudo install -m 0644 .github/ci/bwrap.apparmor /etc/apparmor.d/prosaic-ci-bwrap
+          sudo apparmor_parser -r /etc/apparmor.d/prosaic-ci-bwrap
       - name: Require an operational sandbox (no skipped Linux security gate)
         run: |
           python - <<'PY'

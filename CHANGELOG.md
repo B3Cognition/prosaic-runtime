@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+## 0.5.2 — 2026-10-07
+
+- Public `StructuredToolLoop` for explicitly selected JSON tool-request transport:
+  closed envelopes, registered-tool authorization, bounded history/deadlines,
+  correction and repeated-call detection. Final domain admission remains host-owned;
+  native calling remains a separate explicit transport, not an automatic fallback.
+- Host-controlled `cli_sandbox_v1`: optional required-mode Seatbelt (macOS) or
+  Bubblewrap >= 0.12.0 (Linux, including ARM64), private scratch/HOME, read-only
+  evidence/dependencies, no host IP network and fail-closed preflight. Default is
+  off; callbacks/validators/native coding providers remain outside this boundary.
+- Sandboxed CLI walkthroughs, synthetic containment probe and Linux/macOS CI gates;
+  Ubuntu CI grants user namespaces only to its trusted Bubblewrap executable,
+  retaining host-wide AppArmor restrictions.
+- Retains the immutable Python Prosaic 0.3.0 dependency; no Node/npm required.
+
+## 0.5.1 — 2026-10-01
+
+- Pin the Python Prosaic 0.3.0 release, replacing the TypeScript CLI dependency.
+
 ## 0.5.0 — 2026-10-01
 
 - Operator-trusted YAML CLI-tool manifests, fixed executable/argv execution

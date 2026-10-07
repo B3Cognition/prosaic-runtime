@@ -1,4 +1,4 @@
-# DEVELOPMENT ONLY: requires the unreleased CLI sandbox Runtime capability.
+# Requires Runtime 0.5.2+ with cli_sandbox_v1 and an operational OS backend.
 # Install/review the analyzer and manifest; discovery is not authorization.
 tool_directories: [.prosaic/tools]
 allowed_tools: [analyze_spec]

@@ -1,5 +1,13 @@
 # Prompt-injection containment: first audit, 2026-10-01
 
+## Release status — 2026-10-07
+
+Runtime 0.5.2 includes the opt-in CLI sandbox described below and the independent
+structured JSON tool loop. CLI isolation remains off by default. Required mode
+fails closed; Python callbacks, validators and native coding providers are not
+isolated by it. The dated verification receipts below describe earlier development
+snapshots; their statements about uncommitted/unreleased code are historical.
+
 ## Linux ARM64 follow-up
 
 Required-mode CLI isolation now also has a Linux Bubblewrap backend. It mounts

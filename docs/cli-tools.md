@@ -1,14 +1,13 @@
 # Custom command-line tools: discover, preflight, execute
 
-## Development: opt-in CLI sandbox
+## Opt-in CLI sandbox
 
-The working tree adds `cli_sandbox_v1`; this feature is **not in released Runtime
-0.5.1**.
+Runtime **0.5.2+** includes `cli_sandbox_v1`; Runtime 0.5.1 and earlier do not.
 
-Start with the complete [sandboxed Runtime walkthrough](../examples/README.md#sandboxed-cli-tools-development)
+Start with the complete [sandboxed Runtime walkthrough](../examples/README.md#sandboxed-cli-tools-runtime-052)
 and [sandboxed YAML](../examples/cli-tools-sandboxed.yml), or the companion
-[sandboxed Harness workflow](https://github.com/B3Cognition/prosaic-harness/blob/main/examples/README.md#sandboxed-cli-workflow-development).
-They explain development installation, every declaration/grant, offline
+[sandboxed Harness workflow](https://github.com/B3Cognition/prosaic-harness/blob/main/examples/README.md#sandboxed-cli-workflow-harness-042).
+They explain installation, every declaration/grant, offline
 validation and opt-in live execution. The older examples below use off mode for
 compatibility; do not assume their CLI execution is isolated.
 

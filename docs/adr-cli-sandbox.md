@@ -1,6 +1,6 @@
 # ADR: Separate authenticated inference from sandboxed CLI tools
 
-**Status:** Accepted for the working-tree implementation; not yet released
+**Status:** Accepted; included in Runtime 0.5.2 / Harness 0.4.2
 **Date:** 2026-10-01
 **Deciders:** Project operator before production rollout
 
