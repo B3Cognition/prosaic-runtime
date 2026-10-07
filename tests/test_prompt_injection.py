@@ -96,7 +96,7 @@ def test_cli_read_scope_is_not_an_os_sandbox(server, tmp_path):
     root = tmp_path / 'workspace'
     root.mkdir()
     (root / 'spec.md').write_text('Allowed input')
-    tools, _, _ = manifest(tmp_path, code=
+    tools, _, _ = manifest(tmp_path, timeout_s=5, code=
         f'print(json.dumps({{"outside": open({str(secret)!r}).read()}}))')
     responses.extend([reply('', [native_call()]), reply('done')])
     result = ProsaicRuntime(cli_config(tmp_path, url, [tools])).run(

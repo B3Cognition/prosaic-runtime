@@ -1,11 +1,133 @@
 # Run Prosaic prose with and without tools
 
+## Sandboxed CLI tools (development)
+
+Use this path for **required OS isolation of a custom CLI**. It needs a development
+Runtime checkout containing `cli_sandbox_v1`; released Runtime 0.5.1 does not have
+it. The ordinary `cli-tools.yml` example below is a compatibility example with
+sandboxing off. Prosaic Markdown has no new sandbox permission field.
+
+### 1. Install and check prerequisites
+
+From the Runtime repository root, in your existing project virtual environment:
+
+```sh
+source .venv/bin/activate
+python -m pip install -e .
+python -m pip install examples/cli-tool
+```
+
+For a uv environment without pip:
+`uv pip install --python .venv/bin/python -e . examples/cli-tool`.
+Python Prosaic 0.3.0 installs automatically; this environment's `prosaic` must be
+on PATH. These commands intentionally install the development Runtime into this
+environment, not every application on your machine.
+
+Install the example CLI **without `-e`** here: its implementation then lives in
+the environment's granted library directory. An editable CLI install instead
+needs its specific source directory in `runtime_roots` (for this Runtime config,
+`runtime_roots: [cli-tool]`). Do not grant the whole repository to work around it.
+
+On macOS, `/usr/bin/sandbox-exec` must exist. On Linux/ARM64 or AMD64,
+`/usr/bin/bwrap` must be version **0.12.0 or newer**, and the host must permit
+unprivileged user namespaces. Installing an older distribution package is not
+enough; use an updated package or patched upstream build. See
+[backend setup and fail-closed behavior](../docs/cli-tools.md#development-opt-in-cli-sandbox).
+Never disable host security or switch to off mode just to make a failed preflight pass.
+
+### 2. Understand exactly what is requested and granted
+
+The sample reuses [cli-spec-reviewer.md](.prosaic/subagents/cli-spec-reviewer.md)
+and the reviewed [manifest](.prosaic/tools/analyze-spec.yml). The
+[complete sandboxed Runtime YAML](cli-tools-sandboxed.yml) uses a placeholder
+localhost endpoint; offline checks do not contact it.
+
+| Layer | Sample setting | Purpose |
+| --- | --- | --- |
+| Markdown | `tools: [analyze_spec]` | Agent requests the tool; cannot authorize it |
+| Runtime YAML | `tool_directories: [.prosaic/tools]` | Operator trusts reviewed manifests and executables |
+| Runtime YAML | `allowed_tools: [analyze_spec]` | Operator allows that tool |
+| Runtime invocation | `--allow-tool analyze_spec --read-root evidence` | Host grants this call's tool and readable input directory |
+| Runtime YAML | `cli_sandbox: {mode: required}` | Host requires OS isolation for CLI calls and version probes |
+
+The Python runner uses the equivalent `RunPolicy` grant with
+`read_roots=('evidence',)` and requests the first native call via `initial_tool`.
+The input directory is relative to invocation `cwd`; manifest/dependency
+directories in Runtime YAML are relative to that config file. All three tool
+permission layers must agree; installing a tool or writing frontmatter grants nothing.
+
+### 3. Preflight offline, then opt in to a model call
+
+```sh
+python examples/run_cli_tool.py --config examples/cli-tools-sandboxed.yml --profile local
+
+# Equivalent explicit CLI grants (also offline):
+prosaic-runtime preflight \
+  --config examples/cli-tools-sandboxed.yml --source examples/.prosaic \
+  --agent subagents/cli-spec-reviewer.md --cwd examples \
+  --allow-tool analyze_spec --read-root evidence --output text
+```
+
+Expect `ok: true` (or successful text checks) and exit code 0. This proves
+availability/version/OS setup, not an answer or successful analysis call.
+If unavailable, preflight exits nonzero before inference; it never falls back.
+
+Before a live run, set the `base_url` and `model` placeholders in the sandboxed
+YAML to your tool-calling endpoint. Load `LOCAL_LLM_API_KEY` securely in your
+environment if authentication is needed; never save the key in YAML or Git.
+Changing endpoint/model does not change tool authority.
+
+```sh
+python examples/run_cli_tool.py --config examples/cli-tools-sandboxed.yml --profile local --live
+```
+
+This contacts your endpoint and can incur charges. Expect `tool_executed: true`,
+exit code 0, and a successful `analyze_spec` event. A model that omits/refuses the
+required first native call is rejected, not treated as success. The synthetic
+tool report is `{"requirements":2,"vague_ids":["REQ-002"],"passed":false}`;
+`passed:false` is domain data, not an operational failure or production quality gate.
+
+The independent [sandbox canary probe](run_sandbox_probe.py) tests synthetic
+outside-file/write/loopback denial with private temporary data. Its default is
+offline preflight only; `--live` requires actual probe execution and model calls:
+
+```sh
+python examples/run_sandbox_probe.py --config examples/cli-tools-sandboxed.yml --profile local
+python examples/run_sandbox_probe.py --config examples/cli-tools-sandboxed.yml --profile local --live
+```
+
+### Scope and troubleshooting
+
+- CLI input evidence is read-only. CLI writes belong in private `TMPDIR`/`HOME`,
+  not the workspace; host IP-network access, including loopback, is blocked.
+- Model inference/auth stays in the parent. CLI children do not implicitly get
+  endpoint keys; manifest `pass_env` is an explicit operator credential grant.
+- `runtime_roots` is only for narrow extra dependencies. Do not grant HOME, `/`,
+  or directories containing host Unix sockets. Linux pathname sockets can confer
+  host authority even when host IP networking is isolated.
+- Builtin file tools retain their path checks; this CLI sandbox does not isolate
+  Python callbacks/validators or native Codex/Claude providers. Tool output is
+  still untrusted; controller checks and human review remain necessary.
+- `not_granted`: fix the config/invocation grants and check the agent declaration; do not widen them
+  indiscriminately. `cli_path_denied`: check the input and narrow read roots.
+  `cli_unavailable`: install the trusted executable in this environment/PATH.
+  `cli_sandbox_unavailable`: check backend version and kernel/host restrictions.
+  `cli_version`: check the trusted tool's version/dependency installation; only
+  add necessary dependency paths, not broad filesystem grants.
+- `tool_choice_not_honored` during live execution means the endpoint/model did
+  not emit the required native call. It is not a missing host grant; do not
+  disable the execution requirement or broaden permissions to hide the failure.
+
 ## Custom command-line tools
 
 See the [step-by-step CLI-tool guide](../docs/cli-tools.md) for installation,
 manifest discovery, Markdown declarations, offline preflight, execution, failure
 behavior, and the optional actual Understanding CLI adapter. This feature needs
 Runtime v0.5.1+; Python Prosaic v0.3.0 is installed automatically.
+
+**Compatibility mode:** this section uses `cli-tools.yml`, whose sandbox defaults
+to off. For required isolation use the development walkthrough above. Neither
+mode treats Markdown or tool output as operator authorization.
 
 From this repository root, with the updated checkout installed:
 

@@ -20,7 +20,7 @@ class ToolExecutionError(RuntimeError):
     def __init__(self, code):
         if code not in {'cli_unavailable', 'cli_environment', 'cli_timeout', 'cli_output_limit',
                         'cli_path_denied', 'cli_context', 'cli_arguments', 'cli_exit',
-                        'cli_invalid_output', 'cli_version'}:
+                        'cli_invalid_output', 'cli_version', 'cli_sandbox_unavailable'}:
             raise ValueError('unknown tool error code')
         self.code = code
         super().__init__(code)

@@ -119,7 +119,7 @@ class _BoundedBackend(OpenAICompatibleBackend):
 
 
 class ProsaicRuntime:
-    capabilities = frozenset({'read_receipts_v1', 'initial_tool_v1', 'initial_tool_enforcement_v1', 'acquisition_v1', 'custom_tools_v1', 'cli_tools_v1'})
+    capabilities = frozenset({'read_receipts_v1', 'initial_tool_v1', 'initial_tool_enforcement_v1', 'acquisition_v1', 'custom_tools_v1', 'cli_tools_v1', 'cli_sandbox_v1'})
     def __init__(self, config: RuntimeConfig, *, source=".prosaic", executable="prosaic", custom_tools=None):
         self.config = config
         self.source = Path(source)
@@ -152,7 +152,7 @@ class ProsaicRuntime:
                 error = 'not_granted'
             elif name in self._cli_tools:
                 try:
-                    self._cli_tools[name].preflight(cwd, policy, env, deadline)
+                    self._cli_tools[name].preflight(cwd, policy, env, deadline, self.config.cli_sandbox)
                 except ToolExecutionError as exc:
                     error = exc.code
             else:
@@ -193,7 +193,8 @@ class ProsaicRuntime:
         started = time.monotonic()
         backend = None
         invocation_env = dict(os.environ if env is None else env)
-        with event_context(on_event, cancelled), cli_tool_context(cwd, policy, invocation_env, started + policy.timeout_s):
+        with event_context(on_event, cancelled), cli_tool_context(
+            cwd, policy, invocation_env, started + policy.timeout_s, self.config.cli_sandbox):
             try:
                 check_cancelled()
                 if isinstance(artifact, str):

@@ -11,7 +11,46 @@ with a complete runnable CLI and an optional Understanding adapter.
 
 Version 0.5.0 also adds [host-registered custom tools](examples/README.md#host-registered-custom-tools):
 validated Python callbacks with native function calling. Both APIs are opt-in;
-tools execute trusted host code, not sandboxed code.
+Python callbacks execute trusted host code and are not sandboxed. CLI subprocesses
+are also unsandboxed by default; the development-only opt-in below isolates them.
+
+## Development: tool permissions and CLI isolation
+
+**Unreleased:** the working tree adds `cli_sandbox_v1`. Released Runtime 0.5.1
+does not include it. Install a development checkout containing this feature;
+upgrading Prosaic alone does not enable isolation. Start with the
+[sandboxed CLI walkthrough](examples/README.md#sandboxed-cli-tools-development)
+and its [complete configuration](examples/cli-tools-sandboxed.yml).
+
+Markdown requests capabilities; it does not grant host authority:
+
+| Layer | Example | Who owns it? |
+| --- | --- | --- |
+| Agent Markdown | `tools: [analyze_spec]` | Agent author declares what is needed |
+| Runtime YAML | `allowed_tools: [analyze_spec]` | Operator allows the tool |
+| Invocation | `--allow-tool analyze_spec --read-root evidence` | Host grants this call's tool and readable inputs |
+| CLI OS boundary | `cli_sandbox: {mode: required}` in Runtime YAML | Operator requires isolation; prose cannot disable it |
+
+All three tool declarations/grants must intersect. Merely installing a CLI or
+adding it to frontmatter grants nothing. For custom CLIs, the operator also
+reviews the executable and explicitly trusts its YAML manifest directory via
+`tool_directories`; never automatically trust model-generated manifests.
+
+Required mode confines CLI tools and their version probes to read-only evidence,
+trusted dependencies and private writable HOME/scratch. Host IP network access
+(including loopback) is blocked; model inference/auth stays in the parent.
+Linux requires `/usr/bin/bwrap` >= 0.12.0 and working user namespaces; macOS
+requires `/usr/bin/sandbox-exec`. Unavailable enforcement fails closed before
+inference. There is no automatic unrestricted fallback.
+
+This setting does **not** isolate builtin file tools, trusted Python callbacks,
+validators, or native Codex/Claude providers. Builtin file tools still enforce
+their own path grants. CLI workspace writes and external-service access are not
+supported in required mode, even if builtin write paths are granted. Do not
+grant HOME, `/`, or directories containing host Unix sockets as dependency/input
+roots. See [the full setup and limitations](docs/cli-tools.md).
+
+## Overview
 
 Version 0.3.0 harness support: `tool_completed` events for successful `read_file`
 now include `read_receipts` with path, SHA-256 of the bytes actually read, offset,
@@ -387,7 +426,8 @@ Paths are relative to `--cwd` (the current directory by default) and must resolv
 
 The CLI provides no general-purpose shell, web browsing, recursive agents,
 workflow scheduler, or application state writer. Explicitly trusted CLI manifests
-can execute fixed application commands; these processes are not sandboxed.
+can execute fixed application commands. They are unsandboxed in the default
+`off` mode; development `required` mode adds the CLI OS boundary described above.
 Hosts retain their output validation, workflow decisions and publication rules.
 
 ## Limits and events

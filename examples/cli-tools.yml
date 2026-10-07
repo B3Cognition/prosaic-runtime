@@ -1,4 +1,5 @@
 # Operator trust: inspect these manifests and their executables before enabling.
+# Compatibility example: sandbox defaults to off. For required isolation use cli-tools-sandboxed.yml.
 tool_directories: [.prosaic/tools]
 allowed_tools: [analyze_spec]
 default_profile: qwen

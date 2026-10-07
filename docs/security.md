@@ -1,5 +1,67 @@
 # Prompt-injection containment: first audit, 2026-10-01
 
+## Linux ARM64 follow-up
+
+Required-mode CLI isolation now also has a Linux Bubblewrap backend. It mounts
+a synthetic read-only root and only approved dependencies/evidence, keeps writable
+scratch and deny-mask backing files separate, drops capabilities, disables nested
+user namespaces, and isolates PID/IPC/network/UTS namespaces. Kernel setup and
+Bubblewrap >= 0.12.0 are checked before inference, even without a version probe.
+The minimum version addresses the upstream
+[setup-escape advisory](https://github.com/containers/bubblewrap/security/advisories/GHSA-pxhw-h44j-8pfx).
+
+Real ARM64 Linux process tests exercise host/alias read denial, non-scratch write
+denial, loopback denial, readable evidence, scratch cleanup, inherited child
+policy, forbidden files/directories and version-probe isolation. Runtime and
+Harness full suites and wheel/source builds were run inside a disposable ARM64
+Linux container. Its outer fixture allows namespace setup; the tested CLI still
+runs through Bubblewrap with dropped capabilities, and targeted containment tests
+also pass as an unprivileged UID. No endpoint credential or real model was used.
+
+Final receipt: **311 Runtime tests passed on Linux ARM64 and macOS**, and **119
+Harness tests passed on each** against the development Runtime. The **20 targeted
+Runtime containment/probe cases** also passed as UID 1000, both with the system
+interpreter and a Python virtualenv; all **6 Harness sandbox cases** passed as
+UID 1000. Runtime and Harness wheel/source builds succeeded on both platforms
+(existing manifest exclusion warnings remain). Linux used Bubblewrap 0.12.0 and
+Python 3.12. No global application install, version or dependency pin changed.
+
+CI adds native Ubuntu ARM64 and AMD64 jobs with a pinned patched Bubblewrap build
+and a mandatory backend gate. These remote jobs have not run yet; AMD64 remains
+unverified locally. AppArmor/kernel/container restrictions may reject setup;
+Runtime fails closed rather than relaxing them. Do not mount host Unix sockets
+through evidence/runtime grants: Linux network namespaces alone do not block
+pathname Unix sockets. Native coding providers and Python callbacks are unchanged.
+This remains uncommitted, unreleased working-tree functionality.
+
+## Follow-up: CLI isolation implementation
+
+The working tree now implements opt-in `cli_sandbox.mode: required` on macOS,
+including version probes. Real OS tests deny unrelated/symlinked host reads,
+non-scratch writes and loopback connections, preserve evidence access and private
+scratch, and verify child inheritance and forbidden-root precedence. An off-mode
+positive control confirms the canary and connection would otherwise succeed.
+Harness binds required-mode adapter policy and approvals to workflow identity.
+
+The synthetic local-endpoint probe completed successfully on 2026-10-01:
+`preflight_ok=true`, `probe_executed=true`, `containment_passed=true`, exit code 0,
+864 reported tokens. No real secret was read or saved. The model client retained
+its credential; the CLI child did not inherit it. This is one containment trial,
+not a model-injection resistance benchmark or proof of native-provider isolation.
+
+The earlier audit below describes the unsandboxed behavior, which remains the
+default for compatibility. The initial implementation was macOS-only; Linux
+support is described above. Python callbacks/validators and Echelon's
+native providers remain outside this boundary. See [setup](cli-tools.md) and
+[decision/remaining work](adr-cli-sandbox.md).
+
+Fresh local verification of this follow-up: **305 Runtime tests passed**, **119
+Harness tests passed** against the development Runtime, and both wheel/source
+builds succeeded. Runtime CI now includes macOS for actual Seatbelt tests, plus
+Linux for general/unsupported-backend coverage; these new remote jobs have not
+run yet. Existing versions/pins/global installations were not changed in this
+follow-up. The feature remains uncommitted and unreleased.
+
 This is a bounded source review and deterministic adversarial test pass, not a
 security certification or live-model red-team result. The test model deliberately
 obeys injected instructions. Passing therefore measures execution containment,

@@ -18,6 +18,8 @@ import time
 import yaml
 from .events import check_cancelled
 from .tools import CustomTool, ToolDeadlineExceeded, ToolExecutionError, depth, unique_pairs, reject_constant
+from .config import CliSandboxConfig
+from .sandbox import require_backend, sandbox_command
 
 
 _context = ContextVar('prosaic_cli_context', default=None)
@@ -49,8 +51,8 @@ def _strings(value, maximum=64):
 
 
 @contextmanager
-def cli_tool_context(cwd, policy, env, deadline):
-    token = _context.set((Path(cwd).resolve(), policy, dict(env), deadline))
+def cli_tool_context(cwd, policy, env, deadline, sandbox=CliSandboxConfig()):
+    token = _context.set((Path(cwd).resolve(), policy, dict(env), deadline, sandbox))
     try:
         yield
     finally:
@@ -77,7 +79,13 @@ def _kill(process):
         pass
 
 
-def _process(argv, *, cwd, env, timeout_s, maximum, deadline):
+def _process(argv, *, cwd, env, timeout_s, maximum, deadline, policy, sandbox):
+    with sandbox_command(argv, cwd=cwd, env=env, policy=policy, config=sandbox) as (command, environment):
+        return _drain_process(command, cwd=cwd, env=environment, timeout_s=timeout_s,
+                              maximum=maximum, deadline=deadline)
+
+
+def _drain_process(argv, *, cwd, env, timeout_s, maximum, deadline):
     """Drain both pipes with bounded buffering; stop on cancellation or shared deadline."""
     check_cancelled()
     if time.monotonic() >= deadline:
@@ -177,16 +185,18 @@ class CliTool:
         return CustomTool(m['name'], m['description'], m['parameters'], self.execute, self.version,
                           max_result_bytes=m['max_output_bytes'] + 128)
 
-    def preflight(self, cwd, policy, env, deadline):
+    def preflight(self, cwd, policy, env, deadline, sandbox=CliSandboxConfig()):
         m = self.manifest
         if not self.executable or not Path(self.executable).is_file() or not os.access(self.executable, os.X_OK):
             raise ToolExecutionError('cli_unavailable')
         if m.get('path_parameters') and not policy.read_roots:
             raise ToolExecutionError('cli_path_denied')
+        require_backend(sandbox)
         environment = _environment(m, env)
         if m.get('version_probe'):
             code, output = _process([self.executable, *m['version_probe']], cwd=cwd, env=environment,
-                timeout_s=min(5, m['timeout_s']), maximum=m['max_output_bytes'], deadline=deadline)
+                timeout_s=min(5, m['timeout_s']), maximum=m['max_output_bytes'], deadline=deadline,
+                policy=policy, sandbox=sandbox)
             if code != 0 or (m.get('version_contains') and m['version_contains'].encode() not in output):
                 raise ToolExecutionError('cli_version')
 
@@ -194,7 +204,7 @@ class CliTool:
         context = _context.get()
         if context is None:
             raise ToolExecutionError('cli_context')
-        root, policy, env, deadline = context
+        root, policy, env, deadline, sandbox = context
         m = self.manifest
         values = {}
         for name, value in arguments.items():
@@ -211,7 +221,7 @@ class CliTool:
             else:
                 argv.append(token)
         code, output = _process(argv, cwd=root, env=_environment(m, env), timeout_s=m['timeout_s'],
-                                maximum=m['max_output_bytes'], deadline=deadline)
+                                maximum=m['max_output_bytes'], deadline=deadline, policy=policy, sandbox=sandbox)
         if code not in m.get('success_exit_codes', [0]):
             raise ToolExecutionError('cli_exit')
         try:

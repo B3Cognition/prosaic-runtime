@@ -1,0 +1,19 @@
+# DEVELOPMENT ONLY: requires the unreleased CLI sandbox Runtime capability.
+# Install/review the analyzer and manifest; discovery is not authorization.
+tool_directories: [.prosaic/tools]
+allowed_tools: [analyze_spec]
+cli_sandbox:
+  mode: required
+  runtime_roots: [] # Add only narrowly reviewed extra dependencies, never HOME or /.
+default_profile: local
+routes: {balanced: local}
+limits: {timeout_s: 180, max_tool_rounds: 4}
+profiles:
+  local:
+    # Replace these placeholders with your tool-calling endpoint/model.
+    # Only --live contacts it. Offline preflight needs no endpoint/key.
+    base_url: http://localhost:8000/v1
+    api_key_env: LOCAL_LLM_API_KEY
+    model: your-tool-calling-model
+    max_tokens: 2048
+    features: {streaming: false}

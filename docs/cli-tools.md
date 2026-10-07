@@ -1,5 +1,70 @@
 # Custom command-line tools: discover, preflight, execute
 
+## Development: opt-in CLI sandbox
+
+The working tree adds `cli_sandbox_v1`; this feature is **not in released Runtime
+0.5.1**.
+
+Start with the complete [sandboxed Runtime walkthrough](../examples/README.md#sandboxed-cli-tools-development)
+and [sandboxed YAML](../examples/cli-tools-sandboxed.yml), or the companion
+[sandboxed Harness workflow](https://github.com/B3Cognition/prosaic-harness/blob/main/examples/README.md#sandboxed-cli-workflow-development).
+They explain development installation, every declaration/grant, offline
+validation and opt-in live execution. The older examples below use off mode for
+compatibility; do not assume their CLI execution is isolated.
+
+On macOS or Linux (including ARM64), configure:
+
+```yaml
+cli_sandbox:
+  mode: required
+  runtime_roots: [] # Optional, narrowly trusted dependencies; paths are config-relative.
+```
+
+Both preflight probes and CLI execution use Seatbelt on macOS or Bubblewrap on
+Linux. Model inference stays in
+the authenticated parent process. Children get private scratch/HOME, read-only
+evidence from the invocation's `read_roots`, trusted runtime libraries and their
+own executable. Explicit forbidden paths override grants. Non-scratch filesystem
+writes and host IP network connections (including loopback) are denied. Seatbelt
+also denies IPC; Linux isolates IPC/PID/user/network namespaces and exposes no
+host `/proc` or terminal. Do not include host Unix sockets in Linux read/runtime
+grants: a pathname socket in a mounted directory can still confer host authority.
+Endpoint secrets
+are not implicitly inherited; explicitly configured `pass_env` still shares the
+named values by operator intent. File metadata remains visible.
+
+Missing/unsupported OS enforcement reports `cli_sandbox_unavailable` before
+model dispatch. Mode defaults to `off` for compatibility, and off mode retains
+the historical host-authority risk. No automatic downgrade occurs in required
+mode. Additional interpreters/helpers may need narrowly scoped `runtime_roots`;
+do not grant a home directory or `/` as a workaround. Python callbacks and
+trusted validator code are not sandboxed. There is no CLI workspace write grant
+in this first implementation.
+
+Linux requires `/usr/bin/bwrap` **0.12.0 or newer** and operational unprivileged
+user namespaces. Earlier versions are rejected because of the upstream
+[sandbox-setup escape advisory](https://github.com/containers/bubblewrap/security/advisories/GHSA-pxhw-h44j-8pfx).
+Install an up-to-date distribution package (for example `sudo apt-get install
+bubblewrap`), then check `bwrap --version`; older distributions need a patched
+upstream build installed at that path. Runtime preflight tests actual namespace
+creation, not only installation/version. AppArmor, container restrictions or a
+disabled kernel feature cause `cli_sandbox_unavailable`; do not solve this by
+automatically disabling host security or falling back to unrestricted execution.
+The library paths are discovered without architecture-specific loader names.
+
+Run the synthetic probe (private temporary data only):
+
+```sh
+.venv/bin/python examples/run_sandbox_probe.py        # Offline preflight, no inference
+.venv/bin/python examples/run_sandbox_probe.py --live # Explicit endpoint/model call
+```
+
+The live version supplies malicious test evidence and checks actual probe
+execution/effects, not model claims. It prints only a safe summary. See the
+[architecture decision](adr-cli-sandbox.md) for native-provider work
+that remains. Install this Runtime working tree explicitly to try it; no existing
+installation, Harness dependency pin or Echelon provider was silently upgraded.
+
 The current setup uses Runtime v0.5.1+, Python Prosaic v0.3.0 (installed
 automatically), and Harness v0.4.1+ for workflow integration. Runtime does not
 require the Prosaic catalogue command to execute tools: it validates trusted manifests
@@ -234,12 +299,14 @@ On POSIX, cleanup terminates the process group, including ordinary children; on
 Windows it terminates the direct child. Processes that deliberately escape their
 group require stronger OS isolation.
 
-This is **not an OS sandbox or complete prompt-injection prevention**. Read-scope
+In default **off mode**, this adapter is **not an OS sandbox**. Read-scope
 checks constrain declared path arguments, not every filesystem access the tool's
 implementation might perform. Tools run with the host account's permissions and
 can have effects. Tool output remains potentially untrusted content. Fixed argv,
 schema/grant checks and credential isolation reduce attack surfaces; destructive
-tools still need host approval and, where appropriate, a dedicated sandbox.
+tools still need host approval. Development **required mode** adds the CLI OS
+boundary described above, but is not complete prompt-injection prevention and
+does not isolate callbacks/native coding providers or validate answer truth.
 Interrupted or retried tools are not guaranteed exactly-once execution.
 
 The version binds declared `tool_version`, normalized manifest semantics and

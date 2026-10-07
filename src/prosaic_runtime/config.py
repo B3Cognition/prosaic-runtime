@@ -46,6 +46,20 @@ class EndpointConfig:
 
 
 @dataclass(frozen=True)
+class CliSandboxConfig:
+    """Host-selected CLI isolation. Never supplied by model/prose manifests."""
+    mode: str = 'off'
+    runtime_roots: tuple[str, ...] = ()
+
+    def __post_init__(self):
+        if self.mode not in {'off', 'required'}:
+            raise ValueError('cli_sandbox mode must be off or required')
+        if not isinstance(self.runtime_roots, tuple) or any(
+            not isinstance(p, str) or not p or '\x00' in p for p in self.runtime_roots):
+            raise ValueError('cli_sandbox runtime_roots must contain trusted paths')
+
+
+@dataclass(frozen=True)
 class RuntimeConfig:
     profiles: dict[str, EndpointConfig]
     routes: dict[str, str]
@@ -53,6 +67,7 @@ class RuntimeConfig:
     allowed_tools: frozenset[str] = frozenset()
     limits: RunLimits = field(default_factory=RunLimits)
     tool_directories: tuple[str, ...] = ()
+    cli_sandbox: CliSandboxConfig = field(default_factory=CliSandboxConfig)
 
     def __post_init__(self):
         if self.default_profile not in self.profiles:
@@ -61,6 +76,8 @@ class RuntimeConfig:
             raise ValueError("route references an unknown profile")
         if not isinstance(self.tool_directories, tuple) or any(not isinstance(p, str) or not p for p in self.tool_directories):
             raise ValueError('tool_directories must contain explicit trusted directory paths')
+        if not isinstance(self.cli_sandbox, CliSandboxConfig):
+            raise ValueError('cli_sandbox must be a CliSandboxConfig')
 
     @classmethod
     def load(cls, path: str | Path | None = None):
@@ -75,7 +92,7 @@ class RuntimeConfig:
             raw = yaml.safe_load(path.read_text(encoding="utf-8"))
             if not isinstance(raw, dict):
                 raise ValueError("expected a mapping")
-            if set(raw) - {"profiles", "routes", "default_profile", "allowed_tools", "limits", "tool_directories"}:
+            if set(raw) - {"profiles", "routes", "default_profile", "allowed_tools", "limits", "tool_directories", "cli_sandbox"}:
                 raise ValueError("unknown configuration keys")
             if not isinstance(raw.get("profiles"), dict) or not isinstance(raw.get("routes", {}), dict):
                 raise ValueError("profiles and routes must be mappings")
@@ -85,6 +102,12 @@ class RuntimeConfig:
             directories = raw.get('tool_directories', [])
             if not isinstance(directories, list) or any(not isinstance(p, str) or not p for p in directories):
                 raise ValueError('tool_directories must be a list of trusted paths')
+            sandbox = raw.get('cli_sandbox', {})
+            if not isinstance(sandbox, dict) or set(sandbox) - {'mode', 'runtime_roots'}:
+                raise ValueError('invalid cli_sandbox keys')
+            roots = sandbox.get('runtime_roots', [])
+            if not isinstance(roots, list) or any(not isinstance(p, str) or not p or '\x00' in p for p in roots):
+                raise ValueError('cli_sandbox runtime_roots must be a list of trusted paths')
             return cls(
                 profiles={key: EndpointConfig(**value) for key, value in raw["profiles"].items()},
                 routes=raw.get("routes", {}),
@@ -92,6 +115,8 @@ class RuntimeConfig:
                 allowed_tools=frozenset(allowed),
                 limits=RunLimits(**raw.get("limits", {})),
                 tool_directories=tuple(str((path.resolve().parent / p).resolve()) for p in directories),
+                cli_sandbox=CliSandboxConfig(sandbox.get('mode', 'off'),
+                    tuple(str((path.resolve().parent / p).resolve()) for p in roots)),
             )
         except (yaml.YAMLError, KeyError, TypeError, ValueError, AttributeError) as exc:
             raise ValueError(f"Invalid runtime configuration {path}: {exc}") from exc
