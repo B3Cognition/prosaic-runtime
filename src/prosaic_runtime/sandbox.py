@@ -134,6 +134,11 @@ def _profile(argv, cwd, policy, config, scratch):
              Path(sys.base_prefix) / 'lib', Path(sys.prefix) / 'pyvenv.cfg',
              Path(argv[0]), *config.runtime_roots,
              *(Path(cwd) / p for p in policy.read_roots), *(p for p in libraries if p)]
+    # python.org / setup-python framework builds keep the linked library beside
+    # lib/, not inside it. Grant only that trusted file, never the whole prefix.
+    framework = sysconfig.get_config_var('PYTHONFRAMEWORK')
+    if framework:
+        reads.append(Path(sys.base_prefix) / framework)
     lines = ['(version 1)', '(deny default)', '(allow process-exec)', '(allow process-fork)',
              '(allow process-info* (target self))', '(allow signal (target same-sandbox))',
              '(allow sysctl-read)', '(allow file-read-metadata)',

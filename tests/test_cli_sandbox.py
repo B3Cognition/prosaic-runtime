@@ -17,6 +17,23 @@ MAC = pytest.mark.skipif(not ((sys.platform == 'darwin' and Path('/usr/bin/sandb
                          reason='requires Seatbelt or Bubblewrap')
 
 
+@pytest.mark.skipif(sys.platform != 'darwin', reason='macOS framework interpreter')
+def test_framework_python_starts_without_a_broad_prefix_grant(tmp_path):
+    import sysconfig
+    if not sysconfig.get_config_var('PYTHONFRAMEWORK'):
+        pytest.skip('requires a framework Python build')
+    import subprocess
+    from types import SimpleNamespace
+    from prosaic_runtime import CliSandboxConfig
+    from prosaic_runtime.sandbox import sandbox_command
+    with sandbox_command([sys.executable, '-c', 'print("framework-ready")'],
+        cwd=tmp_path, env={}, policy=SimpleNamespace(read_roots=(), forbidden_roots=()),
+        config=CliSandboxConfig(mode='required')) as (argv, env):
+        result = subprocess.run(argv, env=env, capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == 'framework-ready'
+
+
 def test_linux_missing_backend_stops_before_model_or_tool(server, tmp_path, monkeypatch):
     url, requests, _ = server
     tools, _, _ = manifest(tmp_path)

@@ -16,6 +16,8 @@
   Ubuntu CI grants user namespaces only to its trusted Bubblewrap executable,
   retaining host-wide AppArmor restrictions.
 - Retains the immutable Python Prosaic 0.3.0 dependency; no Node/npm required.
+- Supports macOS framework Python startup with an exact framework-library read
+  grant; no broad interpreter-prefix or workspace access is added.
 
 ## 0.5.1 — 2026-10-01
 
