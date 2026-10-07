@@ -5,3 +5,5 @@ include docs/security.md
 include docs/adr-cli-sandbox.md
 prune examples/cli-tool/build
 global-exclude *.local.yml *.local.yaml
+
+include docs/structured-tools.md
