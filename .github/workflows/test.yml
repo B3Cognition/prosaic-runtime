@@ -59,7 +59,7 @@ jobs:
               with sandbox_command([sys.executable, '-c', 'pass'], cwd='/', env={},
                   policy=SimpleNamespace(read_roots=(), forbidden_roots=()),
                   config=CliSandboxConfig(mode='required')) as (argv, env):
-                  result = subprocess.run(argv, capture_output=True, text=True, env=env)
+                  result = subprocess.run(argv, cwd='/', capture_output=True, text=True, env=env)
                   print('Python sandbox probe exit:', result.returncode)
                   print(result.stderr)
                   if result.returncode:

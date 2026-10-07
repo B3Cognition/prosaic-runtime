@@ -27,9 +27,9 @@ def test_framework_python_starts_without_a_broad_prefix_grant(tmp_path):
     from prosaic_runtime import CliSandboxConfig
     from prosaic_runtime.sandbox import sandbox_command
     with sandbox_command([sys.executable, '-c', 'print("framework-ready")'],
-        cwd=tmp_path, env={}, policy=SimpleNamespace(read_roots=(), forbidden_roots=()),
+        cwd='/', env={}, policy=SimpleNamespace(read_roots=(), forbidden_roots=()),
         config=CliSandboxConfig(mode='required')) as (argv, env):
-        result = subprocess.run(argv, env=env, capture_output=True, text=True, timeout=10)
+        result = subprocess.run(argv, cwd='/', env=env, capture_output=True, text=True, timeout=10)
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == 'framework-ready'
 
