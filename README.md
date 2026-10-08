@@ -1,5 +1,9 @@
 # Prosaic Runtime
 
+Version **0.6.0** adds optional customer usage metering and the separate
+`prosaic-runtime-postgres` **0.1.0** recorder. Release assets include both packages;
+install the Runtime wheel before the adapter wheel. Accounting stays opt-in.
+
 Optional customer usage metering is described in [Accounting](docs/accounting.md).
 Existing callers need no IDs or database; durable tracking uses a separately installed
 PostgreSQL recorder and does not enable customer charges.

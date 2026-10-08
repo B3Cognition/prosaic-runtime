@@ -1,10 +1,8 @@
 # Prosaic Runtime PostgreSQL metering
 
-This package is unreleased. Install it from this source checkout alongside the
-Runtime source checkout implementing `prosaic_runtime.accounting` (or a future release
-with those contracts). The packaging floor `prosaic-runtime>=0.5.3` alone does not
-guarantee accounting support; an older published 0.5.3 package lacks this capability.
-Verify `from prosaic_runtime.accounting import AccountingError, RateCard` before use. Runtime accounting off needs no database or psycopg dependency.
+Install the separate recorder 0.1.0 release wheel alongside Runtime 0.6.x, which
+provides the accounting contracts. Install the Runtime wheel first. Runtime
+accounting off needs no database or psycopg dependency.
 
 ```python
 from prosaic_runtime.accounting import ExecutionContext, RateCard

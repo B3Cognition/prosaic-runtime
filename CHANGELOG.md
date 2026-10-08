@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+## 0.6.0 — 2026-10-08
+
+- Optional trusted execution context records customer/account, user/project and
+  workflow lineage; omitted IDs resolve to configured defaults or `default`.
+  Existing unmetered SDK/CLI calls and serialized Result fields remain compatible.
+- Per-provider-call accounting captures UTC timestamps, requested/reported model
+  and input/output/cache/reasoning token usage across HTTP, SSE and tool loops.
+  Unknown/partial evidence is retained; duplicate-key/conflicting usage is quarantined.
+- Separate `prosaic-runtime-postgres` 0.1.0 adapter persists intent before dispatch,
+  immutable scoped observations and decimal cost estimates with frozen rate cards.
+  Replay is idempotent, queries are bounded and reporting uses a consistent snapshot.
+- Recorder failure never automatically retries a paid model request. Accounting
+  remains opt-in; customer charging, billing export and monetary caps are not enabled.
+
+## 0.5.3 — 2026-10-07
+
+- Pin Python Prosaic 0.3.1 at immutable commit
+  `ee145ef29a62dbcf7f5e8abdf1d979749398718d` and refresh installation guidance.
+
 ## 0.5.2 — 2026-10-07
 
 - Public `StructuredToolLoop` for explicitly selected JSON tool-request transport:

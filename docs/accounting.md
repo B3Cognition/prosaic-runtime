@@ -4,13 +4,12 @@ Accounting is explicitly enabled. Existing SDK and CLI calls keep working withou
 IDs, a recorder, a database or a changed top-level Result schema. Prosaic agent
 definitions do not contain customer identities.
 
-## Local source installation
+## Installation
 
-This feature is not published. Install the local Runtime and its separate adapter
-alongside the local Harness when testing the integration. Harness pins the corresponding
-Runtime implementation commit; Git dependency installation requires that commit to be
-available remotely. Opt-in accounting requires `accounting_v1` and refuses an older
-adapter, while old unmetered callers remain supported.
+Runtime 0.6.0 includes `accounting_v1`; the separately installed PostgreSQL recorder
+is version 0.1.0. Install the Runtime release wheel before the recorder release wheel.
+Harness 0.6.0 pins the corresponding Runtime release commit. Older unmetered callers
+remain supported. The commands below are the source-install equivalent for development.
 
 ```sh
 uv pip install --python .venv/bin/python --no-deps -e .
