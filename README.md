@@ -1,5 +1,9 @@
 # Prosaic Runtime
 
+Optional customer usage metering is described in [Accounting](docs/accounting.md).
+Existing callers need no IDs or database; durable tracking uses a separately installed
+PostgreSQL recorder and does not enable customer charges.
+
 Version 0.5.3 installs Python Prosaic 0.3.1 automatically at an immutable Git
 revision. Installation and CI no longer require Node.js or npm.
 

@@ -2,6 +2,7 @@
 import argparse
 from dataclasses import asdict
 import json
+import os
 import subprocess
 import sys
 from .runtime import ProsaicRuntime
@@ -9,6 +10,7 @@ from .policy import RunPolicy
 from .config import RuntimeConfig
 from .console import Progress
 from .diagnostics import doctor, smoke, failure_hint
+from .accounting import ExecutionContext, RateCard
 
 
 def main(argv=None):
@@ -23,6 +25,12 @@ def main(argv=None):
         target.add_argument('--all-tools', action='store_true', help='check every registered/configured tool')
     if mode == 'run':
         parser.add_argument('--initial-tool', help='require this granted tool as the first native call')
+        for name in ('application_id', 'tenant_id', 'billing_account_id', 'actor_id', 'project_id', 'request_id', 'run_id', 'invocation_id', 'parent_invocation_id'):
+            parser.add_argument('--' + name.replace('_', '-'), help='trusted execution attribution; omitted IDs use defaults')
+        parser.add_argument('--accounting-dsn-env', help='environment variable holding the accounting PostgreSQL DSN; requires separately installed adapter')
+        parser.add_argument('--accounting-namespace', help='persistent deployment namespace')
+        parser.add_argument('--accounting-environment', help='isolated environment, e.g. production or sandbox')
+        parser.add_argument('--accounting-rate-card', help='explicit JSON rate card for internal estimates')
     parser.add_argument("--source", default=".prosaic")
     parser.add_argument("--config", help="YAML configuration (default: prosaic-runtime.yaml, then prosaic-runtime.yml)")
     parser.add_argument("--arguments", default="")
@@ -81,8 +89,30 @@ def main(argv=None):
                 else:
                     emit(report)
                 return 0 if report["ok"] else 1
-            runtime = ProsaicRuntime(config, source=args.source)
-            result = runtime.run(args.artifact, args.arguments, cwd=args.cwd, policy=policy, on_event=sink)
+            recorder = None
+            if args.accounting_dsn_env:
+                if not args.accounting_namespace or not args.accounting_environment:
+                    raise ValueError('accounting requires explicit namespace and environment')
+                dsn = os.environ.get(args.accounting_dsn_env)
+                if not dsn:
+                    raise ValueError('accounting DSN environment variable is not set')
+                try:
+                    from prosaic_runtime_postgres import PostgresRecorder
+                except ImportError as exc:
+                    raise ValueError('install prosaic-runtime-postgres to enable durable accounting') from exc
+                rate_card = None
+                if args.accounting_rate_card:
+                    with open(args.accounting_rate_card, encoding='utf-8') as handle:
+                        rate_card = RateCard(**json.load(handle))
+                recorder = PostgresRecorder(dsn, namespace=args.accounting_namespace,
+                    environment=args.accounting_environment, rate_card=rate_card)
+            elif args.accounting_namespace or args.accounting_environment or args.accounting_rate_card:
+                raise ValueError('accounting options require --accounting-dsn-env')
+            names = ('application_id', 'tenant_id', 'billing_account_id', 'actor_id', 'project_id', 'request_id', 'run_id', 'invocation_id', 'parent_invocation_id')
+            values = {name: getattr(args, name) for name in names if getattr(args, name) is not None}
+            runtime = ProsaicRuntime(config, source=args.source, accounting=recorder)
+            result = runtime.run(args.artifact, args.arguments, cwd=args.cwd, policy=policy, on_event=sink,
+                                 **({'context': ExecutionContext(**values)} if values else {}))
         if args.output == "text":
             if result.stdout:
                 print(result.stdout, end="" if result.stdout.endswith("\n") else "\n")

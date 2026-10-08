@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+[project]
+name = "prosaic-runtime-postgres"
+version = "0.1.0"
+description = "Durable PostgreSQL accounting recorder for Prosaic Runtime"
+requires-python = ">=3.11"
+readme = "README.md"
+license = "Apache-2.0"
+dependencies = ["prosaic-runtime>=0.5.3", "psycopg[binary]>=3.2,<4"]
+[project.optional-dependencies]
+test = ["pytest>=8"]
+[tool.setuptools.packages.find]
+where = ["src"]

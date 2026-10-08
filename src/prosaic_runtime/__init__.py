@@ -11,3 +11,6 @@ __all__ = ["ProsaicArtifact", "EndpointConfig", "RuntimeConfig", "RunLimits", "C
 from .structured_tools import Completion, StructuredToolError, StructuredToolLoop, ToolRequest
 
 __all__ += ["Completion", "StructuredToolError", "StructuredToolLoop", "ToolRequest"]
+
+from .accounting import AccountingError, ExecutionContext, ResolvedContext, RateCard
+__all__ += ["AccountingError", "ExecutionContext", "ResolvedContext", "RateCard"]

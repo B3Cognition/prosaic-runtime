@@ -17,6 +17,8 @@ from .types import Invocation, Result
 from .tools import validate_custom_tools, custom_descriptors, ToolDeadlineExceeded, ToolExecutionError
 from .cli_tools import load_cli_tools, cli_tool_context
 from .tool_registry import BoundedToolRegistry
+from .accounting import AccountingError, resolve_context
+from .accounting_capture import Capture
 
 
 class LimitExceeded(ValueError):
@@ -52,7 +54,7 @@ class _BoundedStream:
 
 
 class _BoundedBackend(OpenAICompatibleBackend):
-    def __init__(self, endpoint, max_input_bytes, custom_tools, deadline):
+    def __init__(self, endpoint, max_input_bytes, custom_tools, deadline, capture=None):
         super().__init__(endpoint)
         self.max_input_bytes = max_input_bytes
         self.reported_token_usage = None
@@ -60,6 +62,7 @@ class _BoundedBackend(OpenAICompatibleBackend):
         self.turns = 0
         self.custom_tools = custom_tools
         self.deadline = deadline
+        self.capture = capture
 
     def check_boundary(self):
         check_cancelled()
@@ -83,7 +86,10 @@ class _BoundedBackend(OpenAICompatibleBackend):
         return frozenset(self.custom_tools)
 
     def open_http(self, request, *, timeout):
-        return urllib.request.build_opener(_NoRedirect()).open(request, timeout=timeout)
+        opener = urllib.request.build_opener(_NoRedirect())
+        if self.capture is not None:
+            return self.capture.open(opener, request, timeout)
+        return opener.open(request, timeout=timeout)
 
     def read_response(self, response):
         check_cancelled()
@@ -119,11 +125,14 @@ class _BoundedBackend(OpenAICompatibleBackend):
 
 
 class ProsaicRuntime:
-    capabilities = frozenset({'read_receipts_v1', 'initial_tool_v1', 'initial_tool_enforcement_v1', 'acquisition_v1', 'custom_tools_v1', 'cli_tools_v1', 'cli_sandbox_v1'})
-    def __init__(self, config: RuntimeConfig, *, source=".prosaic", executable="prosaic", custom_tools=None):
+    capabilities = frozenset({'accounting_v1', 'read_receipts_v1', 'initial_tool_v1', 'initial_tool_enforcement_v1', 'acquisition_v1', 'custom_tools_v1', 'cli_tools_v1', 'cli_sandbox_v1'})
+    def __init__(self, config: RuntimeConfig, *, source=".prosaic", executable="prosaic", custom_tools=None,
+                 accounting=None, context_defaults=None):
         self.config = config
         self.source = Path(source)
         self.executable = executable
+        self.accounting = accounting
+        self.context_defaults = context_defaults
         self._custom_tools = validate_custom_tools(custom_tools)
         self._cli_tools = load_cli_tools(config.tool_directories)
         if self._custom_tools.keys() & self._cli_tools.keys():
@@ -185,9 +194,32 @@ class ProsaicRuntime:
                                      dict(os.environ if env is None else env), deadline)
 
     def run(self, artifact: str | ProsaicArtifact, arguments: str = "", *,
+            cwd: str | Path = '.', policy: RunPolicy | None = None,
+            on_event=None, cancelled=None, env=None,
+            acquisition: str | ProsaicArtifact | None = None, context=None, accounting=None) -> Result:
+        recorder = accounting if accounting is not None else self.accounting
+        enabled = recorder is not None or context is not None or self.context_defaults is not None
+        resolved = resolve_context(context, getattr(recorder, 'defaults', None) or self.context_defaults) if enabled else None
+        captures = []
+        try:
+            result = self._run(artifact, arguments, _recorder=recorder, _context=resolved,
+                               _capture_ref=captures.append, cwd=cwd, policy=policy, on_event=on_event,
+                               cancelled=cancelled, env=env, acquisition=acquisition)
+        except AccountingError:
+            result = Result(1, '', 'accounting persistence failed; do not retry the provider automatically',
+                            metadata={'failure_reason': 'accounting_failed'})
+        if enabled:
+            # Capture lineage is supplied by the result when a request began;
+            # failures before capture still expose the resolved attribution.
+            result.metadata.setdefault('accounting_v1', {'context': resolved.to_dict(),
+                'namespace': getattr(recorder, 'namespace', None), 'environment': getattr(recorder, 'environment', None),
+                'provider_call_ids': list(captures[0].call_ids) if captures else []})
+        return result
+
+    def _run(self, artifact: str | ProsaicArtifact, arguments: str = "", *,
             cwd: str | Path = ".", policy: RunPolicy | None = None,
             on_event=None, cancelled=None, env=None,
-            acquisition: str | ProsaicArtifact | None = None) -> Result:
+            acquisition: str | ProsaicArtifact | None = None, _recorder=None, _context=None, _capture_ref=None) -> Result:
         policy = policy or RunPolicy(timeout_s=self.config.limits.timeout_s,
                                      max_tool_rounds=self.config.limits.max_tool_rounds)
         started = time.monotonic()
@@ -271,7 +303,10 @@ class ProsaicRuntime:
                     return Result(1, "", "invocation deadline exceeded", timed_out=True)
                 emit("started", artifact_id=artifact.id, artifact_sha256=artifact.digest, profile=profile,
                      model=endpoint.model, tools=sorted(tools))
-                backend = _BoundedBackend(endpoint, policy.max_input_bytes, self._custom_tools, started + policy.timeout_s)
+                capture = Capture(_recorder, _context, artifact, profile) if _recorder is not None else None
+                if capture is not None:
+                    _capture_ref(capture)
+                backend = _BoundedBackend(endpoint, policy.max_input_bytes, self._custom_tools, started + policy.timeout_s, capture)
                 result = backend.run_prompt(Invocation(
                     str(Path(cwd).resolve()), prompt, invocation_env, remaining,
                     {"prompt_metadata": metadata}))
@@ -289,6 +324,9 @@ class ProsaicRuntime:
                     result.metadata["failure_reason"] = "incomplete_response"
                 result.metadata.update(artifact_id=artifact.id, artifact_sha256=artifact.digest, profile=profile,
                                        cost_status="unavailable")
+                if capture is not None:
+                    result.metadata['accounting_v1'] = {'context': _context.to_dict(), 'namespace': _recorder.namespace,
+                        'environment': _recorder.environment, 'provider_call_ids': list(capture.call_ids)}
                 if acquisition is not None:
                     result.metadata.update(acquisition_id=acquisition.id, acquisition_sha256=acquisition.digest)
                 emit("completed", exit_code=result.exit_code, token_usage=result.token_usage)
