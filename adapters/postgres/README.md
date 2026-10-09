@@ -104,3 +104,18 @@ uv build --directory adapters/postgres
 ```
 
 Without `METERING_TEST_DSN`, database tests skip explicitly; that is not release proof.
+# Readiness contract
+
+The 0.1.1 candidate validates the actual resolved metering tables using read-only
+catalog queries. It requires permanent logged tables, compatible columns and
+nullability, scoped primary/foreign keys, the measurement-state check constraint,
+and the SELECT/INSERT/intent-UPDATE privileges required by recorder operations.
+PostgreSQL 18 NOT NULL catalog entries are checked through column nullability.
+`check_ready()` never initializes or repairs a database and reports sanitized
+`AccountingError` failures. The stored format is unchanged from 0.1.0.
+
+Destructive readiness regressions require an explicitly owned disposable database:
+set `PROSAIC_OWNED_DB_AUDIT=1`, `METERING_TEST_DSN` to its migration role and
+`METERING_RUNTIME_DSN` to its restricted accounting role. Required integration
+runners must reject missing configuration or skipped tests. No production/shared
+database should be used for these tests.

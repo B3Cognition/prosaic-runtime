@@ -3,7 +3,7 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 [project]
 name = "prosaic-runtime-postgres"
-version = "0.1.0"
+version = "0.1.1"
 description = "Durable PostgreSQL accounting recorder for Prosaic Runtime"
 requires-python = ">=3.11"
 readme = "README.md"

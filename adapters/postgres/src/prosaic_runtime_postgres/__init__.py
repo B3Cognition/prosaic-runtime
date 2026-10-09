@@ -93,9 +93,9 @@ class PostgresRecorder:
             conn.execute(_DDL)
 
     def check_ready(self):
+        from .schema import check_ready
         with self._connection(snapshot=True) as conn:
-            conn.execute('SELECT namespace FROM prosaic_metering_intents LIMIT 0')
-            conn.execute('SELECT amount FROM prosaic_metering_observations LIMIT 0')
+            check_ready(conn)
         return True
 
     def _validate_intent(self, intent):
