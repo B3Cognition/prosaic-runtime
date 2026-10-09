@@ -20,7 +20,7 @@ from .cli_tools import load_cli_tools, cli_tool_context
 from .tool_registry import BoundedToolRegistry
 from .accounting import AccountingError, resolve_context
 from .accounting_capture import Capture
-from .http_bounds import LimitExceeded, set_response_timeout
+from .http_bounds import LimitExceeded, set_response_timeout, BoundedNativeStream
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -113,7 +113,9 @@ class _BoundedMixin:
         return body.decode("utf-8", errors="strict")
 
     def _read_sse_turn(self, response, deadline):
-        if not isinstance(response, _BoundedStream):
+        if self._config.provider == 'anthropic':
+            response = BoundedNativeStream(response, self._config.max_response_bytes, min(deadline, self.deadline))
+        elif not isinstance(response, _BoundedStream):
             response = _BoundedStream(response, self._config.max_response_bytes)
         return super()._read_sse_turn(response, deadline)
 

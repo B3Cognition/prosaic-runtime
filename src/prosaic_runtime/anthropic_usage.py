@@ -65,7 +65,7 @@ class UsageSnapshots:
                 new, old = value[key], previous.get(key)
                 if not _quantity(new) or (old is not None and (not _quantity(old) or new < old)):
                     self.conflict = True
-        self.raw = {**previous, **value}
+        self.raw = _merge_snapshots(previous, value)
 
     def normalized(self):
         usage = normalize_anthropic_usage(self.raw)
@@ -84,3 +84,13 @@ def _snapshot_conflict(previous, current):
         elif old != new:
             return True
     return False
+
+
+def _merge_snapshots(previous, current):
+    merged = dict(previous)
+    for key, value in current.items():
+        if type(value) is dict and type(previous.get(key)) is dict:
+            merged[key] = _merge_snapshots(previous[key], value)
+        else:
+            merged[key] = value
+    return merged

@@ -211,3 +211,18 @@ def test_native_accounting_does_not_trust_frames_rejected_by_parser(native_serve
     result = native_runtime(url, features={'streaming': True}, accounting=recorder).run(artifact())
     assert result.exit_code != 0
     assert observation(recorder)['usage']['status'] != 'reported'
+
+
+def test_native_omitted_nested_usage_preserves_billable_evidence(native_server):
+    url, requests, responses = native_server
+    items = events(message(usage={'input_tokens': 5, 'output_tokens': 2,
+                                  'server_tool_use': {'web_search_requests': 1}}))
+    items[-2]['usage']['server_tool_use'] = {}
+    responses.append(sse(items))
+    recorder = MemoryRecorder(provider_id='anthropic')
+    result = native_runtime(url, features={'streaming': True}, accounting=recorder).run(artifact())
+    assert result.exit_code == 0 and result.token_usage == 7
+    obs = observation(recorder)
+    assert obs['usage']['status'] == 'unsupported'
+    assert result.metadata['raw_response_metadata']['usage']['server_tool_use'] == {'web_search_requests': 1}
+    assert RateCard('v1', 'claude-test', '2', '8').assess(obs)['amount'] is None

@@ -195,5 +195,6 @@ configuration/tools (2), streaming/failures (3), usage/accounting (4), and packa
 verification/documentation (5). Review Focus conditions are assigned to tasks
 2–4. No new public provider plugin interface or ledger schema is introduced.
 Native execution selected by the user. Implementation and package verification
-are complete; final independent review is pending. Full suite: 453 passed,
-1 skipped. Installed wheel: 89 native tests passed outside the checkout.
+are complete. Independent review identified two Important findings; both were
+reproduced and fixed with regression tests. Final full suite: 455 passed,
+1 skipped. Rebuilt installed wheel: 91 native tests passed outside the checkout.

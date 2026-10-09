@@ -2,6 +2,7 @@
 from copy import deepcopy
 from dataclasses import replace
 import json
+import time
 
 import pytest
 
@@ -212,3 +213,15 @@ def test_native_http_error_invalid_utf8_is_still_a_failure(native_server):
     responses.append((429, 'application/json', b'\xff', {}))
     result = native_runtime(url).run(artifact())
     assert result.exit_code == 429 and result.metadata['http_status'] == 429
+
+
+def test_native_sse_drip_feed_line_cannot_extend_deadline(native_server):
+    url, requests, responses = native_server
+    value = sse(events())
+    body = b':' + b'padding' * 220 + b'\n\n' + value[2]
+    responses.append((*value[:2], body, {'Fixture-Drip': '0.02'}))
+    started = time.monotonic()
+    result = native_runtime(url, features={'streaming': True}).run(artifact(), policy=RunPolicy(timeout_s=0.06))
+    elapsed = time.monotonic() - started
+    assert result.exit_code == 1 and result.timed_out
+    assert elapsed < 0.3  # A broken inactivity-only timeout needs >0.6s to finish this line.

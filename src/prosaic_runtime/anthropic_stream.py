@@ -100,8 +100,8 @@ class StreamState:
             if usage is not None:
                 if not isinstance(usage, dict) or not isinstance(self.message.get('usage', {}), dict):
                     raise ValueError('invalid usage')
-                self.message['usage'] = {**self.message.get('usage', {}), **usage}
                 self.usage.update(usage)
+                self.message['usage'] = self.usage.raw
             self.delta_seen = True
             return
         if kind == 'message_stop':

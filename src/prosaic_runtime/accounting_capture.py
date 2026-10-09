@@ -239,6 +239,13 @@ class RecordedResponse:
         self._line(raw)
         return raw
 
+    def read_chunk(self, size):
+        """Native line assembly reads bounded chunks; evidence is admitted per line."""
+        return self.response.read1(size)
+
+    def capture_line(self, raw):
+        self._line(raw)
+
     def read(self, *args):
         raw = self.response.read(*args)
         self._capture_body(raw)
