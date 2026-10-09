@@ -20,10 +20,7 @@ from .cli_tools import load_cli_tools, cli_tool_context
 from .tool_registry import BoundedToolRegistry
 from .accounting import AccountingError, resolve_context
 from .accounting_capture import Capture
-
-
-class LimitExceeded(ValueError):
-    pass
+from .http_bounds import LimitExceeded, set_response_timeout
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -93,9 +90,25 @@ class _BoundedMixin:
         return opener.open(request, timeout=timeout)
 
     def read_response(self, response):
-        check_cancelled()
-        body = response.read(self._config.max_response_bytes + 1)
-        if len(body) > self._config.max_response_bytes:
+        self.check_boundary()
+        limit = self._config.max_response_bytes
+        if self._config.provider == 'anthropic' and callable(getattr(response, 'read1', None)):
+            chunks, size = [], 0
+            while True:
+                self.check_boundary()
+                set_response_timeout(response, self.deadline - time.monotonic())
+                chunk = response.read1(min(65536, limit - size + 1))
+                size += len(chunk)
+                if size > limit:
+                    raise LimitExceeded('response exceeds max_response_bytes')
+                if not chunk:
+                    break
+                chunks.append(chunk)
+            body = b''.join(chunks)
+        else:
+            body = response.read(limit + 1)
+        self.check_boundary()
+        if len(body) > limit:
             raise LimitExceeded("response exceeds max_response_bytes")
         return body.decode("utf-8", errors="strict")
 

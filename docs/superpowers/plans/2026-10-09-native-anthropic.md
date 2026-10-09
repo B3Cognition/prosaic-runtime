@@ -43,7 +43,7 @@ the bounded loop, calling encode/send hooks. Preserve existing facade signatures
 `_chat_payload(messages, metadata, *, streaming, tools)` and
 `_post_chat_turn(payload, request, deadline, streaming)` for OpenAI consumers.
 
-- [ ] Add regression tests using the local server fixture in test_runtime.py:
+- [x] Add regression tests using the local server fixture in test_runtime.py:
 
 ```python
 def test_openai_facade_hooks_remain_overrideable():
@@ -54,14 +54,14 @@ def test_openai_facade_hooks_remain_overrideable():
 
 Also pin no-tool JSON and SSE wire payloads, first-tool enforcement, acquisition
 final transitions, and custom tool execution using current public Runtime tests.
-- [ ] Run `.venv/bin/python -m pytest tests/test_provider_execution.py tests/test_runtime.py tests/test_acquisition.py tests/test_transport.py -q` before extraction to establish passing behavior.
-- [ ] Move loop code without changing grants or wire requests. Replace the
+- [x] Run `.venv/bin/python -m pytest tests/test_provider_execution.py tests/test_runtime.py tests/test_acquisition.py tests/test_transport.py -q` before extraction to establish passing behavior.
+- [x] Move loop code without changing grants or wire requests. Replace the
 completion-turn definition with a compatibility alias to ProviderTurn; introduce
 continuation conversion hooks so native blocks need not be reconstructed.
 Route bounded no-tool calls through the same request boundary as tool calls.
-- [ ] Run the command above plus the full suite; investigate any changed result,
+- [x] Run the command above plus the full suite; investigate any changed result,
 event, request, or token count rather than updating expected values blindly.
-- [ ] Commit only these changes as `refactor: separate provider transport from execution`.
+- [x] Commit only these changes as `refactor: separate provider transport from execution`.
 
 ## Task 2: Native configuration and JSON Messages execution
 
@@ -72,7 +72,7 @@ event, request, or token count rather than updating expected values blindly.
 AnthropicBackend uses shared execution hooks and emits ProviderTurn. Runtime
 selects the backend from endpoint.provider without changing public call signatures.
 
-- [ ] Add failing configuration tests:
+- [x] Add failing configuration tests:
 
 ```python
 def test_provider_defaults_and_unknown_provider():
@@ -84,15 +84,15 @@ def test_provider_defaults_and_unknown_provider():
 Add a local HTTP server assertion that an Anthropic text call sends `/v1/messages`,
 `x-api-key`, `anthropic-version`, no Bearer header, system separately, and positive
 max_tokens. Return a complete native text response and assert public Result text.
-- [ ] Run `.venv/bin/python -m pytest tests/test_config.py tests/test_anthropic.py -q`; new native tests must fail before implementation.
-- [ ] Implement native payload conversion and JSON validation. Convert assistant
+- [x] Run `.venv/bin/python -m pytest tests/test_config.py tests/test_anthropic.py -q`; new native tests must fail before implementation.
+- [x] Implement native payload conversion and JSON validation. Convert assistant
 tool requests to tool_use blocks and tool results to user tool_result blocks;
 retain complete continuation content. Reject unsupported enabled json_mode,
 reasoning controls, and non-text native blocks before continuing execution.
-- [ ] Add two-turn read_file, multiple-tool IDs, custom-tool, forced first-tool,
+- [x] Add two-turn read_file, multiple-tool IDs, custom-tool, forced first-tool,
 denied-grant, and acquisition tests. Assert no tool executes on truncation,
 refusal, malformed arguments, or unexpected forced calls. Test mixed profiles.
-- [ ] Run native tests and existing runtime, acquisition, custom-tool, and
+- [x] Run native tests and existing runtime, acquisition, custom-tool, and
 diagnostics tests; commit as `feat: add native Anthropic Messages execution`.
 
 ## Task 3: Strict native streaming and bounded failures
@@ -104,7 +104,7 @@ diagnostics tests; commit as `feat: add native Anthropic Messages execution`.
 ProviderTurn or Result. It uses the bounded response wrapper and cancellation
 checks; on_text emits provisional text through the existing event mechanism.
 
-- [ ] Add a failing fragmented-input stream test using these native events:
+- [x] Add a failing fragmented-input stream test using these native events:
 
 ```python
 events = [
@@ -121,16 +121,16 @@ events = [
 Wrap these in message_start, message_delta(stop_reason=tool_use), and message_stop;
 assert the tool executes only after message_stop. Removing that terminal event
 must produce failure with zero executed tools.
-- [ ] Run `.venv/bin/python -m pytest tests/test_anthropic_stream.py -q` and verify new tests fail.
-- [ ] Implement block-index state validation, text/input deltas, ping handling,
+- [x] Run `.venv/bin/python -m pytest tests/test_anthropic_stream.py -q` and verify new tests fail.
+- [x] Implement block-index state validation, text/input deltas, ping handling,
 SSE multiline framing, complete message termination, and explicit stream errors.
 Reject duplicate/reordered block events, unsupported blocks, non-object input,
 invalid UTF-8/JSON, and unknown consequential event types. Do not retry.
-- [ ] Add public Runtime tests for cancellation, timeout, redirects, HTTP errors,
+- [x] Add public Runtime tests for cancellation, timeout, redirects, HTTP errors,
 input/response size overflow, missing terminal markers, refusal, max_tokens, and
 pause_turn. Check no-tool and tool paths share all bounds. Cross-check parser
 event fields against official Anthropic documentation.
-- [ ] Run native streaming plus test_redirect_safety.py, test_input_boundary.py,
+- [x] Run native streaming plus test_redirect_safety.py, test_input_boundary.py,
 and test_features.py; commit as `feat: support bounded Anthropic streaming`.
 
 ## Task 4: Provider-aware usage and durable evidence
@@ -142,7 +142,7 @@ create `anthropic_usage.py`; add `tests/test_anthropic_accounting.py`.
 canonical usage keys/status. Capture chooses an observer from endpoint.provider;
 its OpenAI default remains unchanged. Native raw usage stays in Result metadata.
 
-- [ ] Add failing tests for native usage categories:
+- [x] Add failing tests for native usage categories:
 
 ```python
 def test_cache_creation_cannot_be_priced_as_ordinary_input():
@@ -158,13 +158,13 @@ def test_cache_creation_cannot_be_priced_as_ordinary_input():
 Add snapshots with output 1 then 7; final output must be 7, not 8. Add partial
 stream, conflicting IDs, invalid counters, unknown nonzero categories, and
 recorder-provider mismatch tests (mismatch must make zero HTTP calls).
-- [ ] Run `.venv/bin/python -m pytest tests/test_anthropic_accounting.py -q`; confirm failures.
-- [ ] Implement native usage normalization and message event observation. Capture
+- [x] Run `.venv/bin/python -m pytest tests/test_anthropic_accounting.py -q`; confirm failures.
+- [x] Implement native usage normalization and message event observation. Capture
 native IDs/model before cancellation callbacks; require complete native terminal
 framing. Preserve ledger shape, OpenAI normalization, and existing pricing rules.
 Validate recorder/provider match before opening transport. Never guess absent
 usage or assign unsupported cache creation ordinary-input prices.
-- [ ] Run native accounting tests, test_accounting.py, test_usage_integrity.py,
+- [x] Run native accounting tests, test_accounting.py, test_usage_integrity.py,
 and available PostgreSQL adapter tests; commit as `feat: capture Anthropic usage safely`.
 
 ## Task 5: Documentation and installed-package verification
@@ -172,19 +172,19 @@ and available PostgreSQL adapter tests; commit as `feat: capture Anthropic usage
 **Files:** Modify `README.md`, `CHANGELOG.md`, `pyproject.toml`; add
 `examples/anthropic.yml` and `tests/test_anthropic_package.py`.
 
-- [ ] Add a configuration example with provider anthropic, operator-selected model,
+- [x] Add a configuration example with provider anthropic, operator-selected model,
 base_url https://api.anthropic.com/v1, api_key_env ANTHROPIC_API_KEY, and explicit
 allowed_tools. Test loading it without needing credentials or network access.
-- [ ] Document text/tool support, unsupported features, protocol selection,
+- [x] Document text/tool support, unsupported features, protocol selection,
 credential configuration, cached-input accounting limits, and optional live smoke.
 Update package description without changing release version implicitly.
-- [ ] Run `.venv/bin/python -m pytest` in Runtime. Run adapter tests when their
+- [x] Run `.venv/bin/python -m pytest` in Runtime. Run adapter tests when their
 dependencies are available; report unavailable external services explicitly.
-- [ ] Run `.venv/bin/python -m build`. Runtime has no scripts/wheel_smoke.py:
+- [x] Run `.venv/bin/python -m build`. Runtime has no scripts/wheel_smoke.py:
 install the built wheel into a temporary virtualenv, run imports/config loading,
 `prosaic-runtime --help`, and native JSON/text-tool fixture tests from outside
 the checkout with PYTHONPATH unset. Confirm imports resolve to installed files.
-- [ ] Inspect the final diff for secrets, unintended format changes, duplicated
+- [x] Inspect the final diff for secrets, unintended format changes, duplicated
 permission logic, and public hook breakage. Commit documentation and tests as
 `docs: document native Anthropic provider support`; report verification evidence.
 
@@ -194,4 +194,6 @@ All spec sections map to the five tasks: compatibility/execution (1), native
 configuration/tools (2), streaming/failures (3), usage/accounting (4), and package
 verification/documentation (5). Review Focus conditions are assigned to tasks
 2–4. No new public provider plugin interface or ledger schema is introduced.
-Execution remains pending user review and execution-method selection.
+Native execution selected by the user. Implementation and package verification
+are complete; final independent review is pending. Full suite: 453 passed,
+1 skipped. Installed wheel: 89 native tests passed outside the checkout.

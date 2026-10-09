@@ -49,7 +49,7 @@ def test_native_streamed_text_is_provisional_and_usage_is_cumulative(native_serv
     assert result.exit_code == 0 and result.stdout == 'hello' and result.token_usage == 12
     assert result.metadata['streamed'] is True
     assert requests[0]['body']['stream'] is True
-    text = [e for e in seen if e['event'] == 'text']
+    text = [e for e in seen if e['event'] == 'text_delta']
     assert ''.join(e['text'] for e in text) == 'hello'
     assert seen[-1]['event'] == 'completed'
 
@@ -127,7 +127,7 @@ def test_native_cancelled_response_cannot_execute_tools(native_server, tmp_path,
 
     def on_event(event):
         seen.append(event)
-        if ((streaming and event['event'] == 'text') or
+        if ((streaming and event['event'] == 'text_delta') or
                 (not streaming and event['event'] == 'progress' and 'response finish_reason=' in event['text'])):
             stopped.append(True)
 
@@ -197,3 +197,18 @@ def test_streamed_failed_stop_does_not_execute_tools(native_server, stop):
         policy=RunPolicy(allowed_tools=frozenset({'read_file'})), on_event=seen.append)
     assert result.exit_code != 0 and result.metadata['raw_response_metadata']['stop_reason'] == stop
     assert not any(e['event'] == 'tool_started' for e in seen)
+
+
+def test_native_json_drip_feed_cannot_extend_invocation_deadline(native_server):
+    url, requests, responses = native_server
+    value = response()
+    responses.append((*value[:3], {'Fixture-Drip': '0.02'}))
+    result = native_runtime(url).run(artifact(), policy=RunPolicy(timeout_s=0.07))
+    assert result.exit_code == 1 and result.timed_out
+
+
+def test_native_http_error_invalid_utf8_is_still_a_failure(native_server):
+    url, requests, responses = native_server
+    responses.append((429, 'application/json', b'\xff', {}))
+    result = native_runtime(url).run(artifact())
+    assert result.exit_code == 429 and result.metadata['http_status'] == 429

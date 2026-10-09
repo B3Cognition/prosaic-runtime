@@ -161,6 +161,7 @@ class RecordedResponse:
         self.response, self.observation = response, observation
         self.data = []
         self.event_name = None
+        self.body = bytearray()
 
     def __getattr__(self, name):
         return getattr(self.response, name)
@@ -171,6 +172,9 @@ class RecordedResponse:
 
     def __exit__(self, typ, value, traceback):
         try:
+            if self.body:
+                self._capture_body(bytes(self.body))
+                self.body.clear()
             if not self.observation.eager_events and (self.data or self.event_name is not None):
                 self.observation.conflict = True
             self._flush()
@@ -187,7 +191,7 @@ class RecordedResponse:
                 if self.event_name is not None and (not isinstance(event, dict) or event.get('type') != self.event_name):
                     self.observation.conflict = True
                 self.observation.capture(event)
-            except (ValueError, TypeError):
+            except (ValueError, TypeError, RecursionError):
                 self.observation.conflict = True
             self.data = []
         elif self.event_name is not None:
@@ -195,7 +199,14 @@ class RecordedResponse:
         self.event_name = None
 
     def _line(self, raw):
-        line = raw.decode('utf-8', errors='replace').strip()
+        if self.observation.eager_events:
+            line = raw.decode('utf-8', errors='replace').strip()
+        else:
+            try:
+                line = raw.decode('utf-8', errors='strict').rstrip('\r\n')
+            except UnicodeError:
+                self.observation.conflict = True
+                return
         if not line:
             self._flush()
         elif not self.observation.eager_events and line.startswith('event:'):
@@ -204,7 +215,7 @@ class RecordedResponse:
             self.event_name = line[6:].lstrip()
         elif line.startswith('data:'):
             value = line[5:].lstrip()
-            if value == '[DONE]':
+            if value == '[DONE]' and self.observation.eager_events:
                 self._flush()
             else:
                 self.data.append(value)
@@ -230,12 +241,25 @@ class RecordedResponse:
 
     def read(self, *args):
         raw = self.response.read(*args)
+        self._capture_body(raw)
+        return raw
+
+    def read1(self, *args):
+        raw = self.response.read1(*args)
+        self.body.extend(raw)
+        if not raw:
+            self._capture_body(bytes(self.body))
+            self.body.clear()
+        return raw
+
+    def _capture_body(self, raw):
         try:
             self.observation.capture(strict_json(raw))
         except InvalidEvidence:
+            self.observation.conflict = True
+        except RecursionError:
             self.observation.conflict = True
         except (ValueError, TypeError):
             for line in raw.splitlines():
                 self._line(line)
             self._flush()
-        return raw

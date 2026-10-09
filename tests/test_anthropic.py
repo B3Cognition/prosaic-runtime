@@ -28,6 +28,8 @@ def native_server():
 
         def respond(self):
             status, content_type, body, headers, *delay = responses.pop(0)
+            headers = dict(headers)
+            drip = headers.pop('Fixture-Drip', None)
             if delay:
                 time.sleep(delay[0])
             self.send_response(status)
@@ -37,7 +39,13 @@ def native_server():
                 self.send_header(name, value)
             self.end_headers()
             try:
-                self.wfile.write(body)
+                if drip:
+                    for start in range(0, len(body), 50):
+                        self.wfile.write(body[start:start + 50])
+                        self.wfile.flush()
+                        time.sleep(float(drip))
+                else:
+                    self.wfile.write(body)
             except BrokenPipeError:
                 pass
 

@@ -25,8 +25,8 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 def run_check(config, profile, *, with_tools=False, timeout_s=None, max_tool_rounds=None, on_event=None):
     """Use bundled neutral prose and synthetic evidence, never caller files."""
-    name = "reviewer" if with_tools else "summarizer"
     endpoint = config.profiles[profile]
+    name = 'reviewer' if with_tools else 'native-summarizer' if endpoint.provider == 'anthropic' else 'summarizer'
     grants = frozenset({"read_file"}) if with_tools else frozenset()
     # Smoke's explicit opt-in authorizes only these synthetic read-only examples.
     isolated = RuntimeConfig({profile: endpoint}, {"fast": profile}, profile, grants, config.limits)

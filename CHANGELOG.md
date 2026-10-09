@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Native Anthropic Messages profiles support text, streaming, and Runtime-managed
+  builtin, custom, and CLI tools through the shared bounded execution loop.
+  Existing profiles continue to default to OpenAI-compatible Chat Completions.
+- Anthropic usage capture handles cumulative SSE snapshots and distinct cache
+  categories. Cache-write and unsupported pricing categories remain unpriced;
+  conflicting or partial evidence cannot produce a trusted cost estimate.
+- Anthropic supports `temperature: null` to omit sampling parameters; unsupported
+  effort, thinking, JSON mode, and server tools fail explicitly. Durable CLI
+  accounting accepts `--accounting-provider anthropic`.
+
 ## 0.6.0 — 2026-10-08
 
 - Optional trusted execution context records customer/account, user/project and

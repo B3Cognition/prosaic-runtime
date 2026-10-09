@@ -4,9 +4,10 @@ import time
 from .accounting_capture import strict_json
 from .anthropic import parse_message
 from .anthropic_usage import UsageSnapshots
-from .events import check_cancelled, print
+from .events import check_cancelled, emit
 from .openai_compatible import _http_status, _raw_response_headers
 from .types import Result
+from .http_bounds import LimitExceeded, set_response_timeout
 
 
 class StreamState:
@@ -112,7 +113,11 @@ class StreamState:
         raise ValueError('unsupported stream event')
 
 
-def read_anthropic_turn(response, deadline, *, on_text=print):
+def _emit_text(text):
+    emit('text_delta', text=text)
+
+
+def read_anthropic_turn(response, deadline, *, on_text=_emit_text):
     state = StreamState(on_text)
     data, event_name = [], None
     status, headers = _http_status(response), _raw_response_headers(response)
@@ -135,9 +140,7 @@ def read_anthropic_turn(response, deadline, *, on_text=print):
             if remaining <= 0:
                 raise TimeoutError('stream deadline')
             # Reset the socket timeout to the remaining invocation budget before each read.
-            sock = getattr(getattr(getattr(response, 'fp', None), 'raw', None), '_sock', None)
-            if sock is not None:
-                sock.settimeout(max(0.001, remaining))
+            set_response_timeout(response, remaining)
             raw = response.readline()
             if not raw:
                 if data or event_name is not None:
@@ -167,7 +170,6 @@ def read_anthropic_turn(response, deadline, *, on_text=print):
         return turn
     except (UnicodeError, ValueError, TypeError, RecursionError) as exc:
         # Size-limit exceptions are host guards, not malformed provider messages.
-        from .runtime import LimitExceeded
         if isinstance(exc, LimitExceeded):
             raise
         message = state.message or {}

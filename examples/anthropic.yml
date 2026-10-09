@@ -1,0 +1,18 @@
+# Set model to an Anthropic model available to your account.
+default_profile: claude
+allowed_tools: [read_file]
+limits:
+  timeout_s: 180
+  max_tool_rounds: 4
+routes:
+  fast: claude
+profiles:
+  claude:
+    provider: anthropic
+    base_url: https://api.anthropic.com/v1
+    model: your-anthropic-model
+    api_key_env: ANTHROPIC_API_KEY
+    temperature: null
+    max_tokens: 2048
+    features:
+      streaming: true

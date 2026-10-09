@@ -182,8 +182,7 @@ class AnthropicBackend(ExecutionBackend):
             return Result(1, '', 'Malformed Anthropic response', metadata={
                 'provider': self.name, 'provider_error_code': 'malformed_response'})
         except urllib.error.HTTPError as exc:
-            # Bound and capture error bodies without exposing credentials or raw provider messages.
-            self.read_response(exc)
+            exc.close()
             return Result(exc.code, '', 'Anthropic request rejected', metadata={
                 'provider': self.name, 'http_status': exc.code, 'provider_error_code': 'http_error'})
         except (urllib.error.URLError, OSError) as exc:

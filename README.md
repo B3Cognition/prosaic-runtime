@@ -71,7 +71,10 @@ first turn only; prose, runtime and host grants must all allow it. This cannot
 elevate permissions or guarantee an endpoint honors tool choice. Consumers must
 still validate the observed events. Defaults remain unchanged.
 
-Execute neutral Prosaic commands and agents on OpenAI-compatible Chat Completions endpoints. A Python library and CLI for small, bounded tasks with streaming, tool calls, explicit filesystem permissions, and structured results.
+Execute neutral Prosaic commands and agents on OpenAI-compatible Chat Completions
+or native Anthropic Messages endpoints. A Python library and CLI for small,
+bounded tasks with streaming, tool calls, explicit filesystem permissions, and
+structured results.
 
 Version 0.4.0 hardening: explicit `initial_tool` selections now reject omitted,
 substituted or additional first-turn tool calls before executing any of them.
@@ -85,7 +88,9 @@ and the bounded execution fixes described below.
 
 Follow these steps in order in one terminal. Commands below target macOS, Linux,
 or Windows through WSL, using Bash or Zsh. You need an existing OpenAI-compatible
-Chat Completions endpoint: this runtime does **not** install or host a model.
+Chat Completions endpoint or an Anthropic API account: this runtime does **not**
+install or host a model. The walkthrough below uses OpenAI-compatible endpoints;
+see [native Anthropic setup](#native-anthropic-messages) for Claude.
 Local and hosted endpoints both work; hosted calls may incur provider charges.
 
 ### 1. Check prerequisites
@@ -472,6 +477,58 @@ response limit, already reported completed-turn usage is retained and marked
 request's usage.
 
 Usage is reported when supplied by the endpoint. Cost estimation is unavailable in v0.2; `cost_usd = 0` is a legacy compatibility field, not a claim that inference was free. Check `metadata.cost_status`. No retries or model escalation occur automatically. An incomplete or truncated final response is unsuccessful.
+
+## Native Anthropic Messages
+
+Endpoint profiles accept `provider: anthropic` for native Messages requests.
+Omitting `provider` retains `openai-compatible`; both can coexist in the same
+configuration and use the existing `routes` by model tier. Configure an API base
+such as `https://api.anthropic.com/v1`, without `/messages`, and a model available
+to your account. Runtime appends `/messages` and sends `x-api-key` plus the
+Anthropic API version header. Model discovery uses the same native credentials.
+
+Start with [examples/anthropic.yml](examples/anthropic.yml). Replace
+`your-anthropic-model`, set `ANTHROPIC_API_KEY` in your shell, and run from
+`examples/`:
+
+```sh
+prosaic-runtime subagents/native-summarizer.md --config anthropic.yml \
+  --arguments "Summarize this text." --output text
+prosaic-runtime subagents/reviewer.md --config anthropic.yml \
+  --arguments "Review evidence/pilot.md" --allow-tool read_file --read-root evidence
+```
+
+Use `temperature: null` to omit sampling parameters for models that do not
+accept them. Native requests require a positive `max_tokens`. The historic
+`summarizer.md` declares `effort: low`; use `native-summarizer.md` for a summary
+without that control. This version explicitly rejects effort controls, JSON
+mode, extended thinking, image inputs, and provider-hosted tools. It supports
+text and Runtime-managed builtin, host-registered, and trusted CLI tools.
+Runtime continues to enforce all existing grants, read receipts, first-tool
+requirements, acquisition boundaries, cancellation, deadlines, and size limits.
+Partial text events remain provisional, and incomplete streamed tool arguments
+cannot execute. Provider failures are not automatically retried.
+
+For SDK accounting, set the recorder's `provider_id='anthropic'`; a mismatch
+with the routed endpoint fails before inference. For durable CLI accounting,
+add `--accounting-provider anthropic` alongside the existing accounting options.
+Each recorder serves its matching provider; use separate recorders for mixed
+provider invocations. Ledger contracts remain unchanged.
+
+Anthropic token totals include ordinary input, cache reads, cache creation, and
+output. Cumulative stream usage snapshots are replaced rather than summed.
+Missing details stay unknown; partial and conflicting evidence is retained.
+The existing rate-card schema cannot represent cache-write pricing, nonstandard
+service tiers, or regional pricing. Those categories and unfamiliar nonzero
+usage categories remain unavailable for cost estimates. Raw native usage stays
+in result metadata. See the official [streaming](https://platform.claude.com/docs/en/build-with-claude/streaming)
+and [prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching)
+documentation for native response semantics.
+
+To explicitly request a live capability check, run
+`prosaic-runtime smoke --live --config anthropic.yml` from `examples/`.
+This makes paid API calls using bundled synthetic prose; automated tests use
+local fixtures and require no Anthropic key.
 
 ## Echelon integration
 

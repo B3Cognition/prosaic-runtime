@@ -93,7 +93,7 @@ def test_native_usage_captured_before_cancel_callback(native_server):
     recorder = MemoryRecorder(provider_id='anthropic')
     stopped = []
     result = native_runtime(url, features={'streaming': True}, accounting=recorder).run(artifact(),
-        on_event=lambda e: stopped.append(True) if e['event'] == 'text' else None,
+        on_event=lambda e: stopped.append(True) if e['event'] == 'text_delta' else None,
         cancelled=lambda: bool(stopped))
     assert result.exit_code == 130
     obs = observation(recorder)
@@ -182,10 +182,32 @@ def test_native_cli_can_select_matching_accounting_provider(native_server, tmp_p
     config.write_text(f'default_profile: native\nroutes: {{fast: native}}\nprofiles:\n  native:\n'
                       f'    provider: anthropic\n    base_url: {url}\n    model: claude-test\n'
                       '    features: {streaming: false}\n')
-    source = Path(__file__).resolve().parents[1] / 'examples/.prosaic'
+    source = tmp_path / '.prosaic'
+    (source / 'subagents').mkdir(parents=True)
+    (source / 'subagents/summarizer.md').write_text(
+        '---\nname: summarizer\ndescription: Summarize input\nexecution: agent\n'
+        'model_tier: fast\ntools: none\n---\nSummarize the input.')
     code = main(['subagents/summarizer.md', '--config', str(config), '--source', str(source),
                  '--accounting-dsn-env', 'TEST_ACCOUNTING_DSN', '--accounting-namespace', 'test',
                  '--accounting-environment', 'test', '--accounting-provider', 'anthropic', '--quiet'])
     assert code == 0 and recorder.provider_id == 'anthropic'
     assert observation(recorder)['usage']['total_tokens'] == 7
     assert json.loads(capsys.readouterr().out)['exit_code'] == 0
+
+
+@pytest.mark.parametrize('mutation', ['leading_space', 'invalid_utf8', 'openai_done'])
+def test_native_accounting_does_not_trust_frames_rejected_by_parser(native_server, mutation):
+    url, requests, responses = native_server
+    value = sse(events())
+    body = value[2]
+    if mutation == 'leading_space':
+        body = body.replace(b'data:', b' data:')
+    elif mutation == 'invalid_utf8':
+        body = body.replace(b'"text": "done"', b'"text": "\xff"')
+    else:
+        body += b'data: [DONE]\n\n'
+    responses.append((*value[:2], body, value[3]))
+    recorder = MemoryRecorder(provider_id='anthropic')
+    result = native_runtime(url, features={'streaming': True}, accounting=recorder).run(artifact())
+    assert result.exit_code != 0
+    assert observation(recorder)['usage']['status'] != 'reported'
