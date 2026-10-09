@@ -193,15 +193,29 @@ def test_doctor_discovery_auth_and_redaction(tmp_path, monkeypatch, status, expe
         http.server_close()
 
 
-def test_progress_heartbeat_stops_and_stays_off_stdout(capsys):
+@pytest.mark.parametrize('start_delay',[0,0.08])
+def test_progress_heartbeat_stops_and_stays_off_stdout(capsys,monkeypatch,start_delay):
     from prosaic_runtime.console import Progress
     import time
-    with Progress(interval=0.01):
-        time.sleep(0.04)
+    import threading
+    original_thread=threading.Thread
+    def delayed_thread(*args,**kwargs):
+        target=kwargs['target']
+        kwargs['target']=lambda:(time.sleep(start_delay),target())
+        return original_thread(*args,**kwargs)
+    monkeypatch.setattr(threading,'Thread',delayed_thread)
+    observed=threading.Event()
+    class ObservedProgress(Progress):
+        def write(self,text):
+            super().write(text)
+            observed.set()
+    with ObservedProgress(interval=0.01) as progress:
+        assert observed.wait(5), 'heartbeat did not reach stderr'
+    assert not progress.thread.is_alive()
+    assert progress.stop.is_set()
     out = capsys.readouterr()
     assert out.out == ""
     assert "working" in out.err
-    time.sleep(0.03)
     assert capsys.readouterr().err == ""
 
 

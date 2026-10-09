@@ -20,3 +20,10 @@ Runtime CLI, and resolved the immutable Prosaic 0.3.1 pin. No paid inference.
 Independent release review found no blocking version/dependency/test-wiring defect.
 Native CI and remote asset verification are recorded in the release train ledger
 in the integration lab; local tests do not certify external providers or deployment.
+
+The initial native matrix passed ten jobs; macOS Python 3.13 exposed a heartbeat
+test that assumed scheduling within 40 ms. An actual 80 ms startup-delay case
+reproduced the failure. The test now observes real stderr heartbeat output and
+asserts the thread is stopped, with no stdout or later stderr output. Both
+startup cases pass. Final local core suite: 456 passed, one interpreter-specific
+skip. Production Runtime behavior is unchanged by this test correction.
