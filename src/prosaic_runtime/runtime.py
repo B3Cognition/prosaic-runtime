@@ -115,9 +115,10 @@ class _BoundedMixin:
             return Result(1, "", "invocation deadline exceeded", timed_out=True)
         self.validate_payload(payload)
         turn = super()._post_chat_turn(payload, request, deadline, streaming)
-        if not isinstance(turn, Result):
+        native_failure = isinstance(turn, Result) and self._config.provider == 'anthropic'
+        if not isinstance(turn, Result) or native_failure:
             self.turns += 1
-            usage = _reported_usage(turn.token_usage_details)
+            usage = _reported_usage(turn.metadata.get('token_usage_details')) if native_failure else _reported_usage(turn.token_usage_details)
             if usage is None:
                 self.usage_complete = False
             else:
@@ -284,6 +285,8 @@ class ProsaicRuntime:
                     raise ValueError(f"no endpoint route for model_tier: {tier}")
                 profile = self.config.routes[tier] if tier is not None else self.config.default_profile
                 endpoint = self.config.profiles[profile]
+                if _recorder is not None and _recorder.provider_id != endpoint.provider:
+                    raise ValueError('accounting provider_id must match endpoint provider')
                 features = {**endpoint.features, "tool_calls": bool(tools), "max_tool_rounds": policy.max_tool_rounds,
                             "web_tools": False, "transcript": False}
                 endpoint = replace(endpoint, features=features)
@@ -312,7 +315,7 @@ class ProsaicRuntime:
                     return Result(1, "", "invocation deadline exceeded", timed_out=True)
                 emit("started", artifact_id=artifact.id, artifact_sha256=artifact.digest, profile=profile,
                      model=endpoint.model, tools=sorted(tools))
-                capture = Capture(_recorder, _context, artifact, profile) if _recorder is not None else None
+                capture = Capture(_recorder, _context, artifact, profile, endpoint.provider) if _recorder is not None else None
                 if capture is not None:
                     _capture_ref(capture)
                 backend_type = _BoundedAnthropicBackend if endpoint.provider == 'anthropic' else _BoundedBackend

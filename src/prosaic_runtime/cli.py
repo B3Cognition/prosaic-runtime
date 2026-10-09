@@ -31,6 +31,8 @@ def main(argv=None):
         parser.add_argument('--accounting-namespace', help='persistent deployment namespace')
         parser.add_argument('--accounting-environment', help='isolated environment, e.g. production or sandbox')
         parser.add_argument('--accounting-rate-card', help='explicit JSON rate card for internal estimates')
+        parser.add_argument('--accounting-provider', choices=('openai-compatible', 'anthropic'),
+                            help='accounting provider identity; defaults to openai-compatible and must match the selected endpoint')
     parser.add_argument("--source", default=".prosaic")
     parser.add_argument("--config", help="YAML configuration (default: prosaic-runtime.yaml, then prosaic-runtime.yml)")
     parser.add_argument("--arguments", default="")
@@ -105,8 +107,9 @@ def main(argv=None):
                     with open(args.accounting_rate_card, encoding='utf-8') as handle:
                         rate_card = RateCard(**json.load(handle))
                 recorder = PostgresRecorder(dsn, namespace=args.accounting_namespace,
-                    environment=args.accounting_environment, rate_card=rate_card)
-            elif args.accounting_namespace or args.accounting_environment or args.accounting_rate_card:
+                    environment=args.accounting_environment, rate_card=rate_card,
+                    provider_id=args.accounting_provider or 'openai-compatible')
+            elif args.accounting_namespace or args.accounting_environment or args.accounting_rate_card or args.accounting_provider:
                 raise ValueError('accounting options require --accounting-dsn-env')
             names = ('application_id', 'tenant_id', 'billing_account_id', 'actor_id', 'project_id', 'request_id', 'run_id', 'invocation_id', 'parent_invocation_id')
             values = {name: getattr(args, name) for name in names if getattr(args, name) is not None}

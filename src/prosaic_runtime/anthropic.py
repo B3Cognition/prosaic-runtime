@@ -8,6 +8,7 @@ import urllib.request
 from .accounting_capture import strict_json
 from .execution import ExecutionBackend
 from .provider_types import ProviderTurn
+from .anthropic_usage import normalize_anthropic_usage
 from .types import Result
 from .tools import depth
 from .openai_compatible import (
@@ -68,21 +69,14 @@ def encode_messages(payload):
 
 
 def usage_details(raw):
-    if not isinstance(raw, dict):
+    usage = normalize_anthropic_usage(raw)
+    if usage['status'] in {'untrusted', 'unknown'} or usage['total_tokens'] is None:
         return {}
-    names = ('input_tokens', 'output_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens')
-    if any(type(raw.get(n, 0)) is not int or not 0 <= raw.get(n, 0) <= 2**63 - 1 for n in names):
-        return {}
-    if 'input_tokens' not in raw or 'output_tokens' not in raw:
-        return {}
-    inp = sum(raw.get(n, 0) for n in ('input_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens'))
-    out = raw['output_tokens']
-    if inp + out > 2**63 - 1:
-        return {}
-    return {'prompt_tokens': inp, 'completion_tokens': out, 'total_tokens': inp + out}
+    return {'prompt_tokens': usage['input_tokens'], 'completion_tokens': usage['output_tokens'],
+            'total_tokens': usage['total_tokens']}
 
 
-def parse_message(value, *, streamed=False, http_status=200, headers=None):
+def parse_message(value, *, streamed=False, http_status=200, headers=None, usage_conflict=False):
     """Validate native content before exposing any executable tool request."""
     if (not isinstance(value, dict) or value.get('type') != 'message' or
             value.get('role') != 'assistant' or not isinstance(value.get('content'), list) or
@@ -106,8 +100,9 @@ def parse_message(value, *, streamed=False, http_status=200, headers=None):
                 'name': block['name'], 'arguments': json.dumps(block['input'], allow_nan=False)}})
         else:
             raise ValueError('unsupported content block')
-    details = usage_details(value.get('usage'))
+    details = {} if usage_conflict else usage_details(value.get('usage'))
     raw = {k: value[k] for k in ('id', 'model', 'stop_reason', 'stop_sequence', 'usage') if k in value}
+    raw['usage_status'] = 'untrusted' if usage_conflict else normalize_anthropic_usage(value.get('usage'))['status']
     metadata = {'provider': 'anthropic', 'streamed': streamed, 'http_status': http_status,
                 'raw_response_headers': headers or {}, 'raw_response_metadata': raw,
                 'token_usage_details': details}

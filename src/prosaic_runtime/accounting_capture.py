@@ -22,10 +22,11 @@ def strict_json(raw):
 
 
 class Capture:
-    def __init__(self, recorder, context, artifact, profile):
+    def __init__(self, recorder, context, artifact, profile, provider='openai-compatible'):
         self.recorder, self.context = recorder, context
         self.artifact, self.profile = artifact, profile
         self.call_ids = []
+        self.provider = provider
 
     def open(self, opener, request, timeout):
         call_id = uuid.uuid4().hex
@@ -43,7 +44,8 @@ class Capture:
         except Exception as exc:
             raise AccountingError('intent persistence failed') from exc
         self.call_ids.append(call_id)
-        observation = Observation(self.recorder, call_id)
+        observer = AnthropicObservation if self.provider == 'anthropic' else Observation
+        observation = observer(self.recorder, call_id)
         try:
             response = opener.open(request, timeout=timeout)
         except BaseException:
@@ -53,6 +55,7 @@ class Capture:
 
 
 class Observation:
+    eager_events = True
     def __init__(self, recorder, call_id):
         self.recorder, self.call_id = recorder, call_id
         self.usage, self.model, self.request_id, self.tier = None, None, None, None
@@ -100,10 +103,64 @@ class Observation:
         self.finished = True
 
 
+class AnthropicObservation(Observation):
+    eager_events = False
+
+    def __init__(self, recorder, call_id):
+        super().__init__(recorder, call_id)
+        from .anthropic_stream import StreamState
+        self.state = StreamState(lambda text: None)
+
+    def capture(self, event):
+        from .anthropic import parse_message
+        from .anthropic_usage import normalize_anthropic_usage
+        if type(event) is not dict:
+            self.conflict = True
+            return
+        if event.get('type') == 'message':
+            message = event
+            self.usage = normalize_anthropic_usage(message.get('usage'))
+            try:
+                parse_message(message)
+                self.terminal = message.get('stop_reason') in {
+                    'end_turn', 'stop_sequence', 'tool_use', 'max_tokens', 'refusal', 'pause_turn'}
+            except (ValueError, TypeError, RecursionError):
+                self.conflict = True
+        else:
+            try:
+                self.state.push(event)
+                if self.state.stopped:
+                    parse_message(self.state.message)
+                    self.terminal = True
+            except (ValueError, TypeError, RecursionError):
+                self.conflict = True
+            message = self.state.message or {}
+            self.usage = self.state.usage.normalized()
+            self.conflict |= self.state.usage.conflict
+        for key, attr in (('model', 'model'), ('id', 'request_id')):
+            value = message.get(key)
+            if type(value) is str and 0 < len(value) <= 256:
+                previous = getattr(self, attr)
+                if previous is not None and previous != value:
+                    self.conflict = True
+                setattr(self, attr, value)
+            elif key in message:
+                self.conflict = True
+        raw_usage = message.get('usage')
+        if isinstance(raw_usage, dict) and raw_usage.get('service_tier') is not None:
+            tier = raw_usage['service_tier']
+            tier = 'default' if tier == 'standard' else tier
+            if not isinstance(tier, str) or len(tier) > 256 or (self.tier is not None and self.tier != tier):
+                self.conflict = True
+            else:
+                self.tier = tier
+
+
 class RecordedResponse:
     def __init__(self, response, observation):
         self.response, self.observation = response, observation
         self.data = []
+        self.event_name = None
 
     def __getattr__(self, name):
         return getattr(self.response, name)
@@ -114,6 +171,8 @@ class RecordedResponse:
 
     def __exit__(self, typ, value, traceback):
         try:
+            if not self.observation.eager_events and (self.data or self.event_name is not None):
+                self.observation.conflict = True
             self._flush()
             self.observation.finish('cancelled' if typ and typ.__name__ in {'Cancelled', 'KeyboardInterrupt'}
                                     else 'failed' if typ or not self.observation.terminal else 'completed')
@@ -124,21 +183,33 @@ class RecordedResponse:
     def _flush(self):
         if self.data:
             try:
-                self.observation.capture(strict_json('\n'.join(self.data)))
+                event = strict_json('\n'.join(self.data))
+                if self.event_name is not None and (not isinstance(event, dict) or event.get('type') != self.event_name):
+                    self.observation.conflict = True
+                self.observation.capture(event)
             except (ValueError, TypeError):
                 self.observation.conflict = True
             self.data = []
+        elif self.event_name is not None:
+            self.observation.conflict = True
+        self.event_name = None
 
     def _line(self, raw):
         line = raw.decode('utf-8', errors='replace').strip()
         if not line:
             self._flush()
+        elif not self.observation.eager_events and line.startswith('event:'):
+            if self.event_name is not None:
+                self.observation.conflict = True
+            self.event_name = line[6:].lstrip()
         elif line.startswith('data:'):
             value = line[5:].lstrip()
             if value == '[DONE]':
                 self._flush()
             else:
                 self.data.append(value)
+                if not self.observation.eager_events:
+                    return
                 # Capture before the normal parser can emit a text callback
                 # that requests cancellation. Multi-line JSON remains buffered.
                 try:

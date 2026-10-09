@@ -2,7 +2,8 @@
 import time
 
 from .accounting_capture import strict_json
-from .anthropic import parse_message, usage_details
+from .anthropic import parse_message
+from .anthropic_usage import UsageSnapshots
 from .events import check_cancelled, print
 from .openai_compatible import _http_status, _raw_response_headers
 from .types import Result
@@ -17,6 +18,7 @@ class StreamState:
         self.delta_seen = False
         self.stopped = False
         self.on_text = on_text
+        self.usage = UsageSnapshots()
 
     def push(self, event):
         if not isinstance(event, dict) or not isinstance(event.get('type'), str):
@@ -35,6 +37,7 @@ class StreamState:
                     not isinstance(message.get('model'), str) or not message['model']):
                 raise ValueError('invalid message_start')
             self.message = {**message, 'content': self.blocks}
+            self.usage.update(message.get('usage'))
             return
         if self.message is None:
             raise ValueError('missing message_start')
@@ -97,6 +100,7 @@ class StreamState:
                 if not isinstance(usage, dict) or not isinstance(self.message.get('usage', {}), dict):
                     raise ValueError('invalid usage')
                 self.message['usage'] = {**self.message.get('usage', {}), **usage}
+                self.usage.update(usage)
             self.delta_seen = True
             return
         if kind == 'message_stop':
@@ -156,7 +160,8 @@ def read_anthropic_turn(response, deadline, *, on_text=print):
                     data.append(value if separator else '')
         if not state.stopped:
             raise ValueError('missing message_stop')
-        turn = parse_message(state.message, streamed=True, http_status=status, headers=headers)
+        turn = parse_message(state.message, streamed=True, http_status=status, headers=headers,
+                             usage_conflict=state.usage.conflict)
         if not isinstance(turn, Result):
             turn.previewed = True
         return turn
