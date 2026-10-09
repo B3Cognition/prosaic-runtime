@@ -12,6 +12,7 @@ from .artifacts import ProsaicArtifact, inspect_artifact
 from .config import RuntimeConfig
 from .events import Cancelled, check_cancelled, event_context, emit
 from .openai_compatible import OpenAICompatibleBackend
+from .anthropic import AnthropicBackend
 from .policy import RunPolicy, requested_tools, BUILTIN_TOOLS
 from .types import Invocation, Result
 from .tools import validate_custom_tools, custom_descriptors, ToolDeadlineExceeded, ToolExecutionError
@@ -53,7 +54,7 @@ class _BoundedStream:
         return line
 
 
-class _BoundedBackend(OpenAICompatibleBackend):
+class _BoundedMixin:
     def __init__(self, endpoint, max_input_bytes, custom_tools, deadline, capture=None):
         super().__init__(endpoint)
         self.max_input_bytes = max_input_bytes
@@ -122,6 +123,14 @@ class _BoundedBackend(OpenAICompatibleBackend):
             else:
                 self.reported_token_usage = (self.reported_token_usage or 0) + usage
         return turn
+
+
+class _BoundedBackend(_BoundedMixin, OpenAICompatibleBackend):
+    pass
+
+
+class _BoundedAnthropicBackend(_BoundedMixin, AnthropicBackend):
+    pass
 
 
 class ProsaicRuntime:
@@ -306,7 +315,8 @@ class ProsaicRuntime:
                 capture = Capture(_recorder, _context, artifact, profile) if _recorder is not None else None
                 if capture is not None:
                     _capture_ref(capture)
-                backend = _BoundedBackend(endpoint, policy.max_input_bytes, self._custom_tools, started + policy.timeout_s, capture)
+                backend_type = _BoundedAnthropicBackend if endpoint.provider == 'anthropic' else _BoundedBackend
+                backend = backend_type(endpoint, policy.max_input_bytes, self._custom_tools, started + policy.timeout_s, capture)
                 result = backend.run_prompt(Invocation(
                     str(Path(cwd).resolve()), prompt, invocation_env, remaining,
                     {"prompt_metadata": metadata}))

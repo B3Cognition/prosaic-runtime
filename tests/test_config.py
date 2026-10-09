@@ -1,6 +1,6 @@
 import pytest
 
-from prosaic_runtime import RuntimeConfig
+from prosaic_runtime import RuntimeConfig, EndpointConfig
 
 
 CONFIG = """default_profile: small
@@ -14,6 +14,23 @@ profiles:
     features:
       streaming: false
 """
+
+
+def test_provider_defaults_and_unknown_provider():
+    assert EndpointConfig('http://localhost/v1', 'm').provider == 'openai-compatible'
+    with pytest.raises(ValueError, match='provider'):
+        EndpointConfig('http://localhost/v1', 'm', provider='unknown')
+
+
+def test_native_provider_yaml_loading(tmp_path):
+    path = tmp_path / 'native.yml'
+    path.write_text(CONFIG.replace('    model: test-model', '    model: test-model\n    provider: anthropic'))
+    assert RuntimeConfig.load(path).profiles['small'].provider == 'anthropic'
+
+
+def test_anthropic_requires_positive_max_tokens():
+    with pytest.raises(ValueError, match='max_tokens'):
+        EndpointConfig('http://localhost/v1', 'm', provider='anthropic', max_tokens=None)
 
 
 @pytest.mark.parametrize("suffix", ["yaml", "yml"])

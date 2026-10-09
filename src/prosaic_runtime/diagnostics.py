@@ -10,6 +10,7 @@ import urllib.request
 
 from .config import RuntimeConfig
 from .openai_compatible import _api_key
+from .anthropic import native_headers
 from .policy import RunPolicy
 from .runtime import ProsaicRuntime
 
@@ -87,7 +88,8 @@ def doctor(config, profile, *, inference=False, timeout_s=None, on_event=None):
         checks["credentials"]["message"] = "Unable to load configured credentials."
         checks["discovery"] = {"status": "skipped"}
     else:
-        headers = {"Authorization": f"Bearer {token}"} if token else {}
+        headers = (native_headers(token) if endpoint.provider == 'anthropic'
+                   else {"Authorization": f"Bearer {token}"} if token else {})
         request = urllib.request.Request(endpoint.base_url.rstrip("/") + "/models", headers=headers)
         try:
             with urllib.request.build_opener(_NoRedirect).open(request, timeout=min(timeout_s or 15, 15)) as response:
