@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.7.0 — 2026-10-09
+
+- Ship recorder adapter 0.1.1 with read-only catalog/type/constraint/grant readiness
+  checks; incompatible schema or missing runtime privileges fail before dispatch.
+
 - Native Anthropic Messages profiles support text, streaming, and Runtime-managed
   builtin, custom, and CLI tools through the shared bounded execution loop.
   Existing profiles continue to default to OpenAI-compatible Chat Completions.

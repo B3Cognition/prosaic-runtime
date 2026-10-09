@@ -102,12 +102,24 @@ jobs:
           python -m build adapters/postgres
       - name: Install release wheels
         run: |
-          python -m pip install dist/prosaic_runtime-0.6.0-py3-none-any.whl
-          python -m pip install adapters/postgres/dist/prosaic_runtime_postgres-0.1.0-py3-none-any.whl
+          python -m pip install dist/prosaic_runtime-0.7.0-py3-none-any.whl
+          python -m pip install adapters/postgres/dist/prosaic_runtime_postgres-0.1.1-py3-none-any.whl
       - name: Required real-database accounting tests
         env:
           METERING_TEST_DSN: postgresql://postgres:metering-ci-only@127.0.0.1:5432/metering_test
+          METERING_RUNTIME_DSN: postgresql://metering_runtime:metering-ci-only@127.0.0.1:5432/metering_test
+          PROSAIC_OWNED_DB_AUDIT: '1'
           PYTHONPATH: tests
         run: |
+          python - <<'PY'
+          import os
+          import psycopg
+          from prosaic_runtime_postgres import PostgresRecorder
+          PostgresRecorder(os.environ['METERING_TEST_DSN'], namespace='ci-readiness', environment='test').initialize()
+          with psycopg.connect(os.environ['METERING_TEST_DSN']) as connection:
+              connection.execute("CREATE ROLE metering_runtime LOGIN PASSWORD 'metering-ci-only'")
+              connection.execute('GRANT USAGE ON SCHEMA public TO metering_runtime')
+              connection.execute('GRANT SELECT, INSERT, UPDATE ON prosaic_metering_intents, prosaic_metering_observations TO metering_runtime')
+          PY
           # Upstream CI must not depend on an unreleased downstream consumer.
           python -m pytest adapters/postgres/tests -q -k 'not harness_resume'

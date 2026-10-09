@@ -1,7 +1,8 @@
 # Prosaic Runtime
 
-Version **0.6.0** adds optional customer usage metering and the separate
-`prosaic-runtime-postgres` **0.1.0** recorder. Release assets include both packages;
+Version **0.7.0** adds bounded native Anthropic text, streaming and tools, alongside
+OpenAI-compatible execution. The separate `prosaic-runtime-postgres` **0.1.1**
+recorder validates real schema and runtime grants without DDL. Release assets include both packages;
 install the Runtime wheel before the adapter wheel. Accounting stays opt-in.
 
 Optional customer usage metering is described in [Accounting](docs/accounting.md).

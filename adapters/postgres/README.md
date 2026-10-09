@@ -1,6 +1,6 @@
 # Prosaic Runtime PostgreSQL metering
 
-Install the separate recorder 0.1.0 release wheel alongside Runtime 0.6.x, which
+Install the separate recorder 0.1.1 release wheel alongside Runtime 0.7.x, which
 provides the accounting contracts. Install the Runtime wheel first. Runtime
 accounting off needs no database or psycopg dependency.
 
