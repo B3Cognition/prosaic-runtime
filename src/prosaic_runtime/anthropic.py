@@ -38,7 +38,7 @@ def encode_messages(payload):
         if role == 'tool':
             content = message['content']
             block = {'type': 'tool_result', 'tool_use_id': message['tool_call_id'], 'content': content}
-            if json.loads(content).get('status') != 'ok':
+            if json.loads(content).get('status') == 'error':
                 block['is_error'] = True
             role, blocks = 'user', [block]
         elif role == 'assistant' and 'provider_content' in message:
@@ -183,6 +183,9 @@ class AnthropicBackend(ExecutionBackend):
         except (TimeoutError, socket.timeout):
             return Result(1, '', 'Anthropic request timed out', timed_out=True,
                           metadata={'provider': self.name, 'provider_error_code': 'timeout'})
+        except UnicodeError:
+            return Result(1, '', 'Malformed Anthropic response', metadata={
+                'provider': self.name, 'provider_error_code': 'malformed_response'})
         except urllib.error.HTTPError as exc:
             # Bound and capture error bodies without exposing credentials or raw provider messages.
             self.read_response(exc)

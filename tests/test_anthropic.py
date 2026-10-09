@@ -3,6 +3,7 @@ from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
 import json
+import time
 
 import pytest
 
@@ -26,14 +27,19 @@ def native_server():
             self.respond()
 
         def respond(self):
-            status, content_type, body, headers = responses.pop(0)
+            status, content_type, body, headers, *delay = responses.pop(0)
+            if delay:
+                time.sleep(delay[0])
             self.send_response(status)
             self.send_header('Content-Type', content_type)
             self.send_header('Content-Length', str(len(body)))
             for name, value in headers.items():
                 self.send_header(name, value)
             self.end_headers()
-            self.wfile.write(body)
+            try:
+                self.wfile.write(body)
+            except BrokenPipeError:
+                pass
 
         def log_message(self, *args):
             pass
