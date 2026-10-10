@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "b3-prosaic-runtime"
-version = "0.8.0"
+version = "0.8.1"
 description = "Bounded execution of neutral Prosaic agents on OpenAI-compatible and native Anthropic endpoints"
 requires-python = ">=3.11"
 readme = "README.md"

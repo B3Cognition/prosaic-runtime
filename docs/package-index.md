@@ -4,8 +4,8 @@ After the qualified first publication, install in a fresh Python 3.11+ environme
 
 ```sh
 python -m venv .venv
-.venv/bin/python -m pip install 'b3-prosaic-runtime>=0.8,<0.9'
-.venv/bin/python -m pip install 'b3-prosaic-runtime-postgres>=0.2,<0.3'
+.venv/bin/python -m pip install 'b3-prosaic-runtime>=0.8.1,<0.9'
+.venv/bin/python -m pip install 'b3-prosaic-runtime-postgres>=0.2.1,<0.3'
 .venv/bin/prosaic-runtime --help
 ```
 
@@ -107,7 +107,7 @@ ecosystem code and native service/legacy-upgrade gates before publication.
 Publish Core first, Runtime and its recorder second, Harness and its store third,
 and then adopt the downloaded SDK bytes in the lab.
 
-Tag the qualified source `v0.8.0` and explicitly dispatch `Publish SDK` on that tag
+Tag the qualified source `v0.8.1` and explicitly dispatch `Publish SDK` on that tag
 with `candidate_run_id` naming its successful exact-source candidate, the same
 Core run/commit inputs, and `publish=true`. Promotion downloads original qualified
 bytes and reruns required checks; it never rebuilds the publication payload.

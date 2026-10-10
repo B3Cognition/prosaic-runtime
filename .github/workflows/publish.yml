@@ -12,11 +12,11 @@ on:
       core_run_id:
         description: Successful exact-source Core qualified-release run
         type: string
-        default: '38047286885'
+        default: ''
       core_commit:
         description: Exact Core source commit
         type: string
-        default: 'aad4bf45ae1c242f4451700ca59b27280010573a'
+        default: ''
       publish:
         description: Publish already qualified bytes (run on the version tag)
         type: boolean
@@ -84,20 +84,20 @@ jobs:
                       path = source.joinpath(*release.safe_path(name).parts)
                       path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(content)
                   release.audit_artifacts(source, pathlib.Path('release/artifacts'),
-                                          {project['name']: project['version'], 'b3-prosaic-runtime-postgres': '0.2.0'},
+                                          {project['name']: project['version'], 'b3-prosaic-runtime-postgres': '0.2.1'},
                                           ('.', 'adapters/postgres'))
           else:
               subprocess.run(['python', 'scripts/release_artifacts.py', 'build', '--ref',
                               os.environ['SOURCE_COMMIT'], '--output', 'release', '--expect',
                               project['name'] + '=' + project['version'], '--expect',
-                              'b3-prosaic-runtime-postgres=0.2.0', '--project', '.',
+                              'b3-prosaic-runtime-postgres=0.2.1', '--project', '.',
                               '--project', 'adapters/postgres'], check=True)
           PY
       - name: Bind the verified Core candidate to the selected Runtime bytes
         env:
           GH_TOKEN: ${{ secrets.ECOSYSTEM_ARTIFACT_TOKEN || github.token }}
-          CORE_RUN: ${{ inputs.core_run_id || vars.QUALIFIED_CORE_RUN_ID || '38047286885' }}
-          CORE_COMMIT: ${{ inputs.core_commit || vars.QUALIFIED_CORE_COMMIT || 'aad4bf45ae1c242f4451700ca59b27280010573a' }}
+          CORE_RUN: ${{ inputs.core_run_id || vars.QUALIFIED_CORE_RUN_ID }}
+          CORE_COMMIT: ${{ inputs.core_commit || vars.QUALIFIED_CORE_COMMIT }}
         run: |
           python scripts/release_artifacts.py upstream --directory release/artifacts --wheelhouse release/upstream-wheels --core-run "$CORE_RUN" --core-commit "$CORE_COMMIT"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -141,8 +141,8 @@ jobs:
       - name: Install explicit upstream and source test dependencies
         run: |
           python -m venv .venv
-          .venv/bin/python -m pip install release/upstream-wheels/b3_prosaic-0.4.0-py3-none-any.whl
-          .venv/bin/python -m pip install release/artifacts/b3_prosaic_runtime_postgres-0.2.0-py3-none-any.whl release/artifacts/b3_prosaic_runtime-0.8.0-py3-none-any.whl
+          .venv/bin/python -m pip install release/upstream-wheels/b3_prosaic-0.4.1-py3-none-any.whl
+          .venv/bin/python -m pip install release/artifacts/b3_prosaic_runtime_postgres-0.2.1-py3-none-any.whl release/artifacts/b3_prosaic_runtime-0.8.1-py3-none-any.whl
           .venv/bin/python -m pip install -e '.[test]'
           .venv/bin/python - <<'PY'
           import importlib.util
@@ -192,14 +192,14 @@ jobs:
           PROSAIC_RUNTIME_WHEEL_ACCEPTANCE: '1'
         run: |
           python -m venv .wheel-test
-          .wheel-test/bin/python -m pip install pytest packaging release/upstream-wheels/b3_prosaic-0.4.0-py3-none-any.whl release/artifacts/b3_prosaic_runtime-0.8.0-py3-none-any.whl release/artifacts/b3_prosaic_runtime_postgres-0.2.0-py3-none-any.whl
+          .wheel-test/bin/python -m pip install pytest packaging release/upstream-wheels/b3_prosaic-0.4.1-py3-none-any.whl release/artifacts/b3_prosaic_runtime-0.8.1-py3-none-any.whl release/artifacts/b3_prosaic_runtime_postgres-0.2.1-py3-none-any.whl
           .venv/bin/python scripts/release_artifacts.py qualify --directory release/artifacts --commit "$GITHUB_SHA" --label native-${{ matrix.os }}-${{ matrix.python }}-wheel --junit "$RUNNER_TEMP/runtime-wheel.xml" -- .wheel-test/bin/python -I -c "import os, runpy, subprocess, sys; runpy.run_path('scripts/wheel_smoke.py', run_name='__main__'); runpy.run_path('scripts/production_wheel_smoke.py', run_name='__main__'); subprocess.run([sys.executable, '-I', '-m', 'pytest', '-o', 'pythonpath=', 'tests/test_package_compatibility.py::test_wheel_metadata', '-q', '--junitxml=' + os.environ['RUNNER_TEMP'] + '/runtime-wheel.xml'], check=True)"
           .wheel-test/bin/python -m pip check
       - name: Verify minimum dependencies on both Linux architectures
         if: matrix.python == '3.11' && runner.os == 'Linux'
         run: |
           python -m venv .floor-test
-          .floor-test/bin/python -m pip install 'PyYAML==6.0' 'pyuca==1.2' 'markdown-it-py==3.0.0' 'jsonschema==4.23.0' 'referencing==0.28.4' 'psycopg[binary]==3.2.1' release/upstream-wheels/b3_prosaic-0.4.0-py3-none-any.whl release/artifacts/b3_prosaic_runtime-0.8.0-py3-none-any.whl release/artifacts/b3_prosaic_runtime_postgres-0.2.0-py3-none-any.whl
+          .floor-test/bin/python -m pip install 'PyYAML==6.0' 'pyuca==1.2' 'markdown-it-py==3.0.0' 'jsonschema==4.23.0' 'referencing==0.28.4' 'psycopg[binary]==3.2.1' release/upstream-wheels/b3_prosaic-0.4.1-py3-none-any.whl release/artifacts/b3_prosaic_runtime-0.8.1-py3-none-any.whl release/artifacts/b3_prosaic_runtime_postgres-0.2.1-py3-none-any.whl
           .venv/bin/python scripts/release_artifacts.py qualify --directory release/artifacts --commit "$GITHUB_SHA" --label floor-${{ matrix.os }} -- .floor-test/bin/python -I scripts/production_wheel_smoke.py
           .floor-test/bin/python -m pip check
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
@@ -256,7 +256,7 @@ jobs:
           release.verify_receipt(Path('release/artifacts'), '${{ github.sha }}')
           release.verify_upstream(Path('release/artifacts'), Path('release/upstream-wheels'))
           PY
-          python -m pip install release/upstream-wheels/b3_prosaic-0.4.0-py3-none-any.whl release/artifacts/b3_prosaic_runtime-0.8.0-py3-none-any.whl release/artifacts/b3_prosaic_runtime_postgres-0.2.0-py3-none-any.whl
+          python -m pip install release/upstream-wheels/b3_prosaic-0.4.1-py3-none-any.whl release/artifacts/b3_prosaic_runtime-0.8.1-py3-none-any.whl release/artifacts/b3_prosaic_runtime_postgres-0.2.1-py3-none-any.whl
       - name: Provision separate owned migration and runtime roles
         env:
           METERING_TEST_DSN: postgresql://postgres:metering-ci-only@127.0.0.1:5432/metering_test

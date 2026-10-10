@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Prepare Runtime 0.8.1 and the paired PostgreSQL recorder 0.2.1 patch candidates.
+- Recheck cancellation and absolute deadlines after observer/accounting preparation,
+  immediately before dispatch. Count provider requests only at actual attempts.
+- Bound JSON and SSE reads by the absolute execution deadline and preserve usage
+  already observed before cancellation, timeout or a later preparation failure.
+
 ## 0.8.0 — 2026-10-10
 
 - Rename the distribution to `b3-prosaic-runtime` with the index dependency

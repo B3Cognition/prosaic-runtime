@@ -1,9 +1,9 @@
 # Prosaic Runtime
 
-The **0.8.0** candidate is distributed as `b3-prosaic-runtime` and requires
+The **0.8.1** candidate is distributed as `b3-prosaic-runtime` and requires
 `b3-prosaic>=0.4,<0.5` from the package index. Python imports (`prosaic_runtime`)
 and the `prosaic-runtime` CLI remain unchanged. The separately installed recorder
-is `b3-prosaic-runtime-postgres` **0.2.0**, selecting Runtime 0.8.x.
+is `b3-prosaic-runtime-postgres` **0.2.1**, selecting Runtime 0.8.x.
 Candidates are not public index releases until the release qualification gate passes.
 
 Runtime exports pure execution-artifact and native registry validation for host
@@ -128,7 +128,7 @@ an isolated Python environment; no sudo or global Python installation is needed:
 ```sh
 git clone https://github.com/B3Cognition/prosaic-runtime.git
 cd prosaic-runtime
-git checkout v0.8.0
+git checkout v0.8.1
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install .
@@ -138,9 +138,9 @@ The package installs compatible `b3-prosaic` 0.4.x into the same environment.
 Use the release tag after publication; older release tags retain historical docs.
 
 For index installation after publication, create a fresh virtual environment or
-container image and run `python -m pip install 'b3-prosaic-runtime==0.8.0'`.
+container image and run `python -m pip install 'b3-prosaic-runtime==0.8.1'`.
 Install the optional recorder with
-`python -m pip install 'b3-prosaic-runtime-postgres==0.2.0'`. Never add renamed
+`python -m pip install 'b3-prosaic-runtime-postgres==0.2.1'`. Never add renamed
 packages to an environment containing legacy `prosaic`, `prosaic-runtime` or
 `prosaic-runtime-postgres`: they share import paths. Preserve old environments
 for historical reconstruction. PyPI's unrelated `prosaic` is not a dependency.
