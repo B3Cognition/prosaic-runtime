@@ -288,6 +288,8 @@ class ExecutionBackend:
                          **self.tool_event_metadata(tool_name))
                     tool_message = registry.execute_message(tool_call)
                     tool_payload = json.loads(tool_message["content"])
+                    from .conformance import _record_tool_result
+                    _record_tool_result(tool_name, tool_payload)
                     status = tool_payload.get("status", "unknown")
                     read_receipts = []
                     if tool_name == "read_file" and status == "ok":

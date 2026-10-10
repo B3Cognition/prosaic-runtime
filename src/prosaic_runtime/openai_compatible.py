@@ -677,6 +677,8 @@ class OpenAICompatibleBackend(ExecutionBackend):
                 maybe_result = handle_complete_event()
                 if maybe_result is not None:
                     return maybe_result
+                from .conformance import _record_stream_terminal
+                _record_stream_terminal()
                 break
             event_data.append(data)
             if _complete_json_event(event_data):

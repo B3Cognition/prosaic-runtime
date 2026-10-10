@@ -349,6 +349,14 @@ prosaic-runtime doctor --inference --timeout 180
 Inference is never a fallback for a failed default doctor check: only the explicit
 `--inference` flag enables that request.
 
+For a canonical capability report, run
+`prosaic-runtime conformance --config runtime.yml --profile small`. Its default
+produces explicit unexecuted evidence with no Runtime construction or probes.
+`--live` opts into a finite shared allowance for seven synthetic provider/tool
+checks. Fixture results remain `fixture_passed` and cannot qualify a live model.
+See [deterministic conformance](docs/conformance.md) for replay, profile/origin
+binding, measured assertions, canonical serialization, and execution bounds.
+
 ### Troubleshooting
 
 | Symptom | Check or fix |

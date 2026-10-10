@@ -267,7 +267,7 @@ class _BoundedAnthropicBackend(_BoundedMixin, AnthropicBackend):
 
 
 class ProsaicRuntime:
-    capabilities = frozenset({'invocation_budgets_v1', 'observer_v1', 'accounting_v1', 'read_receipts_v1', 'initial_tool_v1', 'initial_tool_enforcement_v1', 'acquisition_v1', 'custom_tools_v1', 'cli_tools_v1', 'cli_sandbox_v1'})
+    capabilities = frozenset({'conformance_v1', 'invocation_budgets_v1', 'observer_v1', 'accounting_v1', 'read_receipts_v1', 'initial_tool_v1', 'initial_tool_enforcement_v1', 'acquisition_v1', 'custom_tools_v1', 'cli_tools_v1', 'cli_sandbox_v1'})
     capabilities |= frozenset({'tool_context_v1', 'tool_journal_v1'})
     def __init__(self, config: RuntimeConfig, *, source=".prosaic", executable="prosaic", custom_tools=None,
                  accounting=None, context_defaults=None):

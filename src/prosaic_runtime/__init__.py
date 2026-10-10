@@ -11,6 +11,7 @@ from .admission import validate_execution_artifact
 from .operation_context import InvocationScope, ToolExecutionContext
 from .tool_effects import ToolClaim, ToolJournal, tool_journal_descriptor
 from .telemetry import ObserverEmitter
+from .conformance import evaluate_conformance
 
 __all__ = ["ProsaicArtifact", "EndpointConfig", "RuntimeConfig", "RunLimits", "CliSandboxConfig", "RunPolicy", "ProsaicRuntime", "Result", "CustomTool"]
 __all__ += ["validate_execution_artifact", "validate_custom_tools", "custom_descriptors"]
@@ -23,3 +24,4 @@ from .accounting import AccountingError, ExecutionContext, ResolvedContext, Rate
 __all__ += ["AccountingError", "ExecutionContext", "ResolvedContext", "RateCard"]
 __all__ += ["InvocationScope", "ObserverEmitter"]
 __all__ += ["ToolExecutionContext", "ToolClaim", "ToolJournal", "tool_journal_descriptor"]
+__all__ += ["evaluate_conformance"]

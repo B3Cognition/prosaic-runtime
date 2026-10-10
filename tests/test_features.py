@@ -85,6 +85,22 @@ def test_smoke_requires_explicit_live_opt_in(tmp_path):
     assert "--live" in result.stderr
 
 
+def test_conformance_without_live_is_explicitly_unexecuted(server, tmp_path):
+    url, requests, responses = server
+    result = cli('conformance', '--config', config_file(tmp_path, url), '--profile', 'small', '--quiet')
+    assert result.returncode == 0, result.stderr
+    report = json.loads(result.stdout)
+    assert report['qualification'] == 'not_qualified'
+    assert all(c['state'] == 'not_run' for c in report['cases'])
+    assert requests == []
+
+
+def test_conformance_default_does_not_contact_unreachable_url(tmp_path):
+    result = cli('conformance', '--config', config_file(tmp_path, 'http://localhost:9/v1'), '--quiet')
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)['qualification'] == 'not_qualified'
+
+
 def test_doctor_checks_without_inference(server, tmp_path):
     url, requests, responses = server
     # This fixture does not implement GET: discovery must be reported, never replaced by inference.
