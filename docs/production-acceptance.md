@@ -84,10 +84,13 @@ qualified 0.4.0 wheel (commit `aad4bf45ae1c242f4451700ca59b27280010573a`, SHA-25
 `120a956fd009ac7db7319a6a2493079441533818320d8adfdcba7b94b47be602`). Runtime
 source began at `583bf91988021375abe98980b345bf29433e3b0f`.
 The direct dependency floors were PyYAML 6.0, pyuca 1.2, markdown-it-py 3.0.0,
-jsonschema 4.23.0, referencing 0.28.4 and Psycopg/binary 3.2.1. Installed metadata
-passed with zero skips; the isolated production smoke confirmed the exact
-request/effect counts above. Local source-suite and exact final archive receipts
-are recorded in the task evidence ledger alongside source bindings and hashes.
+jsonschema 4.23.0, referencing 0.28.4 and Psycopg/binary 3.2.1. The R5 source suite
+passed 800 tests, with two explicit skips: the separately covered framework-Python
+case and the installed-only metadata case. That mandatory installed metadata
+test passed separately (one test, zero skips). The isolated production smoke
+confirmed the exact request/effect counts above. Exact committed archive builds
+and source/wheel payload audits also passed; these local candidates remain
+unpublished and require the native release lanes below.
 
 No owned PostgreSQL DSN was available locally; five recorder capture tests were
 collected, with the downstream Harness test deselected, without claiming database
