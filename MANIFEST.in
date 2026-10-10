@@ -7,3 +7,5 @@ prune examples/cli-tool/build
 global-exclude *.local.yml *.local.yaml
 
 include docs/structured-tools.md
+include docs/workflow-factory-runtime-implementation.md
+include docs/release-0.7.1.md
