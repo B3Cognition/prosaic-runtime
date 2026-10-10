@@ -106,6 +106,10 @@ class OpenAICompatibleBackend(ExecutionBackend):
         """Default compatibility normalization; bounded hosts may validate evidence."""
         return _token_usage_details(parsed)
 
+    def parse_response_json(self, raw):
+        """Compatibility parser; bounded hosts may retain ambiguous evidence."""
+        return json.loads(raw)
+
     def preserve_malformed_tool_calls(self):
         return False
 
@@ -312,7 +316,7 @@ class OpenAICompatibleBackend(ExecutionBackend):
                 metadata={"provider": self.name, "provider_error_code": "os_error"},
             )
         try:
-            parsed = json.loads(body)
+            parsed = self.parse_response_json(body)
         except json.JSONDecodeError:
             if streaming and _looks_like_sse_body(body):
                 return self._read_sse_body(body)
@@ -470,7 +474,7 @@ class OpenAICompatibleBackend(ExecutionBackend):
                 metadata={"provider": self.name, "provider_error_code": "os_error"},
             )
         try:
-            parsed = json.loads(body)
+            parsed = self.parse_response_json(body)
         except json.JSONDecodeError:
             if streaming and _looks_like_sse_body(body):
                 return self._read_sse_turn(
@@ -604,7 +608,7 @@ class OpenAICompatibleBackend(ExecutionBackend):
             if _is_done_marker(raw_data):
                 return None
             try:
-                event = json.loads(raw_data)
+                event = self.parse_response_json(raw_data)
             except json.JSONDecodeError:
                 return CliRunResult(
                     exit_code=1,

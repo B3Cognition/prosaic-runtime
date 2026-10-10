@@ -562,12 +562,15 @@ Provider attempts are reserved before HTTP and accounting preparation. Tool
 attempts include denied and malformed calls, with each call in a batch counted
 once. Acquisition and follow-up turns share the same allowances.
 
-With a reported-token cap, missing, invalid or partial totals fail with
-`usage_unknown`; a terminal response above the cap fails with `token_limit`.
+With a reported-token cap, missing, invalid or partial totals and duplicate JSON
+keys fail with `usage_unknown`; a terminal response above the cap fails with
+`token_limit`.
 A complete final response exactly at the cap succeeds, while further provider or
 tool dispatch stops at equality. Returned text and already reported usage remain
-available, including unknown totals and known partial sums. Accounting capture
-persists a completed response before budget admission. Token reports arrive
+available, including unknown totals and known partial sums. A failed provider
+attempt keeps invocation usage unknown even after earlier turns reported complete
+totals; its provider error remains available alongside the budget failure.
+Accounting capture persists a completed response before budget admission. Token reports arrive
 after a request, so one response can exceed the allowance; these controls do not
 estimate an invoice ceiling or preempt a running callback. Endpoint `max_tokens`
 keeps its provider meaning. Harness `max_calls` still counts workflow invocations.

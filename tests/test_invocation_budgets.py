@@ -1,16 +1,54 @@
 """Invocation allowances stop real fixture dispatch and retain incurred evidence."""
 import json
-from dataclasses import replace
+import io
+from dataclasses import asdict, replace
+from email.message import Message
+from urllib.error import HTTPError, URLError
 
 import pytest
 
-from prosaic_runtime import EndpointConfig, ProsaicRuntime, RunPolicy
+from prosaic_runtime import CustomTool, EndpointConfig, ProsaicRuntime, RunPolicy
+from prosaic_runtime.types import Invocation
+from prosaic_runtime.openai_compatible import OpenAICompatibleBackend
 from prosaic_runtime.accounting import MemoryRecorder
 from test_runtime import artifact, completion, runtime, server
 from test_custom_tool_transport import setup, call
 from test_acquisition import reply
 from test_anthropic import native_server, native_runtime, message, response
 from test_anthropic_stream import events, sse
+
+
+@pytest.fixture
+def budget_transport(monkeypatch):
+    """Replace only external I/O; real request construction/Capture/parsers run."""
+    requests, responses = [], []
+
+    class Response(io.BytesIO):
+        status = 200
+
+        def __init__(self, content_type, body, timed_out=False):
+            super().__init__(body)
+            self.headers = Message()
+            self.headers['Content-Type'] = content_type
+            self.timed_out = timed_out
+
+        def readline(self, *args):
+            if self.timed_out:
+                raise TimeoutError('fixture timeout')
+            return super().readline(*args)
+
+    class Opener:
+        def open(self, request, timeout=None):
+            requests.append(json.loads(request.data))
+            item = responses.pop(0)
+            if isinstance(item, Exception):
+                raise item
+            return Response(*item)
+
+    opener = Opener()
+    monkeypatch.setattr('urllib.request.build_opener', lambda *handlers: opener)
+    monkeypatch.setattr('urllib.request.urlopen', opener.open)
+    return requests, responses
 
 
 @pytest.mark.parametrize('field', ['max_provider_requests', 'max_tool_calls', 'max_reported_tokens'])
@@ -307,3 +345,169 @@ def test_failed_http_usage_stays_unknown_under_a_token_cap(native_server, provid
     assert result.token_usage is None and result.metadata['failure_reason'] == 'usage_unknown'
     assert result.metadata['provider_error_code'] == 'http_error'
     assert result.metadata['invocation_budgets_v1']['usage_complete'] is False
+
+
+@pytest.mark.parametrize('accounted', [False, True])
+@pytest.mark.parametrize('failure,provider_code,usage_status', [
+    ('http', 'http_error', 'unknown'), ('url', 'url_error', 'unknown'),
+    ('malformed_sse', 'malformed_sse', 'untrusted'), ('timeout_sse', 'timeout', 'unknown'),
+])
+def test_failed_followup_retains_prior_sum_without_complete_usage(
+        budget_transport, accounted, failure, provider_code, usage_status):
+    requests, responses = budget_transport
+    responses.append(completion('', [call()]))
+    if failure == 'http':
+        responses.append(HTTPError('http://fixture.invalid/v1', 503, 'fixture', Message(), io.BytesIO(b'{}')))
+    elif failure == 'url':
+        responses.append(URLError('fixture transport error'))
+    elif failure == 'malformed_sse':
+        responses.append(('text/event-stream', b'data: {"choices":\n\n'))
+    else:
+        responses.append(('text/event-stream', b'', True))
+    seen = []
+    config, tool = setup('http://fixture.invalid/v1', seen, streaming=True)
+    recorder = MemoryRecorder() if accounted else None
+    result = ProsaicRuntime(config, custom_tools={'lookup_catalog': tool}, accounting=recorder).run(
+        artifact(['lookup_catalog']), env={}, policy=RunPolicy(
+            allowed_tools=frozenset({'lookup_catalog'}), max_reported_tokens=20))
+    assert len(requests) == 2 and seen == [{'sku': 'SKU-001'}]
+    assert result.exit_code == 1 and result.token_usage is None
+    assert result.metadata['failure_reason'] == 'usage_unknown'
+    assert result.metadata['provider_error_code'] == provider_code
+    assert result.timed_out == (failure == 'timeout_sse')
+    assert result.metadata['reported_token_usage'] == 7
+    assert result.metadata['invocation_budgets_v1'] == {
+        'provider_requests': 2, 'tool_calls': 1, 'reported_tokens': 7, 'usage_complete': False}
+    if recorder is not None:
+        observations = list(recorder.observations.values())
+        assert len(observations) == 2
+        assert observations[0]['usage']['total_tokens'] == 7
+        assert observations[1]['usage']['status'] == usage_status
+
+
+@pytest.mark.parametrize('accounted', [False, True])
+@pytest.mark.parametrize('streaming', [False, True])
+@pytest.mark.parametrize('with_tools', [False, True])
+def test_duplicate_terminal_usage_is_unknown_before_admission(
+        budget_transport, accounted, streaming, with_tools):
+    requests, responses = budget_transport
+    body = b'{"choices":[{"message":{"content":"done"},"finish_reason":"stop"}],"usage":{"total_tokens":100,"total_tokens":7}}'
+    responses.append(('text/event-stream', b'data: ' + body + b'\n\ndata: [DONE]\n\n')
+        if streaming else ('application/json', body))
+    recorder = MemoryRecorder() if accounted else None
+    result = runtime(EndpointConfig('http://fixture.invalid/v1', 'test', features={'streaming': streaming}),
+        accounting=recorder).run(artifact('read' if with_tools else None), env={},
+            policy=RunPolicy(max_reported_tokens=7, read_roots=('.',),
+                allowed_tools=frozenset({'read_file'}) if with_tools else frozenset()))
+    assert len(requests) == 1 and result.stdout == 'done'
+    assert result.exit_code == 1 and result.token_usage is None
+    assert result.metadata['failure_reason'] == 'usage_unknown'
+    assert result.metadata['invocation_budgets_v1'] == {
+        'provider_requests': 1, 'tool_calls': 0, 'reported_tokens': 0, 'usage_complete': False}
+    if recorder is not None:
+        observation, = recorder.observations.values()
+        assert observation['usage']['status'] == 'untrusted'
+
+
+@pytest.mark.parametrize('accounted', [False, True])
+@pytest.mark.parametrize('streaming', [False, True])
+def test_duplicate_tool_turn_usage_prevents_handler_and_followup(
+        budget_transport, accounted, streaming):
+    requests, responses = budget_transport
+    kind, body = reply('', [call()], streaming)
+    responses.extend([(kind, body.replace(b'"total_tokens": 7', b'"total_tokens": 100, "total_tokens": 7')),
+                      reply('done', streaming=streaming)])
+    seen = []
+    config, tool = setup('http://fixture.invalid/v1', seen, streaming=streaming)
+    recorder = MemoryRecorder() if accounted else None
+    result = ProsaicRuntime(config, custom_tools={'lookup_catalog': tool}, accounting=recorder).run(
+        artifact(['lookup_catalog']), env={}, policy=RunPolicy(
+            allowed_tools=frozenset({'lookup_catalog'}), max_reported_tokens=20))
+    assert seen == [] and len(requests) == 1
+    assert result.exit_code == 1 and result.token_usage is None
+    assert result.metadata['failure_reason'] == 'usage_unknown'
+    assert result.metadata['invocation_budgets_v1']['tool_calls'] == 0
+    if recorder is not None:
+        observation, = recorder.observations.values()
+        assert observation['usage']['status'] == 'untrusted'
+
+
+def test_credential_failure_before_followup_attempt_does_not_charge_unknown_usage(budget_transport, tmp_path):
+    requests, responses = budget_transport
+    responses.append(completion('', [call()]))
+    credential = tmp_path / 'fixture-key'
+    credential.write_text('fixture-only')
+    seen = []
+    config, original = setup('http://fixture.invalid/v1', seen)
+    config = replace(config, profiles={'local': replace(config.profiles['local'], api_key_file=str(credential))})
+
+    def handler(args):
+        seen.append(args)
+        credential.unlink()
+        return {'found': True}
+
+    tool = CustomTool(original.name, original.description, original.parameters, handler, original.version)
+    recorder = MemoryRecorder()
+    result = ProsaicRuntime(config, custom_tools={'lookup_catalog': tool}, accounting=recorder).run(
+        artifact(['lookup_catalog']), env={}, policy=RunPolicy(
+            allowed_tools=frozenset({'lookup_catalog'}), max_reported_tokens=20))
+    assert len(requests) == len(recorder.observations) == 1 and seen == [{'sku': 'SKU-001'}]
+    assert result.exit_code == 1 and result.metadata['provider_error_code'] == 'api_key_file_error'
+    assert result.token_usage == 7 and 'failure_reason' not in result.metadata
+    assert result.metadata['invocation_budgets_v1'] == {
+        'provider_requests': 1, 'tool_calls': 1, 'reported_tokens': 7, 'usage_complete': True}
+
+
+@pytest.mark.parametrize('streaming', [False, True])
+@pytest.mark.parametrize('policy', [RunPolicy(), RunPolicy(max_provider_requests=1)])
+def test_uncapped_public_usage_keeps_legacy_duplicate_parsing(budget_transport, streaming, policy):
+    requests, responses = budget_transport
+    body = b'{"choices":[{"message":{"content":"done"},"finish_reason":"stop"}],"usage":{"total_tokens":100,"total_tokens":7}}'
+    responses.append(('text/event-stream', b'data: ' + body + b'\n\ndata: [DONE]\n\n')
+        if streaming else ('application/json', body))
+    recorder = MemoryRecorder()
+    result = runtime(EndpointConfig('http://fixture.invalid/v1', 'test', features={'streaming': streaming}),
+        accounting=recorder).run(artifact(), env={}, policy=policy)
+    assert len(requests) == 1 and result.exit_code == 0 and result.stdout == 'done'
+    assert result.token_usage == 7 and 'failure_reason' not in result.metadata
+    observation, = recorder.observations.values()
+    assert observation['usage']['status'] == 'untrusted'
+
+
+@pytest.mark.parametrize('streaming', [False, True])
+def test_low_level_default_keeps_legacy_duplicate_parsing(budget_transport, streaming, tmp_path):
+    requests, responses = budget_transport
+    body = b'{"choices":[{"message":{"content":"done"},"finish_reason":"stop"}],"usage":{"total_tokens":100,"total_tokens":7}}'
+    responses.append(('text/event-stream', b'data: ' + body + b'\n\ndata: [DONE]\n\n')
+        if streaming else ('application/json', body))
+    result = OpenAICompatibleBackend(EndpointConfig('http://fixture.invalid/v1', 'test',
+        features={'streaming': streaming})).run_prompt(Invocation(str(tmp_path), 'fixture', {}, 5))
+    assert len(requests) == 1 and result.exit_code == 0 and result.stdout == 'done'
+    assert result.token_usage == 7 and 'failure_reason' not in result.metadata
+    assert 'invocation_budgets_v1' not in result.metadata
+
+
+def test_uncapped_result_and_descriptor_match_immutable_r1_golden(budget_transport):
+    """Literal evidence captured using git archive c7c83a1's source package."""
+    requests, responses = budget_transport
+    responses.append(completion('done'))
+    result = runtime(EndpointConfig('http://fixture.invalid/v1', 'test', features={'streaming': False})).run(
+        artifact(), env={}, policy=RunPolicy())
+    assert len(requests) == 1
+    assert asdict(result) == {'exit_code': 0, 'stdout': 'done', 'stderr': '',
+        'token_usage': 7, 'cost_usd': 0.0, 'timed_out': False, 'metadata': {
+            'provider': 'openai-compatible', 'request_model': 'test', 'streamed': False,
+            'http_status': 200, 'raw_response_headers': {'content-type': 'application/json'},
+            'finish_reason': 'stop', 'token_usage_details': {
+                'prompt_tokens': 5, 'completion_tokens': 2, 'total_tokens': 7},
+            'raw_response_metadata': {}, 'reasoning_content_policy': 'auto',
+            'reasoning_content_observed': False, 'token_usage_status': 'reported',
+            'artifact_id': 'subagents/test.md',
+            'artifact_sha256': '5b828e130ff99d5953b8bda007e903e88907e103677257d848345f2afc2c8e56',
+            'profile': 'small', 'cost_status': 'unavailable'}}
+    config, tool = setup('http://fixture.invalid/v1', [])
+    assert ProsaicRuntime(config, custom_tools={'lookup_catalog': tool}).tool_descriptors['lookup_catalog'] == {
+        'name': 'lookup_catalog', 'description': 'Lookup', 'version': 'v1',
+        'parameters': {'type': 'object', 'required': ['sku'], 'additionalProperties': False,
+            'properties': {'sku': {'type': 'string', 'pattern': '^SKU-[0-9]{3}$'}}},
+        'max_argument_bytes': 16384, 'max_result_bytes': 65536, 'authorization_required': False}

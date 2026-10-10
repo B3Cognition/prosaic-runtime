@@ -22,7 +22,7 @@ from .tools import validate_custom_tools, custom_descriptors, ToolDeadlineExceed
 from .cli_tools import load_cli_tools, cli_tool_context
 from .tool_registry import BoundedToolRegistry
 from .accounting import AccountingError, resolve_context
-from .accounting_capture import Capture
+from .accounting_capture import Capture, InvalidEvidence, strict_json
 from .http_bounds import LimitExceeded, set_response_timeout, BoundedNativeStream
 from .operation_context import InvocationScope
 from .telemetry import ObserverEmitter, observation_context, observe, execution_started
@@ -102,6 +102,16 @@ class _BoundedMixin:
                 elif all(k in usage for k in fields) and usage['total_tokens'] != usage['prompt_tokens'] + usage['completion_tokens']:
                     self._turn_usage_unknown = True
         return details
+
+    def parse_response_json(self, raw):
+        if self.budget is not None and self.budget.policy.max_reported_tokens is not None:
+            try:
+                return strict_json(raw)
+            except InvalidEvidence:
+                # Retain ordinary parsed text/details for diagnostics, but never
+                # admit dispatch from duplicate/nonfinite evidence Capture rejects.
+                self._turn_usage_unknown = True
+        return super().parse_response_json(raw)
 
     def record_turn_usage(self, details):
         from .openai_compatible import _merge_token_usage_details
@@ -212,10 +222,14 @@ class _BoundedMixin:
         if time.monotonic() >= deadline:
             return Result(1, "", "invocation deadline exceeded", timed_out=True)
         self.validate_payload(payload)
+        attempted_before = self.budget.provider_requests if self.budget is not None else 0
         turn = super()._post_chat_turn(payload, request, deadline, streaming)
         native_failure = isinstance(turn, Result) and self._config.provider == 'anthropic'
-        if not isinstance(turn, Result) or native_failure:
-            details = turn.metadata.get('token_usage_details') if native_failure else turn.token_usage_details
+        strict_attempt_failure = (isinstance(turn, Result) and self.budget is not None and
+            self.budget.policy.max_reported_tokens is not None and
+            self.budget.provider_requests > attempted_before)
+        if not isinstance(turn, Result) or native_failure or strict_attempt_failure:
+            details = turn.metadata.get('token_usage_details') if isinstance(turn, Result) else turn.token_usage_details
             try:
                 self.record_turn_usage(details)
             except InvocationBudgetExceeded as exc:
