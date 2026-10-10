@@ -47,6 +47,10 @@ def test_clean_archives_ship_index_metadata_and_owned_payloads(
         requirements = [Requirement(value) for value in metadata.get_all("Requires-Dist", [])]
         assert all(requirement.url is None for requirement in requirements)
         assert str(Requirement(dependency)) in {str(requirement) for requirement in requirements}
+        if project == "adapters/postgres":
+            # The published 3.2.0 binary extra references an unavailable dev wheel.
+            assert str(Requirement("psycopg[binary]>=3.2.1,<4")) in {
+                str(requirement) for requirement in requirements}
         module_path = f"{package}/__init__.py"
         module = ast.parse(wheel.read(module_path))
         exports = {target.id: ast.literal_eval(node.value) for node in module.body
