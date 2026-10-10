@@ -102,6 +102,13 @@ class OpenAICompatibleBackend(ExecutionBackend):
         """Tools whose raw call shape must survive compatibility normalization."""
         return frozenset()
 
+    def usage_details(self, parsed):
+        """Default compatibility normalization; bounded hosts may validate evidence."""
+        return _token_usage_details(parsed)
+
+    def preserve_malformed_tool_calls(self):
+        return False
+
     def open_transcript(self, request):
         return open_provider_transcript(Path(request.cwd), self._config.features, request.metadata)
 
@@ -329,7 +336,7 @@ class OpenAICompatibleBackend(ExecutionBackend):
             "http_status": http_status,
             "raw_response_headers": raw_response_headers,
             "finish_reason": _finish_reason(parsed),
-            "token_usage_details": _token_usage_details(parsed),
+            "token_usage_details": self.usage_details(parsed),
             "raw_response_metadata": _raw_response_metadata(parsed),
             "reasoning_content_policy": _reasoning_content_policy(llm.features),
             "reasoning_content_observed": _has_reasoning_content(parsed),
@@ -480,13 +487,16 @@ class OpenAICompatibleBackend(ExecutionBackend):
                     "provider_error_code": "malformed_response",
                 },
             )
-        return _completion_turn_from_parsed(
+        turn = _completion_turn_from_parsed(
             parsed,
             streamed=False,
             http_status=http_status,
             raw_response_headers=raw_response_headers,
             strict_tool_names=self.strict_tool_names(),
+            preserve_malformed=self.preserve_malformed_tool_calls(),
         )
+        turn.token_usage_details = self.usage_details(parsed)
+        return turn
 
     def _read_sse_response(
         self,
@@ -547,7 +557,7 @@ class OpenAICompatibleBackend(ExecutionBackend):
         reasoning_content_observed = False
         raw_response_metadata: dict[str, object] = {}
         event_data: list[str] = []
-        tool_accumulator = _ToolCallAccumulator(self.strict_tool_names())
+        tool_accumulator = _ToolCallAccumulator(self.strict_tool_names(), self.preserve_malformed_tool_calls())
         progress_detail = _feature_str(
             self._config.features,
             "progress_detail",
@@ -616,7 +626,7 @@ class OpenAICompatibleBackend(ExecutionBackend):
             event_usage = _token_usage(event)
             if event_usage:
                 token_usage = event_usage
-            event_usage_details = _token_usage_details(event)
+            event_usage_details = self.usage_details(event)
             if event_usage_details:
                 token_usage_details = event_usage_details
             event_finish_reason = _event_finish_reason(event)
@@ -708,9 +718,10 @@ class _BodyResponse:
 
 
 class _ToolCallAccumulator:
-    def __init__(self, strict_tool_names=frozenset()) -> None:
+    def __init__(self, strict_tool_names=frozenset(), preserve_malformed=False) -> None:
         self._calls: dict[int, dict[str, object]] = {}
         self._strict_tool_names = strict_tool_names
+        self._preserve_malformed = preserve_malformed
 
     def add_event(self, event: object) -> None:
         choice = _first_choice(event)
@@ -725,7 +736,9 @@ class _ToolCallAccumulator:
                 continue
             for offset, raw_call in enumerate(raw_calls):
                 if not isinstance(raw_call, dict):
-                    continue
+                    if not self._preserve_malformed:
+                        continue
+                    raw_call = {}
                 index = raw_call.get("index")
                 if not isinstance(index, int):
                     index = offset
@@ -767,9 +780,10 @@ class _ToolCallAccumulator:
         for _, call in sorted(self._calls.items()):
             function = call.get('function')
             if not isinstance(function, dict) or not function.get('name'):
-                continue
+                if not self._preserve_malformed:
+                    continue
             normalized = {key: value for key, value in call.items() if not key.startswith('_')}
-            if function['name'] in self._strict_tool_names:
+            if isinstance(function, dict) and function.get('name') in self._strict_tool_names:
                 normalized['function'] = dict(function)
                 if call.get('_invalid_arguments'):
                     normalized['function']['arguments'] = None
@@ -1696,6 +1710,7 @@ def _completion_turn_from_parsed(
     http_status: int | None,
     raw_response_headers: dict[str, str],
     strict_tool_names=frozenset(),
+    preserve_malformed=False,
 ) -> _OpenAICompletionTurn:
     return _OpenAICompletionTurn(
         text=_assistant_text(parsed),
@@ -1704,7 +1719,8 @@ def _completion_turn_from_parsed(
         token_usage_details=_token_usage_details(parsed),
         raw_response_metadata=_raw_response_metadata(parsed),
         reasoning_content_observed=_has_reasoning_content(parsed),
-        tool_calls=_message_tool_calls(parsed, strict_tool_names=strict_tool_names),
+        tool_calls=_message_tool_calls(parsed, strict_tool_names=strict_tool_names,
+                                      preserve_malformed=preserve_malformed),
         streamed=streamed,
         http_status=http_status,
         raw_response_headers=raw_response_headers,
@@ -1718,7 +1734,7 @@ def _transcript_metadata(transcript: object) -> dict[str, object]:
     return {}
 
 
-def _message_tool_calls(parsed: object, *, strict_tool_names=frozenset()) -> list[dict[str, object]]:
+def _message_tool_calls(parsed: object, *, strict_tool_names=frozenset(), preserve_malformed=False) -> list[dict[str, object]]:
     if not isinstance(parsed, dict):
         return []
     choices = parsed.get("choices")
@@ -1736,12 +1752,18 @@ def _message_tool_calls(parsed: object, *, strict_tool_names=frozenset()) -> lis
     calls: list[dict[str, object]] = []
     for index, raw_call in enumerate(raw_calls):
         if not isinstance(raw_call, dict):
+            if preserve_malformed:
+                calls.append({'id': f'call_{index}', 'type': None, 'function': {}})
             continue
         function = raw_call.get("function")
         if not isinstance(function, dict):
+            if preserve_malformed:
+                calls.append({'id': str(raw_call.get('id') or f'call_{index}'), 'type': None, 'function': {}})
             continue
         name = function.get("name")
         if not isinstance(name, str) or not name:
+            if preserve_malformed:
+                calls.append({'id': str(raw_call.get('id') or f'call_{index}'), 'type': None, 'function': {}})
             continue
         arguments = function.get("arguments")
         if not isinstance(arguments, str) and name not in strict_tool_names:

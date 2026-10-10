@@ -16,6 +16,9 @@ class RunPolicy:
     max_tool_rounds: int = 8
     max_input_bytes: int = 262144
     initial_tool: str | None = None
+    max_provider_requests: int | None = None
+    max_tool_calls: int | None = None
+    max_reported_tokens: int | None = None
 
     def __post_init__(self):
         import math
@@ -25,6 +28,10 @@ class RunPolicy:
             raise ValueError("max_tool_rounds must be between 1 and 64")
         if type(self.max_input_bytes) is not int or self.max_input_bytes <= 0:
             raise ValueError("max_input_bytes must be positive")
+        for name in ('max_provider_requests', 'max_tool_calls', 'max_reported_tokens'):
+            value = getattr(self, name)
+            if value is not None and (type(value) is not int or value < 0):
+                raise ValueError(f'{name} must be a nonnegative integer or None')
         if self.initial_tool is not None and self.initial_tool not in self.allowed_tools:
             raise ValueError('initial_tool must be explicitly allowed')
 

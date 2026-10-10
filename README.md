@@ -555,6 +555,30 @@ usage. `token_usage_status` distinguishes unknown from reported totals; real
 reported zero remains zero. Known partial sums are diagnostic
 `reported_token_usage`, not a complete total for a consumer token budget.
 
+For finite invocation allowances, set `RunPolicy(max_provider_requests=4,
+max_tool_calls=2, max_reported_tokens=8192)`. Each field accepts a nonnegative
+integer or `None` (legacy behavior); zero prevents dispatch in that unit.
+Provider attempts are reserved before HTTP and accounting preparation. Tool
+attempts include denied and malformed calls, with each call in a batch counted
+once. Acquisition and follow-up turns share the same allowances.
+
+With a reported-token cap, missing, invalid or partial totals fail with
+`usage_unknown`; a terminal response above the cap fails with `token_limit`.
+A complete final response exactly at the cap succeeds, while further provider or
+tool dispatch stops at equality. Returned text and already reported usage remain
+available, including unknown totals and known partial sums. Accounting capture
+persists a completed response before budget admission. Token reports arrive
+after a request, so one response can exceed the allowance; these controls do not
+estimate an invoice ceiling or preempt a running callback. Endpoint `max_tokens`
+keeps its provider meaning. Harness `max_calls` still counts workflow invocations.
+
+The capability `invocation_budgets_v1` advertises support. When any allowance is
+configured, `Result.metadata.invocation_budgets_v1` includes `provider_requests`,
+`tool_calls`, `reported_tokens` and `usage_complete`. Exhausted request/tool
+allowances return `provider_request_limit` or `tool_call_limit` in
+`metadata.failure_reason`. Disabled allowances add no count metadata and retain
+existing low-level consumer defaults.
+
 ```sh
 python -m pip install -e '.[test]'
 pytest

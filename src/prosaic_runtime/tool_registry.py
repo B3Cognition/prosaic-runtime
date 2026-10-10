@@ -4,11 +4,12 @@ from .tools import execute_custom_tool
 
 
 class BoundedToolRegistry:
-    def __init__(self, builtin_registry, custom_tools, allowed_tools, check_boundary):
+    def __init__(self, builtin_registry, custom_tools, allowed_tools, check_boundary, before_tool=None):
         self.builtin = builtin_registry
         self.custom = custom_tools
         self.allowed = frozenset(allowed_tools)
         self.check_boundary = check_boundary
+        self.before_tool = before_tool
 
     def openai_tools(self):
         return self.builtin.openai_tools() + [
@@ -18,6 +19,8 @@ class BoundedToolRegistry:
 
     def execute_message(self, tool_call):
         self.check_boundary()
+        if self.before_tool is not None:
+            self.before_tool()
         function = tool_call.get('function')
         name = function.get('name') if isinstance(function, dict) else None
         if isinstance(name, str) and name not in self.custom:

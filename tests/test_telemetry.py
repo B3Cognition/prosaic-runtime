@@ -130,6 +130,25 @@ def test_invalid_public_labels_are_rejected_before_delivery(labels):
                 scope=scope('attempt'), labels=labels)
 
 
+@pytest.mark.parametrize('revision', ['r' * 129, 'é' * 256])
+def test_supported_store_revision_survives_label_trimming(revision):
+    records = []
+    delivery = emitter(records.append, source='harness', scope=scope('attempt'),
+        labels={str(i) + 'k' * 60: 'é' * 64 for i in range(16)})
+    delivery.emit('transition_committed', outcome='running', revision=revision, calls=1)
+    assert records[0]['revision'] == revision
+    assert 'labels' not in records[0]
+    assert len(json.dumps(records[0]).encode('utf-8')) <= 4096
+
+
+@pytest.mark.parametrize('revision', ['r' * 513, 'é' * 257, 'unsafe\nrevision', 'unsafe\u200brevision', 1.5, True])
+def test_invalid_store_revision_is_omitted(revision):
+    records = []
+    emitter(records.append, source='harness', scope=scope('attempt')).emit(
+        'transition_committed', outcome='running', revision=revision)
+    assert 'revision' not in records[0]
+
+
 def test_harness_commit_state_survives_record_bounding():
     records = []
     delivery = emitter(records.append, source='harness', scope=scope('é' * 64,

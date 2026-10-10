@@ -33,6 +33,12 @@ the execution outcome: `completed`, `cancelled`, `timed_out`, `admission_failure
 delivers one terminal record for returned Results and escaped admission or
 critical-hook failures, independently of cancellation checks.
 
+Invocation allowance failures report `budget_failure` with the closed reason
+`provider_request_limit`, `tool_call_limit`, `token_limit` or `usage_unknown`.
+A provider transport can complete successfully before its returned token report
+causes an invocation budget failure. A rejected allowance produces no provider
+start event because the HTTP/accounting boundary was not entered.
+
 Records contain only allowlisted scalars: opaque references, SHA-256 digests,
 nonnegative finite counts/durations, exit/HTTP status and closed outcome, reason
 and tool status sets. Tool names are host-registered names or `unknown` for
@@ -48,7 +54,9 @@ events `run_started`, `transition_committed`, `waiting_committed`,
 `recovery_committed`, `blocked_committed` and `run_completed`. Harness supplies
 the actual committed `outcome` (`running`, `waiting`, `blocked`, `completed` or
 `rejected`), opaque/nonnegative integer `revision` and nonnegative integer `calls`.
-These fields survive size bounding. A host may explicitly supply at most 16
+These fields survive size bounding. String store revisions accept up to 512
+UTF-8 bytes, with the same character restrictions as scope references; scope
+and label values retain their 128-byte bounds. A host may explicitly supply at most 16
 public labels; plain nonempty keys/values have limits 64/128 UTF-8 bytes and the
 same character restrictions as scope. Labels are copied and removed first when
 needed to keep serialized records within 4096 UTF-8 bytes. Never put private

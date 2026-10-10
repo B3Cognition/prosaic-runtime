@@ -21,6 +21,7 @@ _OUTCOMES = {
     'harness': frozenset({'running', 'waiting', 'blocked', 'completed', 'rejected'}),
 }
 _REASONS = frozenset({'unknown', 'cancelled', 'invocation_timeout', 'inspection_timeout', 'budget_exceeded',
+                      'provider_request_limit', 'tool_call_limit', 'token_limit', 'usage_unknown',
                       'accounting_failed', 'incomplete_response', 'admission_failure',
                       'critical_hook_error', 'execution_failure'})
 _COUNTS = frozenset({'calls', 'turn', 'token_usage', 'tool_call_count', 'provider_request_count'})
@@ -73,7 +74,7 @@ class ObserverEmitter:
                 record[key] = value
             elif key in _COUNTS and _count(value):
                 record[key] = value
-            elif key == 'revision' and self.source == 'harness' and (_count(value) or bounded_reference(value)):
+            elif key == 'revision' and self.source == 'harness' and (_count(value) or bounded_reference(value, 512)):
                 record[key] = value
             elif key in _DIGESTS and type(value) is str and re.fullmatch('[0-9a-f]{64}', value):
                 record[key] = value
