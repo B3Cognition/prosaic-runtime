@@ -295,11 +295,20 @@ def test_native_missing_terminal_never_passes(native_server):
     assert report['qualification'] == 'not_qualified'
 
 
-def test_shared_deadline_stops_remaining_scenarios(native_server):
+def test_shared_deadline_stops_remaining_scenarios(native_server, monkeypatch):
+    import time
+    from types import SimpleNamespace
+    import test_anthropic
+    clock = [0.0]
+    monkeypatch.setattr(time, 'monotonic', lambda: clock[0])
+    # Advance only after the fixture receives the first real request. This
+    # tests the shared deadline without requiring cold admission to fit in 40ms.
+    monkeypatch.setattr(test_anthropic, 'time', SimpleNamespace(
+        sleep=lambda seconds: clock.__setitem__(0, clock[0] + seconds)))
     url, requests, responses = native_server
-    responses.append((*native_suite()[0], 0.08))
+    responses.append((*native_suite()[0], 6.0))
     report = run(suite_config(url, 'anthropic'), live=True, evidence_origin='fixture',
-                 policy=RunPolicy(timeout_s=0.04, max_provider_requests=12, max_tool_calls=4,
+                 policy=RunPolicy(timeout_s=5.0, max_provider_requests=12, max_tool_calls=4,
                                   max_reported_tokens=32768))
     assert len(requests) == 1
     assert case(report, 'text_complete')['state'] == 'failed'

@@ -3,6 +3,14 @@
 The SQLite implementation is an explicitly loaded test fixture shipped in the
 source archive. It is not an SDK journal or a production usage ledger.
 """
+import faulthandler
+import sys
+
+if sys.argv[1:2] == ['--worker']:
+    # Include imports and ownership checks in diagnostics for the separately
+    # bounded child. The parent still enforces its original 30-second limit.
+    faulthandler.dump_traceback_later(10, repeat=True)
+
 from dataclasses import asdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import metadata, util
@@ -10,7 +18,6 @@ import json
 import os
 from pathlib import Path
 import subprocess
-import sys
 import tempfile
 from threading import Thread
 
@@ -159,9 +166,16 @@ def main():
         directory = Path(temporary)
         workers = []
         for attempt in ("first", "replay"):
-            process = subprocess.run([sys.executable, "-I", str(Path(__file__).resolve()),
-                "--worker", temporary, attempt], cwd=temporary, env=dict(os.environ),
-                capture_output=True, text=True, timeout=30)
+            try:
+                process = subprocess.run([sys.executable, "-I", str(Path(__file__).resolve()),
+                    "--worker", temporary, attempt], cwd=temporary, env=dict(os.environ),
+                    capture_output=True, text=True, timeout=30)
+            except subprocess.TimeoutExpired as error:
+                for captured in (error.stdout, error.stderr):
+                    if captured:
+                        text = captured.decode('utf-8', errors='replace') if isinstance(captured, bytes) else captured
+                        print(text, file=sys.stderr, end='')
+                raise
             assert process.returncode == 0, process.stdout + process.stderr
             workers.append(json.loads(process.stdout))
         assert [row["handler_calls"] for row in workers] == [1, 0]
