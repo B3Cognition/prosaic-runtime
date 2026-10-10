@@ -25,7 +25,9 @@ Runtime emits `invocation_started`, `invocation_completed`,
 `provider_request_started`, `provider_request_completed`, `tool_started` and
 `tool_completed`. Provider observations surround the HTTP response context,
 including read and close failures. They report transport completion; successful
-transport does not guarantee valid provider content. Invocation completion is
+transport does not guarantee valid provider content. Provider and invocation
+observations report `timed_out` for stream timeouts, including readers that return
+a failure Result instead of raising. Invocation completion is
 the execution outcome: `completed`, `cancelled`, `timed_out`, `admission_failure`,
 `critical_hook_error`, `budget_failure` or `execution_failure`. The public wrapper
 delivers one terminal record for returned Results and escaped admission or

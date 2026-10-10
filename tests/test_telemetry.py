@@ -1,5 +1,6 @@
 """Optional observation cannot affect accepted work or expose private payloads."""
 import json
+import io
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import FrozenInstanceError
 
@@ -216,3 +217,45 @@ def test_invalid_operation_context_rejected_before_critical_callback():
     with pytest.raises(ValueError):
         runtime().run(artifact(), operation_context={'invocation_id': 'attempt'},
                       on_event=lambda event: pytest.fail('invalid scope executed callback'))
+
+
+@pytest.mark.parametrize('tools', [False, True], ids=['text', 'tool-loop'])
+@pytest.mark.parametrize('timeout', ['socket', 'deadline'])
+def test_stream_timeout_result_is_observed_as_provider_timeout(monkeypatch, tools, timeout):
+    # The real stream reader converts these failures to Result, hiding the
+    # transport exception from the HTTP context. Only network I/O and time are fake.
+    import time
+    clock = [0.0]
+    monkeypatch.setattr(time, 'monotonic', lambda: clock[0])
+    class Response(io.BytesIO):
+        status = 200
+        headers = {'Content-Type': 'text/event-stream'}
+        def getcode(self):
+            return self.status
+        def __enter__(self):
+            if timeout == 'deadline':
+                clock[0] = 11.0
+            return super().__enter__()
+        def readline(self, *args):
+            if timeout == 'deadline':
+                pytest.fail('expired stream deadline must precede read')
+            raise TimeoutError('PRIVATE_SOCKET_TIMEOUT')
+    class Opener:
+        def open(self, *args, **kwargs):
+            return Response()
+    monkeypatch.setattr('urllib.request.build_opener', lambda *args: Opener())
+    records, critical = [], []
+    result = runtime(api.EndpointConfig('http://unused.invalid/v1', 'test',
+        features={'streaming': True})).run(artifact('read' if tools else ''),
+            policy=api.RunPolicy(timeout_s=10, allowed_tools=frozenset({'read_file'}) if tools else frozenset()),
+            observer=records.append, on_event=critical.append)
+    assert result.exit_code == -1 and result.timed_out and result.stdout == ''
+    assert result.metadata['provider_error_code'] == 'timeout'
+    assert [r['event'] for r in records] == [
+        'invocation_started', 'provider_request_started',
+        'provider_request_completed', 'invocation_completed']
+    assert records[-2]['outcome'] == 'timed_out'
+    assert records[-1]['outcome'] == 'timed_out'
+    assert critical[-1]['event'] == 'completed'
+    assert critical[-1]['exit_code'] == -1
+    assert 'PRIVATE' not in json.dumps(records)

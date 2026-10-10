@@ -91,6 +91,7 @@ class _BoundedMixin:
     @contextmanager
     def open_http(self, request, *, timeout):
         started = time.monotonic()
+        self._stream_timed_out = False
         observe('provider_request_started')
         outcome = 'execution_failure'
         status = None
@@ -101,7 +102,7 @@ class _BoundedMixin:
             with response:
                 status = response.status
                 yield response
-            outcome = 'completed'
+            outcome = 'timed_out' if self._stream_timed_out else 'completed'
         except Cancelled:
             outcome = 'cancelled'
             raise
@@ -146,7 +147,12 @@ class _BoundedMixin:
             response = BoundedNativeStream(response, self._config.max_response_bytes, min(deadline, self.deadline))
         elif not isinstance(response, _BoundedStream):
             response = _BoundedStream(response, self._config.max_response_bytes)
-        return super()._read_sse_turn(response, deadline)
+        turn = super()._read_sse_turn(response, deadline)
+        # Readers may convert transport/deadline timeouts into Result instead
+        # of raising. Carry that state to the still-active HTTP observation.
+        if isinstance(turn, Result) and turn.timed_out:
+            self._stream_timed_out = True
+        return turn
 
     def validate_payload(self, payload):
         check_cancelled()
