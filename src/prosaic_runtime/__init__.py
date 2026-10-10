@@ -1,4 +1,6 @@
 """Execute neutral Prosaic artifacts with explicitly granted authority."""
+__version__ = '0.8.1'
+
 from .artifacts import ProsaicArtifact
 from .config import EndpointConfig, RuntimeConfig, RunLimits, CliSandboxConfig
 from .policy import RunPolicy
@@ -6,6 +8,10 @@ from .runtime import ProsaicRuntime
 from .types import Result
 from .tools import CustomTool, validate_custom_tools, custom_descriptors
 from .admission import validate_execution_artifact
+from .operation_context import InvocationScope, ToolExecutionContext
+from .tool_effects import ToolClaim, ToolJournal, tool_journal_descriptor
+from .telemetry import ObserverEmitter
+from .conformance import evaluate_conformance
 
 __all__ = ["ProsaicArtifact", "EndpointConfig", "RuntimeConfig", "RunLimits", "CliSandboxConfig", "RunPolicy", "ProsaicRuntime", "Result", "CustomTool"]
 __all__ += ["validate_execution_artifact", "validate_custom_tools", "custom_descriptors"]
@@ -16,3 +22,6 @@ __all__ += ["Completion", "StructuredToolError", "StructuredToolLoop", "ToolRequ
 
 from .accounting import AccountingError, ExecutionContext, ResolvedContext, RateCard
 __all__ += ["AccountingError", "ExecutionContext", "ResolvedContext", "RateCard"]
+__all__ += ["InvocationScope", "ObserverEmitter"]
+__all__ += ["ToolExecutionContext", "ToolClaim", "ToolJournal", "tool_journal_descriptor"]
+__all__ += ["evaluate_conformance"]

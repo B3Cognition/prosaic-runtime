@@ -1,4 +1,4 @@
-"""Host response guards shared by native JSON and stream readers."""
+"""Host response guards shared by JSON and stream readers."""
 import time
 
 from .events import check_cancelled
@@ -29,6 +29,7 @@ class BoundedNativeStream:
         self.response, self.remaining, self.deadline = response, limit, deadline
         self.buffer = bytearray()
         self.eof = False
+        self.overflow = False
 
     def __getattr__(self, name):
         return getattr(self.response, name)
@@ -38,7 +39,7 @@ class BoundedNativeStream:
             check_cancelled()
             remaining = self.deadline - time.monotonic()
             if remaining <= 0:
-                raise TimeoutError('native stream deadline')
+                raise TimeoutError('stream deadline')
             index = self.buffer.find(b'\n')
             if index >= 0 or self.eof:
                 size = index + 1 if index >= 0 else len(self.buffer)
@@ -48,12 +49,18 @@ class BoundedNativeStream:
                 if line and callable(capture):
                     capture(line)
                 return line
+            if self.overflow:
+                raise LimitExceeded('response exceeds max_response_bytes')
             set_response_timeout(self.response, remaining)
-            reader = getattr(self.response, 'read_chunk', None) or self.response.read1
+            reader = (getattr(self.response, 'read_chunk', None) or
+                      getattr(self.response, 'read1', None) or self.response.readline)
             chunk = reader(min(65536, self.remaining + 1))
             self.remaining -= len(chunk)
             if self.remaining < 0:
-                raise LimitExceeded('response exceeds max_response_bytes')
+                # Admit complete lines within the cap before rejecting later
+                # bytes from the same socket read. Capture remains per-line.
+                chunk = chunk[:self.remaining]
+                self.overflow = True
             self.buffer.extend(chunk)
-            if not chunk:
+            if not chunk and not self.overflow:
                 self.eof = True

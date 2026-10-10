@@ -1,8 +1,13 @@
 # Prosaic Runtime
 
-Version **0.7.1** exports pure execution-artifact and native registry validation
-for host workflow admission. Runtime execution reuses those checks and pins
-Prosaic **0.3.2** for canonical in-memory artifact validation.
+The **0.8.1** candidate is distributed as `b3-prosaic-runtime` and requires
+`b3-prosaic>=0.4,<0.5` from the package index. Python imports (`prosaic_runtime`)
+and the `prosaic-runtime` CLI remain unchanged. The separately installed recorder
+is `b3-prosaic-runtime-postgres` **0.2.1**, selecting Runtime 0.8.x.
+Candidates are not public index releases until the release qualification gate passes.
+
+Runtime exports pure execution-artifact and native registry validation for host
+workflow admission and reuses Core's canonical in-memory artifact validation.
 
 Version **0.7.0** adds bounded native Anthropic text, streaming and tools, alongside
 OpenAI-compatible execution. The separate `prosaic-runtime-postgres` **0.1.1**
@@ -13,8 +18,13 @@ Optional customer usage metering is described in [Accounting](docs/accounting.md
 Existing callers need no IDs or database; durable tracking uses a separately installed
 PostgreSQL recorder and does not enable customer charges.
 
-Version 0.7.1 installs Python Prosaic 0.3.2 automatically at an immutable Git
-revision. Installation and CI no longer require Node.js or npm.
+Runtime also offers optional [bounded observation](docs/telemetry.md) through
+`run(observer=..., operation_context=InvocationScope(...))` and the `observer_v1`
+capability. Ordinary observer exceptions leave execution results unchanged.
+The existing `on_event` callback remains a critical evidence hook. Operation
+scope supplies opaque host correlation without enabling accounting.
+
+Installation and CI do not require Node.js or npm.
 
 Version 0.5.3 retains trusted macOS framework Python startup probes using their
 declared sandbox working directory and pins the updated permission documentation.
@@ -118,16 +128,24 @@ an isolated Python environment; no sudo or global Python installation is needed:
 ```sh
 git clone https://github.com/B3Cognition/prosaic-runtime.git
 cd prosaic-runtime
-git checkout v0.7.1
+git checkout v0.8.1
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install .
 ```
 
-The package automatically installs Python Prosaic v0.3.2 at immutable commit
-`af7d90e178f61d53ba71bcc61c41c3ef7f941b4c` into the same environment. No global
-installation or retained TypeScript checkout is needed. Older Runtime release
-tags retain their historical installation docs.
+The package installs compatible `b3-prosaic` 0.4.x into the same environment.
+Use the release tag after publication; older release tags retain historical docs.
+
+For index installation after publication, create a fresh virtual environment or
+container image and run `python -m pip install 'b3-prosaic-runtime==0.8.1'`.
+Install the optional recorder with
+`python -m pip install 'b3-prosaic-runtime-postgres==0.2.1'`. Never add renamed
+packages to an environment containing legacy `prosaic`, `prosaic-runtime` or
+`prosaic-runtime-postgres`: they share import paths. Preserve old environments
+for historical reconstruction. PyPI's unrelated `prosaic` is not a dependency.
+Before publication, install only the explicit candidate wheels from an audited
+wheelhouse with `--no-index --find-links /path/to/qualified-wheelhouse`.
 
 Confirm both commands are available:
 
@@ -330,6 +348,14 @@ prosaic-runtime doctor --inference --timeout 180
 
 Inference is never a fallback for a failed default doctor check: only the explicit
 `--inference` flag enables that request.
+
+For a canonical capability report, run
+`prosaic-runtime conformance --config runtime.yml --profile small`. Its default
+produces explicit unexecuted evidence with no Runtime construction or probes.
+`--live` opts into a finite shared allowance for seven synthetic provider/tool
+checks. Fixture results remain `fixture_passed` and cannot qualify a live model.
+See [deterministic conformance](docs/conformance.md) for replay, profile/origin
+binding, measured assertions, canonical serialization, and execution bounds.
 
 ### Troubleshooting
 
@@ -549,12 +575,46 @@ usage. `token_usage_status` distinguishes unknown from reported totals; real
 reported zero remains zero. Known partial sums are diagnostic
 `reported_token_usage`, not a complete total for a consumer token budget.
 
+For finite invocation allowances, set `RunPolicy(max_provider_requests=4,
+max_tool_calls=2, max_reported_tokens=8192)`. Each field accepts a nonnegative
+integer or `None` (legacy behavior); zero prevents dispatch in that unit.
+Provider attempts are reserved before HTTP and accounting preparation. Tool
+attempts include denied and malformed calls, with each call in a batch counted
+once. Acquisition and follow-up turns share the same allowances.
+
+With a reported-token cap, missing, invalid or partial totals and duplicate JSON
+keys fail with `usage_unknown`; a terminal response above the cap fails with
+`token_limit`.
+A complete final response exactly at the cap succeeds, while further provider or
+tool dispatch stops at equality. Returned text and already reported usage remain
+available, including unknown totals and known partial sums. A failed provider
+attempt keeps invocation usage unknown even after earlier turns reported complete
+totals; its provider error remains available alongside the budget failure.
+Accounting capture persists a completed response before budget admission. Token reports arrive
+after a request, so one response can exceed the allowance; these controls do not
+estimate an invoice ceiling or preempt a running callback. Endpoint `max_tokens`
+keeps its provider meaning. Harness `max_calls` still counts workflow invocations.
+
+The capability `invocation_budgets_v1` advertises support. When any allowance is
+configured, `Result.metadata.invocation_budgets_v1` includes `provider_requests`,
+`tool_calls`, `reported_tokens` and `usage_complete`. Exhausted request/tool
+allowances return `provider_request_limit` or `tool_call_limit` in
+`metadata.failure_reason`. Disabled allowances add no count metadata and retain
+existing low-level consumer defaults.
+
 ```sh
 python -m pip install -e '.[test]'
 pytest
 ```
 
-Tests cover extracted transport edge cases, tool denial, path containment, artifact loading, routing, cancellation, and local HTTP/SSE integration. The end-to-end Prosaic test requires the CLI on PATH; CI installs the pinned Prosaic revision. Tests do not require paid LLM access. Successful conformance tests do not establish model quality; evaluate each agent/model pair against its own acceptance criteria.
+Tests cover extracted transport edge cases, tool denial, path containment, artifact loading, routing, cancellation, and local HTTP/SSE integration. The end-to-end Prosaic test requires the CLI on PATH; CI installs an explicit immutable Core candidate while index publication is pending. Tests do not require paid LLM access. Successful conformance tests do not establish model quality; evaluate each agent/model pair against its own acceptance criteria.
+
+`tests/test_distribution_metadata.py` builds both distributions from `git archive`
+(override the source with `PROSAIC_RUNTIME_RELEASE_REF`). The optional test extra
+includes the backend required for no-isolation source-artifact verification.
+Run `python -I scripts/wheel_smoke.py` with a fresh environment containing the
+explicit Core, Runtime and recorder candidate wheels to check installed ownership,
+CLI help, pure admission and documented recorder construction without model or DB calls.
 
 Licensed under the [Apache License, Version 2.0](LICENSE). See [NOTICE.md](NOTICE.md)
 for extraction provenance and [LICENSE-MIT](LICENSE-MIT) for the retained notice

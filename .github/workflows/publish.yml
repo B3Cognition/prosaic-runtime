@@ -1,0 +1,392 @@
+name: Publish SDK
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      candidate_run_id:
+        description: Successful build run at this exact commit; required for promotion
+        type: string
+        default: ''
+      core_run_id:
+        description: Successful exact-source Core qualified-release run
+        type: string
+        default: ''
+      core_commit:
+        description: Exact Core source commit
+        type: string
+        default: ''
+      publish:
+        description: Publish already qualified bytes (run on the version tag)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: package-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  artifacts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - run: python -m pip install 'build>=1' 'setuptools>=77' wheel packaging
+      - name: Build or promote immutable candidate bytes
+        env:
+          GH_TOKEN: ${{ secrets.ECOSYSTEM_ARTIFACT_TOKEN || github.token }}
+          SOURCE_COMMIT: ${{ github.sha }}
+          SOURCE_REF: ${{ github.ref }}
+          SOURCE_TAG: ${{ github.ref_name }}
+          CANDIDATE_RUN: ${{ inputs.candidate_run_id }}
+          PUBLISH: ${{ inputs.publish }}
+        run: |
+          python - <<'PY'
+          import importlib.util, json, os, pathlib, subprocess, tempfile, tomllib
+          project = tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']
+          publishing = os.environ['PUBLISH'] == 'true'
+          candidate = os.environ['CANDIDATE_RUN']
+          if publishing:
+              assert os.environ['SOURCE_REF'].startswith('refs/tags/')
+              assert os.environ['SOURCE_TAG'] == 'v' + project['version']
+              assert candidate, 'Promotion requires a successful exact-source candidate run'
+          if candidate:
+              assert candidate.isdigit()
+              run = json.loads(subprocess.check_output([
+                  'gh', 'api', 'repos/${{ github.repository }}/actions/runs/' + candidate]))
+              assert run['head_sha'] == os.environ['SOURCE_COMMIT']
+              assert run['conclusion'] == 'success' and run['name'] == 'Publish SDK'
+              assert run['path'] == '.github/workflows/publish.yml'
+              assert run['event'] in ('push', 'workflow_dispatch')
+              subprocess.run(['gh', 'run', 'download', candidate, '--name', 'qualified-release',
+                              '--dir', 'release/artifacts'], check=True)
+              subprocess.run(['python', 'scripts/release_artifacts.py', 'verify', '--directory',
+                              'release/artifacts', '--commit', os.environ['SOURCE_COMMIT']], check=True)
+              spec = importlib.util.spec_from_file_location('release', 'scripts/release_artifacts.py')
+              release = importlib.util.module_from_spec(spec); spec.loader.exec_module(release)
+              committed = release.tar_contents(subprocess.check_output([
+                  'git', 'archive', '--format=tar', os.environ['SOURCE_COMMIT']]))
+              with tempfile.TemporaryDirectory() as temporary:
+                  source = pathlib.Path(temporary)
+                  for name, content in committed.items():
+                      path = source.joinpath(*release.safe_path(name).parts)
+                      path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(content)
+                  release.audit_artifacts(source, pathlib.Path('release/artifacts'),
+                                          {project['name']: project['version'], 'b3-prosaic-runtime-postgres': '0.2.1'},
+                                          ('.', 'adapters/postgres'))
+          else:
+              subprocess.run(['python', 'scripts/release_artifacts.py', 'build', '--ref',
+                              os.environ['SOURCE_COMMIT'], '--output', 'release', '--expect',
+                              project['name'] + '=' + project['version'], '--expect',
+                              'b3-prosaic-runtime-postgres=0.2.1', '--project', '.',
+                              '--project', 'adapters/postgres'], check=True)
+          PY
+      - name: Bind the verified Core candidate to the selected Runtime bytes
+        env:
+          GH_TOKEN: ${{ secrets.ECOSYSTEM_ARTIFACT_TOKEN || github.token }}
+          CORE_RUN: ${{ inputs.core_run_id || vars.QUALIFIED_CORE_RUN_ID }}
+          CORE_COMMIT: ${{ inputs.core_commit || vars.QUALIFIED_CORE_COMMIT }}
+        run: |
+          python scripts/release_artifacts.py upstream --directory release/artifacts --wheelhouse release/upstream-wheels --core-run "$CORE_RUN" --core-commit "$CORE_COMMIT"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-bytes
+          path: release/artifacts/
+          if-no-files-found: error
+          retention-days: 90
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: curated-upstream
+          path: release/upstream-wheels/
+          if-no-files-found: error
+          retention-days: 90
+
+
+  native:
+    needs: artifacts
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-latest]
+        python: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: release-bytes
+          path: release/artifacts
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: curated-upstream
+          path: release/upstream-wheels
+      - name: Install explicit upstream and source test dependencies
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install release/upstream-wheels/b3_prosaic-0.4.1-py3-none-any.whl
+          .venv/bin/python -m pip install release/artifacts/b3_prosaic_runtime_postgres-0.2.1-py3-none-any.whl release/artifacts/b3_prosaic_runtime-0.8.1-py3-none-any.whl
+          .venv/bin/python -m pip install -e '.[test]'
+          .venv/bin/python - <<'PY'
+          import importlib.util
+          from pathlib import Path
+          spec = importlib.util.spec_from_file_location('release', 'scripts/release_artifacts.py')
+          release = importlib.util.module_from_spec(spec); spec.loader.exec_module(release)
+          release.verify_upstream(Path('release/artifacts'), Path('release/upstream-wheels'))
+          PY
+      - name: Expose the installed Core CLI to source tests
+        run: echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+      - name: Install Linux CLI sandbox backend
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap meson ninja-build pkg-config libcap-dev gcc
+          git clone https://github.com/containers/bubblewrap.git "$RUNNER_TEMP/bubblewrap"
+          git -C "$RUNNER_TEMP/bubblewrap" checkout --detach 2a76602a8c71f36c1527cf9fc3417d9149822e0c
+          meson setup "$RUNNER_TEMP/bubblewrap/_build" "$RUNNER_TEMP/bubblewrap" --prefix=/usr -Dman=disabled -Dtests=false
+          meson compile -C "$RUNNER_TEMP/bubblewrap/_build"
+          sudo meson install -C "$RUNNER_TEMP/bubblewrap/_build"
+          sudo install -m 0644 .github/ci/bwrap.apparmor /etc/apparmor.d/prosaic-ci-bwrap
+          sudo apparmor_parser -r /etc/apparmor.d/prosaic-ci-bwrap
+      - name: Require operational native confinement
+        run: |
+          .venv/bin/python - <<'PY'
+          import subprocess, sys
+          from types import SimpleNamespace
+          from prosaic_runtime import CliSandboxConfig
+          from prosaic_runtime.sandbox import require_backend, sandbox_command
+          configuration = CliSandboxConfig(mode='required')
+          require_backend(configuration)
+          with sandbox_command([sys.executable, '-c', 'pass'], cwd='/', env={},
+              policy=SimpleNamespace(read_roots=(), forbidden_roots=()),
+              config=configuration) as (argv, environment):
+              subprocess.run(argv, cwd='/', env=environment, check=True, timeout=10)
+          PY
+      - name: Qualify applicable Linux source cases without skipped gates
+        if: runner.os == 'Linux'
+        run: |
+          .venv/bin/python scripts/release_artifacts.py qualify --directory release/artifacts --commit "$GITHUB_SHA" --label native-${{ matrix.os }}-${{ matrix.python }}-source --junit "$RUNNER_TEMP/runtime-source.xml" -- .venv/bin/python -m pytest -q --junitxml="$RUNNER_TEMP/runtime-source.xml" -k 'not test_framework_python_starts_without_a_broad_prefix_grant and not test_wheel_metadata'
+      - name: Qualify macOS source including its framework interpreter gate
+        if: runner.os == 'macOS'
+        run: |
+          .venv/bin/python scripts/release_artifacts.py qualify --directory release/artifacts --commit "$GITHUB_SHA" --label native-${{ matrix.os }}-${{ matrix.python }}-source --junit "$RUNNER_TEMP/runtime-source.xml" -- .venv/bin/python -m pytest -q --junitxml="$RUNNER_TEMP/runtime-source.xml" -k 'not test_wheel_metadata'
+      - name: Qualify the transported isolated wheel and metadata
+        env:
+          PROSAIC_RUNTIME_WHEEL_ACCEPTANCE: '1'
+        run: |
+          python -m venv .wheel-test
+          .wheel-test/bin/python -m pip install pytest packaging release/upstream-wheels/b3_prosaic-0.4.1-py3-none-any.whl release/artifacts/b3_prosaic_runtime-0.8.1-py3-none-any.whl release/artifacts/b3_prosaic_runtime_postgres-0.2.1-py3-none-any.whl
+          .venv/bin/python scripts/release_artifacts.py qualify --directory release/artifacts --commit "$GITHUB_SHA" --label native-${{ matrix.os }}-${{ matrix.python }}-wheel --junit "$RUNNER_TEMP/runtime-wheel.xml" -- .wheel-test/bin/python -I -c "import os, runpy, subprocess, sys; runpy.run_path('scripts/wheel_smoke.py', run_name='__main__'); runpy.run_path('scripts/production_wheel_smoke.py', run_name='__main__'); subprocess.run([sys.executable, '-I', '-m', 'pytest', '-o', 'pythonpath=', 'tests/test_package_compatibility.py::test_wheel_metadata', '-q', '--junitxml=' + os.environ['RUNNER_TEMP'] + '/runtime-wheel.xml'], check=True)"
+          .wheel-test/bin/python -m pip check
+      - name: Verify minimum dependencies on both Linux architectures
+        if: matrix.python == '3.11' && runner.os == 'Linux'
+        run: |
+          python -m venv .floor-test
+          .floor-test/bin/python -m pip install 'PyYAML==6.0' 'pyuca==1.2' 'markdown-it-py==3.0.0' 'jsonschema==4.23.0' 'referencing==0.28.4' 'psycopg[binary]==3.2.1' release/upstream-wheels/b3_prosaic-0.4.1-py3-none-any.whl release/artifacts/b3_prosaic_runtime-0.8.1-py3-none-any.whl release/artifacts/b3_prosaic_runtime_postgres-0.2.1-py3-none-any.whl
+          .venv/bin/python scripts/release_artifacts.py qualify --directory release/artifacts --commit "$GITHUB_SHA" --label floor-${{ matrix.os }} -- .floor-test/bin/python -I scripts/production_wheel_smoke.py
+          .floor-test/bin/python -m pip check
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: qualified-native-${{ matrix.os }}-${{ matrix.python }}
+          path: release/artifacts/qualification-*.json
+          if-no-files-found: error
+          retention-days: 90
+
+  postgres:
+    needs: artifacts
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
+        postgres: ['16', '18']
+    services:
+      postgres:
+        image: postgres:${{ matrix.postgres }}
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: metering-ci-only
+          POSTGRES_DB: metering_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: release-bytes
+          path: release/artifacts
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: curated-upstream
+          path: release/upstream-wheels
+      - name: Verify and install only transported distributions
+        run: |
+          python -m pip install packaging pytest
+          python - <<'PY'
+          import importlib.util
+          from pathlib import Path
+          spec = importlib.util.spec_from_file_location('release', 'scripts/release_artifacts.py')
+          release = importlib.util.module_from_spec(spec); spec.loader.exec_module(release)
+          release.verify_receipt(Path('release/artifacts'), '${{ github.sha }}')
+          release.verify_upstream(Path('release/artifacts'), Path('release/upstream-wheels'))
+          PY
+          python -m pip install release/upstream-wheels/b3_prosaic-0.4.1-py3-none-any.whl release/artifacts/b3_prosaic_runtime-0.8.1-py3-none-any.whl release/artifacts/b3_prosaic_runtime_postgres-0.2.1-py3-none-any.whl
+      - name: Provision separate owned migration and runtime roles
+        env:
+          METERING_TEST_DSN: postgresql://postgres:metering-ci-only@127.0.0.1:5432/metering_test
+        run: |
+          python - <<'PY'
+          import os, psycopg
+          from prosaic_runtime_postgres import PostgresRecorder
+          PostgresRecorder(os.environ['METERING_TEST_DSN'], namespace='ci-readiness', environment='test').initialize()
+          with psycopg.connect(os.environ['METERING_TEST_DSN']) as connection:
+              connection.execute("CREATE ROLE metering_runtime LOGIN PASSWORD 'metering-ci-only'")
+              connection.execute('GRANT USAGE ON SCHEMA public TO metering_runtime')
+              connection.execute('GRANT SELECT, INSERT, UPDATE ON prosaic_metering_intents, prosaic_metering_observations TO metering_runtime')
+          PY
+      - name: Qualify actual installed database accounting
+        env:
+          METERING_TEST_DSN: postgresql://postgres:metering-ci-only@127.0.0.1:5432/metering_test
+          METERING_RUNTIME_DSN: postgresql://metering_runtime:metering-ci-only@127.0.0.1:5432/metering_test
+          PROSAIC_OWNED_DB_AUDIT: '1'
+        run: |
+          python scripts/release_artifacts.py qualify --directory release/artifacts --commit "$GITHUB_SHA" --label postgres-${{ matrix.os }}-${{ matrix.postgres }} --junit "$RUNNER_TEMP/runtime-postgres.xml" -- python -I -m pytest -o pythonpath=tests adapters/postgres/tests -q -k 'not harness_resume' --junitxml="$RUNNER_TEMP/runtime-postgres.xml"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: qualified-postgres-${{ matrix.os }}-${{ matrix.postgres }}
+          path: release/artifacts/qualification-*.json
+          if-no-files-found: error
+          retention-days: 90
+
+  gate:
+    needs: [native, postgres]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - run: python -m pip install packaging
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: release-bytes
+          path: release/artifacts
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          pattern: qualified-*
+          merge-multiple: true
+          path: release/artifacts
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: curated-upstream
+          path: release/upstream-wheels
+      - name: Require every source, installed, database and dependency-floor record
+        run: |
+          python - <<'PY'
+          import importlib.util, os
+          from pathlib import Path
+          spec = importlib.util.spec_from_file_location('release', 'scripts/release_artifacts.py')
+          release = importlib.util.module_from_spec(spec); spec.loader.exec_module(release)
+          release.verify_upstream(Path('release/artifacts'), Path('release/upstream-wheels'))
+          labels = [f'native-{os_name}-{version}-{kind}'
+                    for os_name in ('ubuntu-24.04', 'ubuntu-24.04-arm', 'macos-latest')
+                    for version in ('3.11', '3.12', '3.13') for kind in ('source', 'wheel')]
+          labels += [f'postgres-{os_name}-{version}' for os_name in ('ubuntu-24.04', 'ubuntu-24.04-arm') for version in ('16', '18')]
+          labels += [f'floor-{os_name}' for os_name in ('ubuntu-24.04', 'ubuntu-24.04-arm')]
+          release.require_qualification(Path('release/artifacts'), os.environ['GITHUB_SHA'], labels)
+          PY
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: qualified-release
+          path: release/artifacts/
+          if-no-files-found: error
+          retention-days: 90
+  pypi:
+    if: github.event_name == 'workflow_dispatch' && inputs.publish && startsWith(github.ref, 'refs/tags/')
+    needs: gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - run: python -m pip install packaging
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: qualified-release
+          path: release/artifacts
+      - name: Refuse conflicting existing index bytes
+        run: python scripts/release_artifacts.py index-check --directory release/artifacts --commit ${{ github.sha }} --allow-missing
+      - name: Prepare only distribution files for upload
+        run: |
+          mkdir upload
+          cp release/artifacts/*.whl release/artifacts/*.tar.gz upload/
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: upload/
+          skip-existing: true # Safe only with the mandatory pre/post digest checks.
+      - name: Verify actual downloaded public bytes
+        run: python scripts/release_artifacts.py index-check --directory release/artifacts --commit ${{ github.sha }}
+
+  github-release:
+    needs: [gate, pypi]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - run: python -m pip install packaging
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: qualified-release
+          path: release/artifacts
+      - name: Publish the same bytes and evidence without replacing assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python scripts/release_artifacts.py verify --directory release/artifacts --commit "$GITHUB_SHA"
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release download "$RELEASE_TAG" --dir existing
+            python scripts/release_artifacts.py verify --directory existing --commit "$GITHUB_SHA"
+            cmp existing/release-receipt.json release/artifacts/release-receipt.json
+            cmp existing/upstream-receipt.json release/artifacts/upstream-receipt.json
+          else
+            gh release create "$RELEASE_TAG" --verify-tag --title "$RELEASE_TAG" --notes "Qualified package-index release. Exact byte hashes and platform receipts are attached." release/artifacts/*
+          fi

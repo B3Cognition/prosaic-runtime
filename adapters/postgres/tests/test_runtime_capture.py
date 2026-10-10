@@ -4,7 +4,8 @@ import os
 import uuid
 from dataclasses import replace
 import pytest
-from prosaic_runtime import ExecutionContext, EndpointConfig, RateCard, ProsaicRuntime
+from prosaic_runtime import (ExecutionContext, EndpointConfig, RateCard, ProsaicRuntime,
+                             InvocationScope, RunPolicy, CustomTool, RuntimeConfig)
 from prosaic_runtime_postgres import PostgresRecorder
 from test_runtime import server, artifact, runtime
 
@@ -27,6 +28,10 @@ def response():
         'choices':[{'message':{'content':'{"approved":true}'},'finish_reason':'stop'}]}
 
 
+def failing_observer(record):
+    raise RuntimeError('PRIVATE_OBSERVER_FAILURE')
+
+
 @pytest.mark.parametrize('streaming',[False,True])
 def test_network_to_durable_scoped_estimate(server,ledger,streaming):
     url,requests,responses=server
@@ -38,7 +43,8 @@ def test_network_to_durable_scoped_estimate(server,ledger,streaming):
     else:
         responses.append(('application/json',json.dumps(response()).encode()))
     result=runtime(EndpointConfig(url,'alias',features={'streaming':streaming}),accounting=ledger).run(
-        artifact(),'private input',context=ExecutionContext(application_id='app',tenant_id='acme',billing_account_id='payer'))
+        artifact(),'private input',context=ExecutionContext(application_id='app',tenant_id='acme',billing_account_id='payer'),
+        observer=failing_observer, operation_context=InvocationScope('attempt', run_id='observed-run'))
     assert result.exit_code==0
     report=ledger.report(tenant_id='acme',billing_account_id='payer')
     assert report['total_calls']==report['complete_calls']==1
@@ -51,6 +57,53 @@ def test_network_to_durable_scoped_estimate(server,ledger,streaming):
     restarted.observe(rows[0]['intent']['provider_call_id'],rows[0]['observation'])
     assert restarted.report()['total_calls']==1
     assert 'payer' not in json.dumps(requests)
+    assert 'PRIVATE_OBSERVER_FAILURE' not in json.dumps(rows,default=str)
+
+
+def test_token_cap_retains_real_paid_observation(server, ledger):
+    url, requests, responses = server
+    responses.append(('application/json', json.dumps(response()).encode()))
+    result = runtime(EndpointConfig(url, 'alias', features={'streaming': False}),
+                     accounting=ledger).run(artifact(), policy=RunPolicy(max_reported_tokens=1199),
+        observer=failing_observer, operation_context=InvocationScope('capped'))
+    assert result.exit_code == 1 and result.metadata['failure_reason'] == 'token_limit'
+    assert result.token_usage == 1200 and len(requests) == 1
+    assert ledger.report()['total_calls'] == ledger.report()['complete_calls'] == 1
+    row = ledger.calls()[0]
+    assert row['observation']['usage']['total_tokens'] == 1200
+    assert ledger.report()['estimated_amounts'] == {'USD': '0.003000000000000000'}
+
+
+def test_journal_failure_retains_real_paid_observation_without_dispatch(server, ledger):
+    url, requests, responses = server
+    item = response()
+    item['choices'][0]['message']['tool_calls'] = [{'id': 'effect', 'type': 'function',
+        'function': {'name': 'approve', 'arguments': '{}'}}]
+    item['choices'][0]['finish_reason'] = 'tool_calls'
+    responses.append(('application/json', json.dumps(item).encode()))
+    effects = []
+    tool = CustomTool('approve', 'Approve synthetic operation',
+        {'type': 'object', 'properties': {}, 'additionalProperties': False},
+        lambda args, context: effects.append(context.operation_key) or {'approved': True},
+        'v1', with_context=True, operation_key=lambda args, context: 'business-operation')
+    class BrokenJournal:
+        contract_version = 'tool-journal-v1'
+        identity = 'synthetic-broken-journal'
+        def claim(self, operation_namespace, operation_key, signature):
+            raise RuntimeError('PRIVATE_JOURNAL_FAILURE')
+        def commit(self, operation_namespace, operation_key, claim_token, bounded_outcome):
+            raise AssertionError('commit must not run')
+    config = RuntimeConfig({'local': EndpointConfig(url, 'alias', features={'streaming': False})},
+                           {'fast': 'local'}, 'local', frozenset({'approve'}))
+    result = ProsaicRuntime(config, custom_tools={'approve': tool}, accounting=ledger).run(
+        artifact(['approve']), policy=RunPolicy(allowed_tools=frozenset({'approve'})),
+        tool_journal=BrokenJournal(), observer=failing_observer,
+        operation_context=InvocationScope('journal-attempt', operation_namespace='tenant'))
+    assert result.exit_code == 1 and result.metadata['failure_reason'] == 'tool_journal_failed'
+    assert result.token_usage == 1200 and len(requests) == 1 and effects == []
+    assert ledger.report()['total_calls'] == ledger.report()['complete_calls'] == 1
+    assert ledger.calls()[0]['observation']['usage']['total_tokens'] == 1200
+    assert 'PRIVATE_JOURNAL_FAILURE' not in result.stderr + json.dumps(result.metadata)
 
 
 def test_harness_resume_does_not_duplicate_accounting(server,ledger,tmp_path,monkeypatch):

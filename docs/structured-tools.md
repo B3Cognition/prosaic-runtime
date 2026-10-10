@@ -74,3 +74,18 @@ fingerprint and adapter checks include the tool contracts.
 
 Native calling remains available through `ProsaicRuntime.run`; neither the native
 implementation nor its compatibility guarantees change with this addition.
+
+## Trusted context and journals
+
+Pass `operation_context=InvocationScope(...)`, `tool_journal=host_journal` and an
+optional best-effort `observer` to `StructuredToolLoop`. It uses the same contextual
+authorization, trusted operation-key resolution, fenced claims and bounded outcome
+commit as native Runtime dispatch. Journaled tools require a trusted operation
+namespace and journal before the loop starts.
+
+Effect uncertainty, journal failure and signature conflict terminate the loop with
+fixed `tool_effect_uncertain`, `tool_journal_failed` and `tool_identity_conflict`
+reasons. They never consume the model correction allowance or redispatch an
+uncertain effect. A valid effect outcome commits before a subsequent cancellation
+or deadline check. See [trusted tool effects](tool-effects.md) for host identity,
+fencing, versioning and reconciliation responsibilities.

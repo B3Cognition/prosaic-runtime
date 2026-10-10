@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from prosaic_runtime import RunPolicy
+from prosaic_runtime import CustomTool, EndpointConfig, ProsaicRuntime, RunPolicy, RuntimeConfig
 from prosaic_runtime.accounting import MemoryRecorder, RateCard
 from test_runtime import artifact
 from test_anthropic import native_server, native_runtime, message, response, tool
@@ -139,6 +139,43 @@ def test_native_failed_final_turn_does_not_erase_its_usage(native_server, tmp_pa
     assert result.exit_code == 1 and result.token_usage == 14
     assert len(recorder.observations) == 2
     assert all(obs['usage']['total_tokens'] == 7 for obs in recorder.observations.values())
+
+
+@pytest.mark.parametrize('cap', [None, 20])
+@pytest.mark.parametrize('accounted', [False, True])
+def test_native_credential_failure_before_followup_preserves_known_usage(native_server, tmp_path, cap, accounted):
+    url, requests, responses = native_server
+    credential = tmp_path / 'api-key'
+    credential.write_text('fixture-key')
+
+    def lookup(arguments):
+        credential.unlink()
+        return {'done': True}
+
+    descriptor = CustomTool('lookup', 'Lookup', {'type': 'object', 'properties': {},
+        'additionalProperties': False}, lookup, 'v1')
+    responses.append(response(text='', calls=[tool('lookup')]))
+    endpoint = EndpointConfig(url, 'claude-test', provider='anthropic', api_key_file=str(credential),
+        features={'streaming': False})
+    recorder = MemoryRecorder(provider_id='anthropic') if accounted else None
+    runner = ProsaicRuntime(RuntimeConfig({'native': endpoint}, {'fast': 'native'}, 'native',
+        frozenset({'lookup'})), custom_tools={'lookup': descriptor}, accounting=recorder)
+    result = runner.run(artifact(['lookup']), env={}, policy=RunPolicy(
+        allowed_tools=frozenset({'lookup'}), max_reported_tokens=cap))
+    assert len(requests) == 1
+    assert result.exit_code == 1 and result.token_usage == 7
+    assert result.metadata['provider_error_code'] == 'api_key_file_error'
+    assert 'not readable' in result.stderr
+    assert 'failure_reason' not in result.metadata
+    assert result.metadata['token_usage_status'] == 'reported'
+    if cap is not None:
+        assert result.metadata['invocation_budgets_v1'] == {'provider_requests': 1,
+            'tool_calls': 1, 'reported_tokens': 7, 'usage_complete': True}
+    else:
+        assert 'invocation_budgets_v1' not in result.metadata
+    if accounted:
+        assert observation(recorder)['usage']['total_tokens'] == 7
+        assert observation(recorder)['usage']['status'] == 'reported'
 
 
 def test_native_unknown_turn_does_not_become_known_loop_total(native_server, tmp_path):

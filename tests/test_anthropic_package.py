@@ -25,6 +25,18 @@ def test_native_example_loads_without_credentials_or_inference():
     assert config.allowed_tools == frozenset({'read_file'})
 
 
+def test_native_conformance_default_cli_never_loads_credentials(tmp_path):
+    raw = yaml.safe_load(EXAMPLE.read_text())
+    raw['profiles'][raw['default_profile']].update(base_url='http://localhost:9/v1',
+        api_key_env=None, api_key_file=str(tmp_path / 'missing-secret'))
+    config = tmp_path / 'native.yml'
+    config.write_text(yaml.safe_dump(raw))
+    result = subprocess.run([sys.executable, '-m', 'prosaic_runtime.cli', 'conformance',
+        '--config', str(config), '--quiet'], capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)['qualification'] == 'not_qualified'
+
+
 def test_native_documented_cli_text_and_tools(native_server, tmp_path):
     url, requests, responses = native_server
     raw = yaml.safe_load(EXAMPLE.read_text())

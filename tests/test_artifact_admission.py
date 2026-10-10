@@ -37,6 +37,18 @@ def test_admission_does_not_prepare_configured_cli_directories(tmp_path):
     assert not (tmp_path / 'missing-cli-directory').exists()
 
 
+def test_pure_admission_never_constructs_observation_or_runtime(monkeypatch):
+    import prosaic_runtime.runtime as runtime_module
+    import prosaic_runtime.telemetry as telemetry_module
+    def forbidden(*args, **kwargs):
+        pytest.fail('pure admission constructed executable infrastructure')
+    monkeypatch.setattr(runtime_module, 'ObserverEmitter', forbidden)
+    monkeypatch.setattr(telemetry_module, 'ObserverEmitter', forbidden)
+    monkeypatch.setattr(api, 'ProsaicRuntime', forbidden)
+    monkeypatch.setattr(runtime_module, 'ProsaicRuntime', forbidden)
+    assert validate(artifact(), config()) is None
+
+
 @pytest.mark.parametrize('change', [
     {'id': ''}, {'type': 'skill'}, {'frontmatter': []}, {'body': None},
     {'resources': ({'relPath': '../private', 'content': 'data'},)},

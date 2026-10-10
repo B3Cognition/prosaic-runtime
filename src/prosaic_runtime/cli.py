@@ -9,13 +9,13 @@ from .runtime import ProsaicRuntime
 from .policy import RunPolicy
 from .config import RuntimeConfig
 from .console import Progress
-from .diagnostics import doctor, smoke, failure_hint
+from .diagnostics import doctor, smoke, failure_hint, conformance
 from .accounting import ExecutionContext, RateCard
 
 
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
-    mode = argv.pop(0) if argv and argv[0] in {"doctor", "smoke", "preflight"} else "run"
+    mode = argv.pop(0) if argv and argv[0] in {"doctor", "smoke", "preflight", "conformance"} else "run"
     parser = argparse.ArgumentParser(prog="prosaic-runtime")
     if mode == "run":
         parser.add_argument("artifact", help="Prosaic artifact identifier (also: doctor or smoke subcommands)")
@@ -53,6 +53,8 @@ def main(argv=None):
         parser.add_argument("--inference", action="store_true", help="opt in to one model request (may incur charges)")
     if mode == "smoke":
         parser.add_argument("--live", action="store_true", required=True, help="explicitly authorize live model calls")
+    if mode == 'conformance':
+        parser.add_argument('--live', action='store_true', help='explicitly authorize bounded provider calls')
     args = parser.parse_args(argv)
     def emit(event):
         print(json.dumps(event), flush=True)
@@ -79,6 +81,20 @@ def main(argv=None):
                 profile = args.profile or config.default_profile
                 if profile not in config.profiles:
                     raise ValueError(f"Unknown endpoint profile: {profile}")
+                if mode == 'conformance':
+                    suite_policy = RunPolicy(timeout_s=args.timeout if args.timeout is not None else 60,
+                        max_tool_rounds=args.max_tool_rounds if args.max_tool_rounds is not None else 2,
+                        max_input_bytes=65536, max_provider_requests=12, max_tool_calls=4,
+                        max_reported_tokens=32768)
+                    report = conformance(config, profile, live=args.live, policy=suite_policy,
+                                         observer=emit if args.events else None)
+                    if args.output == 'text':
+                        print('conformance: ' + report['qualification'])
+                        for case in report['cases']:
+                            print(f"{case['id']}: {case['state']} — {case['reason']}")
+                    else:
+                        emit(report)
+                    return 0 if not args.live or report['qualification'] == 'qualified' else 1
                 if mode == "doctor":
                     report = doctor(config, profile, inference=args.inference, timeout_s=policy.timeout_s, on_event=sink)
                 else:
@@ -101,7 +117,7 @@ def main(argv=None):
                 try:
                     from prosaic_runtime_postgres import PostgresRecorder
                 except ImportError as exc:
-                    raise ValueError('install prosaic-runtime-postgres to enable durable accounting') from exc
+                    raise ValueError('install b3-prosaic-runtime-postgres to enable durable accounting') from exc
                 rate_card = None
                 if args.accounting_rate_card:
                     with open(args.accounting_rate_card, encoding='utf-8') as handle:

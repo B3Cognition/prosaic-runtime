@@ -7,6 +7,55 @@ from prosaic_runtime import EndpointConfig, RunPolicy
 from test_runtime import server, artifact, runtime, completion
 
 
+def test_operation_scope_and_failing_observer_do_not_enable_accounting(server):
+    from prosaic_runtime import InvocationScope
+    url, requests, responses = server
+    responses.append(completion('done'))
+    records = []
+    def observer(record):
+        records.append(dict(record))
+        raise RuntimeError('PRIVATE_OBSERVER_FAILURE')
+    result = runtime(EndpointConfig(url, 'test', features={'streaming': False})).run(
+        artifact(), operation_context=InvocationScope('attempt', run_id='run'),
+        observer=observer)
+    assert result.exit_code == 0 and result.stdout == 'done' and result.token_usage == 7
+    assert len(requests) == 1 and records[-1]['outcome'] == 'completed'
+    assert 'accounting_v1' not in result.metadata
+    assert 'invocation_budgets_v1' not in result.metadata
+    assert set(asdict(result)) == {
+        'exit_code', 'stdout', 'stderr', 'token_usage', 'cost_usd', 'timed_out', 'metadata'}
+
+
+def test_accounting_scope_is_independent_of_observation_scope(server):
+    from prosaic_runtime import InvocationScope
+    url, requests, responses = server
+    responses.append(completion('done'))
+    recorder, records = MemoryRecorder(), []
+    def observer(record):
+        records.append(dict(record))
+        raise RuntimeError('PRIVATE_OBSERVER_FAILURE')
+    result = runtime(EndpointConfig(url, 'test', features={'streaming': False}),
+                     accounting=recorder).run(artifact(), context=ExecutionContext(
+        application_id='app', tenant_id='tenant', billing_account_id='payer',
+        request_id='request', invocation_id='billing-attempt', run_id='billing-run'),
+        operation_context=InvocationScope('observed-attempt', run_id='observed-run'),
+        observer=observer)
+    assert result.exit_code == 0 and len(requests) == 1
+    intent = next(iter(recorder.intents.values()))
+    assert intent['context'] == {
+        'application_id': 'app', 'tenant_id': 'tenant', 'billing_account_id': 'payer',
+        'request_id': 'request', 'invocation_id': 'billing-attempt',
+        'actor_id': None, 'project_id': None, 'run_id': 'billing-run',
+        'parent_invocation_id': None, 'step_id': None,
+        'attribution_source': {'application_id': 'provided', 'tenant_id': 'provided',
+                               'billing_account_id': 'provided'}}
+    assert next(iter(recorder.observations.values()))['usage'] == {
+        'input_tokens': 5, 'output_tokens': 2, 'total_tokens': 7,
+        'cached_input_tokens': None, 'reasoning_output_tokens': None, 'status': 'reported'}
+    assert records[-1]['invocation_id'] == 'observed-attempt'
+    assert 'PRIVATE_OBSERVER_FAILURE' not in json.dumps(records)
+
+
 def test_partial_ids_do_not_inherit_unrelated_payer():
     resolved = ExecutionContext(tenant_id='tenant-b').resolve(ExecutionContext(tenant_id='tenant-a', billing_account_id='payer-a'))
     assert resolved.billing_account_id == 'default'

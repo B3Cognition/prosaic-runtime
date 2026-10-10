@@ -121,3 +121,12 @@ def smoke(config, profile, *, timeout_s=None, max_tool_rounds=None, on_event=Non
         tests[name] = run_check(config, profile, with_tools=with_tools, timeout_s=timeout_s,
                                max_tool_rounds=max_tool_rounds, on_event=on_event)
     return {"command": "smoke", "ok": all(t["status"] == "ok" for t in tests.values()), "tests": tests}
+
+
+def conformance(config, profile, live=False, policy=None, observer=None, *, evidence_origin='live'):
+    """Default is pure unexecuted evidence; execution requires explicit opt-in."""
+    from .conformance import _profile_fingerprint, evaluate_conformance, _run_suite
+    fingerprint = _profile_fingerprint(config.profiles[profile])
+    if not live:
+        return evaluate_conformance('text-tools-v1', fingerprint, {})
+    return _run_suite(config, profile, fingerprint, policy, observer, evidence_origin)
