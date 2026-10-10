@@ -1,5 +1,6 @@
 """Opaque host correlation, independent of billing attribution."""
 from dataclasses import dataclass, fields
+from collections.abc import Callable
 import unicodedata
 
 
@@ -23,3 +24,16 @@ class InvocationScope:
                 continue
             if not bounded_reference(value):
                 raise ValueError(f'invalid {field.name}')
+
+
+@dataclass(frozen=True)
+class ToolExecutionContext:
+    """Trusted invocation data; business identity is resolved only by the host."""
+    scope: InvocationScope
+    tool_name: str
+    tool_version: str
+    call_index: int
+    arguments_sha256: str
+    deadline: float
+    cancelled: Callable
+    operation_key: str | None = None

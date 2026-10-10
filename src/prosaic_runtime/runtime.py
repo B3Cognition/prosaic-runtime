@@ -25,6 +25,7 @@ from .accounting import AccountingError, resolve_context
 from .accounting_capture import Capture, InvalidEvidence, strict_json
 from .http_bounds import LimitExceeded, set_response_timeout, BoundedNativeStream
 from .operation_context import InvocationScope
+from .tool_effects import admit_tool_effects, ToolEffectFailure
 from .telemetry import ObserverEmitter, observation_context, observe, execution_started
 from .budgets import InvocationBudget, InvocationBudgetExceeded
 
@@ -58,7 +59,8 @@ class _BoundedStream:
 
 
 class _BoundedMixin:
-    def __init__(self, endpoint, max_input_bytes, custom_tools, deadline, capture=None, budget=None):
+    def __init__(self, endpoint, max_input_bytes, custom_tools, deadline, capture=None, budget=None,
+                 scope=None, tool_journal=None, cancelled=None):
         super().__init__(endpoint)
         self.max_input_bytes = max_input_bytes
         self.reported_token_usage = None
@@ -68,6 +70,9 @@ class _BoundedMixin:
         self.deadline = deadline
         self.capture = capture
         self.budget = budget
+        self.scope, self.tool_journal = scope, tool_journal
+        self.cancelled = cancelled if cancelled is not None else lambda: False
+        self.tool_call_index = 0
         self.reported_usage_details = {}
         self._turn_usage_unknown = False
         self._latest_usage_complete = None
@@ -81,7 +86,14 @@ class _BoundedMixin:
     def make_registry(self, cwd, features, metadata):
         return BoundedToolRegistry(super().make_registry(cwd, features, metadata),
                                    self.custom_tools, metadata.get('allowed_tools', ()), self.check_boundary,
-                                   self.budget.before_tool if self.budget is not None else None)
+                                   self.budget.before_tool if self.budget is not None else None,
+                                   self.tool_execution_options)
+
+    def tool_execution_options(self):
+        index = self.tool_call_index
+        self.tool_call_index += 1
+        return dict(scope=self.scope, deadline=self.deadline, cancelled=self.cancelled,
+                    call_index=index, tool_journal=self.tool_journal)
 
     def usage_details(self, parsed):
         details = super().usage_details(parsed)
@@ -256,6 +268,7 @@ class _BoundedAnthropicBackend(_BoundedMixin, AnthropicBackend):
 
 class ProsaicRuntime:
     capabilities = frozenset({'invocation_budgets_v1', 'observer_v1', 'accounting_v1', 'read_receipts_v1', 'initial_tool_v1', 'initial_tool_enforcement_v1', 'acquisition_v1', 'custom_tools_v1', 'cli_tools_v1', 'cli_sandbox_v1'})
+    capabilities |= frozenset({'tool_context_v1', 'tool_journal_v1'})
     def __init__(self, config: RuntimeConfig, *, source=".prosaic", executable="prosaic", custom_tools=None,
                  accounting=None, context_defaults=None):
         self.config = config
@@ -327,7 +340,7 @@ class ProsaicRuntime:
             cwd: str | Path = '.', policy: RunPolicy | None = None,
             on_event=None, cancelled=None, env=None,
             acquisition: str | ProsaicArtifact | None = None, context=None, accounting=None,
-            observer=None, operation_context: InvocationScope | None = None) -> Result:
+            observer=None, operation_context: InvocationScope | None = None, tool_journal=None) -> Result:
         scope = InvocationScope(str(uuid4())) if operation_context is None else operation_context
         emitter = ObserverEmitter(observer, source='runtime', scope=scope)
         started = time.monotonic()
@@ -338,7 +351,7 @@ class ProsaicRuntime:
                 emitter.emit('invocation_started')
                 result = self._run_accounted(artifact, arguments, cwd=cwd, policy=policy,
                     on_event=on_event, cancelled=cancelled, env=env, acquisition=acquisition,
-                    context=context, accounting=accounting)
+                    context=context, accounting=accounting, operation_context=scope, tool_journal=tool_journal)
                 if result.metadata.get('failure_reason') == 'cancelled':
                     outcome = 'cancelled'
                 elif result.timed_out:
@@ -364,7 +377,8 @@ class ProsaicRuntime:
     def _run_accounted(self, artifact: str | ProsaicArtifact, arguments: str = "", *,
             cwd: str | Path = '.', policy: RunPolicy | None = None,
             on_event=None, cancelled=None, env=None,
-            acquisition: str | ProsaicArtifact | None = None, context=None, accounting=None) -> Result:
+            acquisition: str | ProsaicArtifact | None = None, context=None, accounting=None,
+            operation_context=None, tool_journal=None) -> Result:
         policy = policy or RunPolicy(timeout_s=self.config.limits.timeout_s,
                                      max_tool_rounds=self.config.limits.max_tool_rounds)
         budget = InvocationBudget(policy)
@@ -375,7 +389,8 @@ class ProsaicRuntime:
         try:
             result = self._run(artifact, arguments, _recorder=recorder, _context=resolved,
                                _capture_ref=captures.append, _budget=budget, cwd=cwd, policy=policy, on_event=on_event,
-                               cancelled=cancelled, env=env, acquisition=acquisition)
+                               cancelled=cancelled, env=env, acquisition=acquisition,
+                               _operation_context=operation_context, _tool_journal=tool_journal)
         except AccountingError:
             result = Result(1, '', 'accounting persistence failed; do not retry the provider automatically',
                             metadata={'failure_reason': 'accounting_failed'})
@@ -393,7 +408,7 @@ class ProsaicRuntime:
             cwd: str | Path = ".", policy: RunPolicy | None = None,
             on_event=None, cancelled=None, env=None,
             acquisition: str | ProsaicArtifact | None = None, _recorder=None, _context=None, _capture_ref=None,
-            _budget=None) -> Result:
+            _budget=None, _operation_context=None, _tool_journal=None) -> Result:
         policy = policy or RunPolicy(timeout_s=self.config.limits.timeout_s,
                                      max_tool_rounds=self.config.limits.max_tool_rounds)
         started = time.monotonic()
@@ -413,6 +428,7 @@ class ProsaicRuntime:
                     "body": artifact.body, "resources": list(artifact.resources)})
                 validate_execution_artifact(artifact, self.config)
                 requested = requested_tools(artifact.frontmatter.get("tools"))
+                admit_tool_effects(self._custom_tools, requested, _operation_context, _tool_journal)
                 unsupported = requested - BUILTIN_TOOLS - self._custom_tools.keys()
                 if unsupported:
                     raise ValueError(f"unsupported tools: {sorted(unsupported)}")
@@ -480,7 +496,8 @@ class ProsaicRuntime:
                     _capture_ref(capture)
                 backend_type = _BoundedAnthropicBackend if endpoint.provider == 'anthropic' else _BoundedBackend
                 backend = backend_type(endpoint, policy.max_input_bytes, self._custom_tools,
-                                       started + policy.timeout_s, capture, _budget)
+                                       started + policy.timeout_s, capture, _budget,
+                                       _operation_context, _tool_journal, cancelled)
                 result = backend.run_prompt(Invocation(
                     str(Path(cwd).resolve()), prompt, invocation_env, remaining,
                     {"prompt_metadata": metadata}))
@@ -518,6 +535,13 @@ class ProsaicRuntime:
                     result.metadata.update(acquisition_id=acquisition.id, acquisition_sha256=acquisition.digest)
                 emit("completed", exit_code=result.exit_code, token_usage=result.token_usage)
                 return result
+            except ToolEffectFailure as exc:
+                return Result(1, '', exc.reason,
+                    token_usage=backend.reported_token_usage if backend and backend.usage_complete else None,
+                    metadata={'failure_reason': exc.reason, 'usage_scope': 'reported_completed_turns',
+                              'token_usage_status': 'reported' if backend and backend.usage_complete and backend.reported_token_usage is not None else 'unknown',
+                              'reported_token_usage': backend.reported_token_usage if backend else None,
+                              'token_usage_details': backend.reported_usage_details if backend else {}})
             except Cancelled:
                 return Result(130, "", 'invocation cancelled', token_usage=backend.reported_token_usage if backend and backend.usage_complete else None,
                               metadata={"failure_reason": "cancelled", 'usage_scope': 'reported_completed_turns'})

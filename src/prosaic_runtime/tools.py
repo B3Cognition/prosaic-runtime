@@ -1,7 +1,8 @@
 """Validated host tools. Callbacks are trusted code, not sandboxed or preemptible."""
 from collections.abc import Mapping, Callable
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+import hashlib
 import json
 import math
 import re
@@ -9,6 +10,8 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError, SchemaError
 from .events import Cancelled
 from .policy import BUILTIN_TOOLS
+from .operation_context import ToolExecutionContext, bounded_reference
+from .tool_effects import ToolEffectFailure, canonical_json, snapshot_outcome, validate_claim
 
 
 class ToolDeadlineExceeded(TimeoutError):
@@ -71,9 +74,12 @@ class CustomTool:
     max_argument_bytes: int
     max_result_bytes: int
     authorize: Callable | None
+    with_context: bool
+    operation_key: Callable | None
 
     def __init__(self, name, description, parameters, handler, version, *,
-                 max_argument_bytes=16384, max_result_bytes=65536, authorize=None):
+                 max_argument_bytes=16384, max_result_bytes=65536, authorize=None,
+                 with_context=False, operation_key=None):
         if not isinstance(name, str) or not re.fullmatch(r'[A-Za-z][A-Za-z0-9_-]{0,63}', name) or name in BUILTIN_TOOLS:
             raise ValueError('invalid or reserved custom tool name')
         for label, value, limit in [('description', description, 4096), ('version', version, 128)]:
@@ -84,6 +90,10 @@ class CustomTool:
                 raise ValueError('tool byte limits must be positive integers')
         if not callable(handler) or (authorize is not None and not callable(authorize)):
             raise ValueError('handler and authorizer must be callable')
+        if type(with_context) is not bool:
+            raise ValueError('with_context must be boolean')
+        if operation_key is not None and (not with_context or not callable(operation_key)):
+            raise ValueError('operation_key requires contextual tools and a callable resolver')
         try:
             depth(parameters)
             if type(parameters) is not dict or parameters.get('type') != 'object' or parameters.get('additionalProperties') is not False:
@@ -95,7 +105,8 @@ class CustomTool:
             raise ValueError('invalid tool schema') from exc
         for key, value in dict(name=name, description=description, _schema_json=schema_json,
                                handler=handler, version=version, max_argument_bytes=max_argument_bytes,
-                               max_result_bytes=max_result_bytes, authorize=authorize).items():
+                               max_result_bytes=max_result_bytes, authorize=authorize,
+                               with_context=with_context, operation_key=operation_key).items():
             object.__setattr__(self, key, value)
 
     @property
@@ -104,9 +115,14 @@ class CustomTool:
 
     @property
     def descriptor(self):
-        return dict(name=self.name, description=self.description, parameters=self.parameters,
+        descriptor = dict(name=self.name, description=self.description, parameters=self.parameters,
                     version=self.version, max_argument_bytes=self.max_argument_bytes,
                     max_result_bytes=self.max_result_bytes, authorization_required=self.authorize is not None)
+        if self.with_context:
+            descriptor['with_context'] = True
+        if self.operation_key is not None:
+            descriptor['journaled'] = True
+        return descriptor
 
 
 def validate_custom_tools(tools):
@@ -162,15 +178,29 @@ def bounded_result(value, maximum):
         return {'status': 'error', 'error': 'invalid_result'}
 
 
-def execute_custom_tool(tool, raw_arguments, *, check_boundary):
+def execute_custom_tool(tool, raw_arguments, *, check_boundary, scope=None,
+                        deadline=None, cancelled=lambda: False, call_index=0, tool_journal=None):
     check_boundary()
     try:
         arguments = parse_arguments(raw_arguments, tool.parameters, tool.max_argument_bytes)
     except (TypeError, ValueError, RecursionError, OverflowError, ValidationError):
         return {'status': 'error', 'error': 'invalid_arguments'}
+    context = None
+    if tool.with_context:
+        try:
+            digest = hashlib.sha256(canonical_json(arguments).encode('utf-8')).hexdigest()
+        except (TypeError, ValueError, RecursionError, OverflowError):
+            return {'status': 'error', 'error': 'invalid_arguments'}
+        context = ToolExecutionContext(scope, tool.name, tool.version, call_index,
+            digest, deadline, cancelled)
+
+    def invoke(callback, ctx=context):
+        owned = deepcopy(arguments)
+        return callback(owned, ctx) if tool.with_context else callback(owned)
+
     if tool.authorize is not None:
         try:
-            allowed = tool.authorize(deepcopy(arguments)) is True
+            allowed = invoke(tool.authorize) is True
         except (Cancelled, ToolDeadlineExceeded):
             raise
         except Exception:
@@ -179,8 +209,44 @@ def execute_custom_tool(tool, raw_arguments, *, check_boundary):
         if not allowed:
             return {'status': 'error', 'error': 'authorization_denied'}
     check_boundary()
+    if tool.operation_key is not None:
+        try:
+            key = tool.operation_key(deepcopy(arguments), context)
+        except (Cancelled, ToolDeadlineExceeded):
+            raise
+        except Exception:
+            raise ToolEffectFailure('tool_identity_conflict') from None
+        if not bounded_reference(key, 256):
+            raise ToolEffectFailure('tool_identity_conflict')
+        check_boundary()
+        context = replace(context, operation_key=key)
+        signature = hashlib.sha256(canonical_json({'tool_name': tool.name,
+            'tool_version': tool.version, 'arguments': arguments}).encode('utf-8')).hexdigest()
+        try:
+            claim = tool_journal.claim(scope.operation_namespace, key, signature)
+        except Exception:
+            raise ToolEffectFailure('tool_journal_failed') from None
+        replay = validate_claim(claim, signature, tool.max_result_bytes)
+        if claim.state == 'uncertain':
+            raise ToolEffectFailure('tool_effect_uncertain')
+        check_boundary()
+        if claim.state == 'replay':
+            return replay
+        try:
+            value = invoke(tool.handler, context)
+            outcome = snapshot_outcome({'status': 'ok', 'result': value}, tool.max_result_bytes)
+        except Exception:
+            # Dispatch errors and unusable results cannot establish completion.
+            raise ToolEffectFailure('tool_effect_uncertain') from None
+        try:
+            tool_journal.commit(scope.operation_namespace, key, claim.claim_token, deepcopy(outcome))
+        except Exception:
+            raise ToolEffectFailure('tool_journal_failed') from None
+        # Commit valid completion before observing cancellation or deadline.
+        check_boundary()
+        return outcome
     try:
-        value = tool.handler(deepcopy(arguments))
+        value = invoke(tool.handler)
     except (Cancelled, ToolDeadlineExceeded):
         raise
     except ToolExecutionError as exc:

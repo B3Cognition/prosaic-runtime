@@ -8,10 +8,14 @@ from dataclasses import dataclass
 import json
 import time
 from typing import Any
+from uuid import uuid4
 
 from jsonschema import ValidationError
 
 from .events import Cancelled
+from .operation_context import InvocationScope
+from .tool_effects import admit_tool_effects, ToolEffectFailure
+from .telemetry import ObserverEmitter
 from .tools import (ToolDeadlineExceeded, depth, execute_custom_tool, parse_arguments, reject_constant,
                     unique_pairs, validate_custom_tools)
 
@@ -37,11 +41,18 @@ class Completion:
 class StructuredToolLoop:
     def __init__(self, tools, *, arguments, deadline, allowed_tools=(), max_turns=12,
                  max_input_bytes=196608, max_response_bytes=131072, max_history_bytes=131072,
-                 max_identical_calls=1, cancelled=lambda: False, on_event=lambda event: None):
+                 max_identical_calls=1, cancelled=lambda: False, on_event=lambda event: None,
+                 operation_context=None, tool_journal=None, observer=None):
         self.tools = validate_custom_tools(tools)
         self.allowed_tools = frozenset(allowed_tools)
         if self.allowed_tools - self.tools.keys():
             raise ValueError('granted tools must be registered')
+        self.operation_context = InvocationScope(str(uuid4())) if operation_context is None else operation_context
+        admit_tool_effects(self.tools, self.allowed_tools, self.operation_context, tool_journal)
+        self.tool_journal = tool_journal
+        self.emitter = ObserverEmitter(observer, source='runtime', scope=self.operation_context)
+        self.emitter._registered_tools = frozenset(self.tools)
+        self.call_index = 0
         for value in (max_turns, max_input_bytes, max_response_bytes, max_history_bytes, max_identical_calls):
             if type(value) is not int or value <= 0:
                 raise ValueError('limits must be positive integers')
@@ -99,8 +110,15 @@ class StructuredToolLoop:
             raise StructuredToolError('repeated-tool-call')
         self.calls[key] = self.calls.get(key, 0) + 1
         self.on_event({'type': 'tool_start', 'name': request.name})
+        self.emitter.emit('tool_started', name=request.name)
+        index = self.call_index
+        self.call_index += 1
         try:
-            outcome = execute_custom_tool(tool, raw, check_boundary=self.check_boundary)
+            outcome = execute_custom_tool(tool, raw, check_boundary=self.check_boundary,
+                scope=self.operation_context, deadline=self.deadline, cancelled=self.cancelled,
+                call_index=index, tool_journal=self.tool_journal)
+        except ToolEffectFailure as exc:
+            raise StructuredToolError(exc.reason) from None
         except ToolDeadlineExceeded:
             raise StructuredToolError('execution-timeout') from None
         except Cancelled:
@@ -108,6 +126,7 @@ class StructuredToolLoop:
         if outcome['status'] != 'ok':
             raise StructuredToolError('tool-' + outcome['error'])
         self.on_event({'type': 'tool_complete', 'name': request.name})
+        self.emitter.emit('tool_completed', name=request.name, status='ok')
         return {'name': request.name, 'arguments': args}, outcome['result']
 
     def turns(self, *, admit, tool_outcome=lambda name, data: None, feedback=None):
