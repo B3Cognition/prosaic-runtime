@@ -20,7 +20,7 @@ _OUTCOMES = {
                          'critical_hook_error', 'budget_failure', 'execution_failure'}),
     'harness': frozenset({'running', 'waiting', 'blocked', 'completed', 'rejected'}),
 }
-_REASONS = frozenset({'cancelled', 'invocation_timeout', 'inspection_timeout', 'budget_exceeded',
+_REASONS = frozenset({'unknown', 'cancelled', 'invocation_timeout', 'inspection_timeout', 'budget_exceeded',
                       'accounting_failed', 'incomplete_response', 'admission_failure',
                       'critical_hook_error', 'execution_failure'})
 _COUNTS = frozenset({'calls', 'turn', 'token_usage', 'tool_call_count', 'provider_request_count'})

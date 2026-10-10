@@ -145,6 +145,15 @@ def test_harness_commit_state_survives_record_bounding():
     assert 'PRIVATE' not in json.dumps(record) and 'duration_ms' not in record
 
 
+def test_harness_unknown_reason_marker_is_explicit_and_private_reasons_are_dropped():
+    records = []
+    delivery = emitter(records.append, source='harness', scope=scope('attempt'))
+    delivery.emit('blocked_committed', outcome='blocked', revision=1, calls=0, reason='unknown')
+    delivery.emit('blocked_committed', outcome='blocked', revision=2, calls=0, reason='PRIVATE_REASON')
+    assert records[0]['reason'] == 'unknown'
+    assert 'reason' not in records[1]
+
+
 def test_shared_helper_drops_unknown_events_and_invalid_dynamic_fields():
     records = []
     delivery = emitter(records.append, source='runtime', scope=scope('attempt'))
