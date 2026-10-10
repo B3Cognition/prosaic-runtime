@@ -2,6 +2,7 @@
 import builtins
 from contextlib import contextmanager
 from contextvars import ContextVar
+from .telemetry import observe, critical_hook_failed
 
 _sink = ContextVar("prosaic_event_sink", default=None)
 _cancel = ContextVar("prosaic_cancel", default=None)
@@ -19,9 +20,19 @@ def check_cancelled():
 
 def emit(event: str, **data):
     check_cancelled()
+    if event in {'tool_started', 'tool_completed'}:
+        observe(event, **data)
     sink = _sink.get()
     if sink is not None:
-        sink({"event": event, **data})
+        _deliver(sink, {"event": event, **data})
+
+
+def _deliver(sink, event):
+    try:
+        sink(event)
+    except BaseException:
+        critical_hook_failed()
+        raise
 
 
 def print(*values, **kwargs):
@@ -31,7 +42,7 @@ def print(*values, **kwargs):
     if sink is None:
         builtins.print(*values, **kwargs)
     else:
-        sink({"event": "progress" if kwargs.get("file") else "text", "text": " ".join(map(str, values))})
+        _deliver(sink, {"event": "progress" if kwargs.get("file") else "text", "text": " ".join(map(str, values))})
 
 
 @contextmanager

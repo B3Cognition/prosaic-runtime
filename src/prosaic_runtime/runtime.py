@@ -1,11 +1,13 @@
 """Public Prosaic-only invocation API."""
 from dataclasses import replace
+from contextlib import contextmanager
 from pathlib import Path
 import os
 import time
 import json
 import subprocess
 import urllib.request
+from uuid import uuid4
 from types import MappingProxyType
 
 from .artifacts import ProsaicArtifact, inspect_artifact
@@ -22,6 +24,8 @@ from .tool_registry import BoundedToolRegistry
 from .accounting import AccountingError, resolve_context
 from .accounting_capture import Capture
 from .http_bounds import LimitExceeded, set_response_timeout, BoundedNativeStream
+from .operation_context import InvocationScope
+from .telemetry import ObserverEmitter, observation_context, observe, execution_started
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -84,11 +88,35 @@ class _BoundedMixin:
     def strict_tool_names(self):
         return frozenset(self.custom_tools)
 
+    @contextmanager
     def open_http(self, request, *, timeout):
+        started = time.monotonic()
+        observe('provider_request_started')
+        outcome = 'execution_failure'
+        status = None
         opener = urllib.request.build_opener(_NoRedirect())
-        if self.capture is not None:
-            return self.capture.open(opener, request, timeout)
-        return opener.open(request, timeout=timeout)
+        try:
+            response = (self.capture.open(opener, request, timeout) if self.capture is not None
+                        else opener.open(request, timeout=timeout))
+            with response:
+                status = response.status
+                yield response
+            outcome = 'completed'
+        except Cancelled:
+            outcome = 'cancelled'
+            raise
+        except (ToolDeadlineExceeded, TimeoutError):
+            outcome = 'timed_out'
+            raise
+        except LimitExceeded:
+            outcome = 'budget_failure'
+            raise
+        except urllib.error.HTTPError as exc:
+            status = exc.code
+            raise
+        finally:
+            observe('provider_request_completed', outcome=outcome, http_status=status,
+                    duration_ms=(time.monotonic() - started) * 1000)
 
     def read_response(self, response):
         self.check_boundary()
@@ -151,7 +179,7 @@ class _BoundedAnthropicBackend(_BoundedMixin, AnthropicBackend):
 
 
 class ProsaicRuntime:
-    capabilities = frozenset({'accounting_v1', 'read_receipts_v1', 'initial_tool_v1', 'initial_tool_enforcement_v1', 'acquisition_v1', 'custom_tools_v1', 'cli_tools_v1', 'cli_sandbox_v1'})
+    capabilities = frozenset({'observer_v1', 'accounting_v1', 'read_receipts_v1', 'initial_tool_v1', 'initial_tool_enforcement_v1', 'acquisition_v1', 'custom_tools_v1', 'cli_tools_v1', 'cli_sandbox_v1'})
     def __init__(self, config: RuntimeConfig, *, source=".prosaic", executable="prosaic", custom_tools=None,
                  accounting=None, context_defaults=None):
         self.config = config
@@ -220,6 +248,44 @@ class ProsaicRuntime:
                                      dict(os.environ if env is None else env), deadline)
 
     def run(self, artifact: str | ProsaicArtifact, arguments: str = "", *,
+            cwd: str | Path = '.', policy: RunPolicy | None = None,
+            on_event=None, cancelled=None, env=None,
+            acquisition: str | ProsaicArtifact | None = None, context=None, accounting=None,
+            observer=None, operation_context: InvocationScope | None = None) -> Result:
+        scope = InvocationScope(str(uuid4())) if operation_context is None else operation_context
+        emitter = ObserverEmitter(observer, source='runtime', scope=scope)
+        started = time.monotonic()
+        result = None
+        outcome = 'execution_failure'
+        with observation_context(emitter, self._custom_tools):
+            try:
+                emitter.emit('invocation_started')
+                result = self._run_accounted(artifact, arguments, cwd=cwd, policy=policy,
+                    on_event=on_event, cancelled=cancelled, env=env, acquisition=acquisition,
+                    context=context, accounting=accounting)
+                if result.metadata.get('failure_reason') == 'cancelled':
+                    outcome = 'cancelled'
+                elif result.timed_out:
+                    outcome = 'timed_out'
+                elif result.metadata.get('failure_reason') == 'budget_exceeded':
+                    outcome = 'budget_failure'
+                else:
+                    outcome = 'completed' if result.exit_code == 0 else 'execution_failure'
+                return result
+            except Exception:
+                outcome = ('critical_hook_error' if emitter.critical_hook_failed else
+                           'execution_failure' if emitter.execution_started else 'admission_failure')
+                raise
+            finally:
+                if emitter.critical_hook_failed:
+                    outcome = 'critical_hook_error'
+                emitter.emit('invocation_completed', outcome=outcome,
+                    duration_ms=(time.monotonic() - started) * 1000,
+                    exit_code=result.exit_code if result is not None else None,
+                    token_usage=result.token_usage if result is not None else None,
+                    reason=result.metadata.get('failure_reason') if result is not None else None)
+
+    def _run_accounted(self, artifact: str | ProsaicArtifact, arguments: str = "", *,
             cwd: str | Path = '.', policy: RunPolicy | None = None,
             on_event=None, cancelled=None, env=None,
             acquisition: str | ProsaicArtifact | None = None, context=None, accounting=None) -> Result:
@@ -324,6 +390,7 @@ class ProsaicRuntime:
                 remaining = policy.timeout_s - (time.monotonic() - started)
                 if remaining <= 0:
                     return Result(1, "", "invocation deadline exceeded", timed_out=True)
+                execution_started()
                 emit("started", artifact_id=artifact.id, artifact_sha256=artifact.digest, profile=profile,
                      model=endpoint.model, tools=sorted(tools))
                 capture = Capture(_recorder, _context, artifact, profile, endpoint.provider) if _recorder is not None else None

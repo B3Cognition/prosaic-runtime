@@ -13,6 +13,12 @@ Optional customer usage metering is described in [Accounting](docs/accounting.md
 Existing callers need no IDs or database; durable tracking uses a separately installed
 PostgreSQL recorder and does not enable customer charges.
 
+Runtime also offers optional [bounded observation](docs/telemetry.md) through
+`run(observer=..., operation_context=InvocationScope(...))` and the `observer_v1`
+capability. Ordinary observer exceptions leave execution results unchanged.
+The existing `on_event` callback remains a critical evidence hook. Operation
+scope supplies opaque host correlation without enabling accounting.
+
 Version 0.7.1 installs Python Prosaic 0.3.2 automatically at an immutable Git
 revision. Installation and CI no longer require Node.js or npm.
 
