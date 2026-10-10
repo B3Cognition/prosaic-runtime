@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "prosaic-runtime"
-version = "0.7.0"
+version = "0.7.1"
 description = "Bounded execution of neutral Prosaic agents on OpenAI-compatible and native Anthropic endpoints"
 requires-python = ">=3.11"
 readme = "README.md"
@@ -12,7 +12,7 @@ license = "Apache-2.0"
 license-files = ["LICENSE", "LICENSE-MIT", "NOTICE.md"]
 authors = [{name = "B3 Cognition"}]
 dependencies = [
-  "prosaic @ git+https://github.com/B3Cognition/prosaic.git@ee145ef29a62dbcf7f5e8abdf1d979749398718d",
+  "prosaic @ git+https://github.com/B3Cognition/prosaic.git@737bc0f4e6b5d3bd7bd370f2c0d408bc89eb494f",
   "PyYAML>=6.0",
   "jsonschema>=4.23",
 ]

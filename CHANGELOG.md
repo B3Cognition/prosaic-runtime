@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.7.1 — candidate
+
+- Export validate_execution_artifact, validate_custom_tools and custom_descriptors
+  for pure admission without model calls or CLI discovery.
+- Reuse execution validation for effort, routing and selected-provider controls,
+  including acquisition inheritance of the final agent's execution context.
+- Pin Prosaic 0.3.2 with the public canonical artifact-definition validator.
+
 ## 0.7.0 — 2026-10-09
 
 - Ship recorder adapter 0.1.1 with read-only catalog/type/constraint/grant readiness

@@ -21,6 +21,17 @@ from .openai_compatible_transcript import ProviderTranscript
 API_VERSION = '2023-06-01'
 
 
+def validate_anthropic_controls(features, prompt_metadata):
+    """Validate known Messages controls without constructing a model request."""
+    unsupported = {'json_mode', 'reasoning_effort', 'effort', 'thinking', 'stream_options', 'web_tools'}
+    for name in unsupported:
+        value = features.get(name)
+        if value not in (None, False, 'off', 'false', 'disabled'):
+            raise ValueError(f'unsupported Anthropic feature: {name}')
+    if any(prompt_metadata.get(k) is not None for k in ('effort', 'reasoning_effort')):
+        raise ValueError('unsupported Anthropic effort control')
+
+
 def native_headers(token):
     headers = {'Content-Type': 'application/json', 'anthropic-version': API_VERSION}
     if token:
@@ -148,13 +159,7 @@ class AnthropicBackend(ExecutionBackend):
                                            _feature_enabled(self._config.features, 'streaming', default=True))
 
     def _chat_payload(self, messages, prompt_metadata, *, streaming, tools=None):
-        unsupported = {'json_mode', 'reasoning_effort', 'effort', 'thinking', 'stream_options', 'web_tools'}
-        for name in unsupported:
-            value = self._config.features.get(name)
-            if value not in (None, False, 'off', 'false', 'disabled'):
-                raise ValueError(f'unsupported Anthropic feature: {name}')
-        if any(prompt_metadata.get(k) is not None for k in ('effort', 'reasoning_effort')):
-            raise ValueError('unsupported Anthropic effort control')
+        validate_anthropic_controls(self._config.features, prompt_metadata)
         payload = OpenAICompatibleBackend._chat_payload(self, messages, prompt_metadata, streaming=streaming, tools=tools)
         if type(payload.get('max_tokens')) is not int or payload['max_tokens'] <= 0:
             raise ValueError('Anthropic max_tokens must be a positive integer')

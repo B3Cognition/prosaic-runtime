@@ -13,6 +13,7 @@ from .config import RuntimeConfig
 from .events import Cancelled, check_cancelled, event_context, emit
 from .openai_compatible import OpenAICompatibleBackend
 from .anthropic import AnthropicBackend
+from .admission import validate_execution_artifact
 from .policy import RunPolicy, requested_tools, BUILTIN_TOOLS
 from .types import Invocation, Result
 from .tools import validate_custom_tools, custom_descriptors, ToolDeadlineExceeded, ToolExecutionError
@@ -262,6 +263,7 @@ class ProsaicRuntime:
                 artifact = ProsaicArtifact.from_inspection({
                     "id": artifact.id, "type": artifact.type, "frontmatter": artifact.frontmatter,
                     "body": artifact.body, "resources": list(artifact.resources)})
+                validate_execution_artifact(artifact, self.config)
                 requested = requested_tools(artifact.frontmatter.get("tools"))
                 unsupported = requested - BUILTIN_TOOLS - self._custom_tools.keys()
                 if unsupported:
@@ -288,16 +290,12 @@ class ProsaicRuntime:
                     acquisition = ProsaicArtifact.from_inspection({
                         'id': acquisition.id, 'type': acquisition.type, 'frontmatter': acquisition.frontmatter,
                         'body': acquisition.body, 'resources': list(acquisition.resources)})
+                    validate_execution_artifact(artifact, self.config, acquisition=acquisition)
                     acquisition_tools = requested_tools(acquisition.frontmatter.get('tools'))
                     if acquisition_tools - requested or policy.initial_tool not in acquisition_tools:
                         raise ValueError('acquisition requires an explicit initial_tool and tools granted by final prose, runtime and host')
                     acquisition_tools &= tools
-                    for key in ('model_tier', 'effort'):
-                        if key in acquisition.frontmatter and acquisition.frontmatter[key] != artifact.frontmatter.get(key):
-                            raise ValueError(f'acquisition {key} must match final prose or be omitted')
                 tier = artifact.frontmatter.get("model_tier")
-                if tier is not None and tier not in self.config.routes:
-                    raise ValueError(f"no endpoint route for model_tier: {tier}")
                 profile = self.config.routes[tier] if tier is not None else self.config.default_profile
                 endpoint = self.config.profiles[profile]
                 if _recorder is not None and _recorder.provider_id != endpoint.provider:
@@ -313,8 +311,6 @@ class ProsaicRuntime:
                     metadata['initial_tool'] = policy.initial_tool
                 effort = artifact.frontmatter.get("effort")
                 if effort is not None:
-                    if effort not in {"low", "medium", "high"}:
-                        raise ValueError(f"unsupported effort: {effort}")
                     metadata["effort"] = effort
                 prompt = artifact.render(arguments)
                 if len(prompt.encode()) > policy.max_input_bytes:

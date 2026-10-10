@@ -1,5 +1,9 @@
 # Prosaic Runtime
 
+Version **0.7.1** exports pure execution-artifact and native registry validation
+for host workflow admission. Runtime execution reuses those checks and pins
+Prosaic **0.3.2** for canonical in-memory artifact validation.
+
 Version **0.7.0** adds bounded native Anthropic text, streaming and tools, alongside
 OpenAI-compatible execution. The separate `prosaic-runtime-postgres` **0.1.1**
 recorder validates real schema and runtime grants without DDL. Release assets include both packages;
