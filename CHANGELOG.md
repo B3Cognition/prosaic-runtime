@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-## 0.7.1 — candidate
+## 0.7.1 — 2026-10-10
 
 - Export validate_execution_artifact, validate_custom_tools and custom_descriptors
   for pure admission without model calls or CLI discovery.

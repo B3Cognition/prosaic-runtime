@@ -13,7 +13,7 @@ Optional customer usage metering is described in [Accounting](docs/accounting.md
 Existing callers need no IDs or database; durable tracking uses a separately installed
 PostgreSQL recorder and does not enable customer charges.
 
-Version 0.5.3 installs Python Prosaic 0.3.1 automatically at an immutable Git
+Version 0.7.1 installs Python Prosaic 0.3.2 automatically at an immutable Git
 revision. Installation and CI no longer require Node.js or npm.
 
 Version 0.5.3 retains trusted macOS framework Python startup probes using their
@@ -118,14 +118,14 @@ an isolated Python environment; no sudo or global Python installation is needed:
 ```sh
 git clone https://github.com/B3Cognition/prosaic-runtime.git
 cd prosaic-runtime
-git checkout v0.5.3
+git checkout v0.7.1
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install .
 ```
 
-The package automatically installs Python Prosaic v0.3.1 at immutable commit
-`ee145ef29a62dbcf7f5e8abdf1d979749398718d` into the same environment. No global
+The package automatically installs Python Prosaic v0.3.2 at immutable commit
+`af7d90e178f61d53ba71bcc61c41c3ef7f941b4c` into the same environment. No global
 installation or retained TypeScript checkout is needed. Older Runtime release
 tags retain their historical installation docs.
 

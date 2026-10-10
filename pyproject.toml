@@ -12,7 +12,7 @@ license = "Apache-2.0"
 license-files = ["LICENSE", "LICENSE-MIT", "NOTICE.md"]
 authors = [{name = "B3 Cognition"}]
 dependencies = [
-  "prosaic @ git+https://github.com/B3Cognition/prosaic.git@737bc0f4e6b5d3bd7bd370f2c0d408bc89eb494f",
+  "prosaic @ git+https://github.com/B3Cognition/prosaic.git@af7d90e178f61d53ba71bcc61c41c3ef7f941b4c",
   "PyYAML>=6.0",
   "jsonschema>=4.23",
 ]
