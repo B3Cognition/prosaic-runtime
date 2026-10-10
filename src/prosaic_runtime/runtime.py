@@ -80,6 +80,8 @@ class _BoundedMixin:
 
     def check_boundary(self):
         check_cancelled()
+        from .conformance import _check_suite_deadline
+        _check_suite_deadline()
         if time.monotonic() >= self.deadline:
             raise ToolDeadlineExceeded('invocation deadline exceeded')
 
@@ -167,6 +169,10 @@ class _BoundedMixin:
         status = None
         opener = urllib.request.build_opener(_NoRedirect())
         try:
+            # A conformance observer can consume the remaining suite time.
+            # Recheck its absolute deadline after the callback, before dispatch.
+            from .conformance import _check_suite_deadline
+            _check_suite_deadline()
             response = (self.capture.open(opener, request, timeout) if self.capture is not None
                         else opener.open(request, timeout=timeout))
             with response:

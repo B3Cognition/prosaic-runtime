@@ -59,8 +59,11 @@ The default shared allowance is `timeout_s=60`, `max_provider_requests=12`,
 `max_tool_calls=4`, `max_reported_tokens=32768`, `max_input_bytes=65536`, and
 `max_tool_rounds=2`. A caller-supplied `RunPolicy` must supply finite request,
 tool-call, and token caps. One absolute suite deadline includes setup; every
-scenario receives the remaining time and count/token allowances. Unknown usage
-halts later dispatch and records `usage_complete=unknown/usage_unknown`.
+scenario receives the remaining time and count/token allowances.
+The absolute deadline remains bound across synchronous observers and callbacks;
+dispatch checks it again after a provider-start observer returns. Callbacks may
+finish after the deadline, but cannot authorize a new request after it.
+Unknown usage halts later dispatch and records `usage_complete=unknown/usage_unknown`.
 Exhausted allowances leave remaining checks `not_run`. Tool-round limits apply
 to each scenario. These are reported-usage controls, not a provider cost promise.
 

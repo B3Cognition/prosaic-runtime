@@ -1,6 +1,8 @@
 """Closed replay evidence and explicitly bounded, owned fixture execution."""
 from copy import deepcopy
 from dataclasses import replace
+from email.message import Message
+import io
 import json
 
 import pytest
@@ -315,7 +317,7 @@ def test_suite_clamps_provider_output_and_stops_on_unknown_usage(server):
 
 
 def test_private_collector_resets_on_propagating_observer_error(server):
-    from prosaic_runtime.conformance import _tool_evidence
+    from prosaic_runtime.conformance import _tool_evidence, _suite_deadline
     url, requests, responses = server
     class HostAbort(BaseException):
         pass
@@ -324,6 +326,7 @@ def test_private_collector_resets_on_propagating_observer_error(server):
     with pytest.raises(HostAbort):
         run(suite_config(url), live=True, evidence_origin='fixture', observer=observer)
     assert _tool_evidence.get() is None and requests == []
+    assert _suite_deadline.get() is None
 
 
 def test_constructor_time_is_charged_to_absolute_suite_deadline(server, monkeypatch):
@@ -340,3 +343,68 @@ def test_constructor_time_is_charged_to_absolute_suite_deadline(server, monkeypa
                          max_reported_tokens=32768))
     assert requests == []
     assert all(c['state'] == 'not_run' for c in report['cases'])
+
+
+@pytest.mark.parametrize('provider', ['openai-compatible', 'anthropic'])
+@pytest.mark.parametrize('delayed_event', ['invocation_started', 'provider_request_started'])
+@pytest.mark.parametrize('observer_raises', [False, True])
+def test_absolute_suite_deadline_prevents_dispatch_after_observer(
+        monkeypatch, provider, delayed_event, observer_raises):
+    """Relative invocation clocks must not authorize work past the suite deadline."""
+    from prosaic_runtime.conformance import _tool_evidence, _suite_deadline
+    clock, attempts = [100.0], []
+    class Response(io.BytesIO):
+        status = 200
+        headers = Message()
+        headers['Content-Type'] = 'application/json'
+    body = completion()[1] if provider == 'openai-compatible' else json.dumps(message()).encode()
+    def local_open(*args, **kwargs):
+        attempts.append(round(clock[0] - 100, 3))
+        return Response(body)
+    def observer(event):
+        if event['event'] == delayed_event:
+            clock[0] += 0.08
+            if observer_raises:
+                raise RuntimeError('private-host-error')
+    monkeypatch.setattr('time.monotonic', lambda: clock[0])
+    monkeypatch.setattr('urllib.request.OpenerDirector.open', local_open)
+    report = run(suite_config('http://localhost:9/v1', provider, streaming=False),
+        live=True, evidence_origin='fixture', observer=observer,
+        policy=RunPolicy(timeout_s=0.04, max_provider_requests=12, max_tool_calls=4,
+                         max_reported_tokens=32768))
+    assert attempts == []
+    assert case(report, 'text_complete')['state'] == 'failed'
+    assert report['qualification'] == 'not_qualified'
+    assert 'private-host-error' not in json.dumps(report)
+    assert _tool_evidence.get() is None
+    assert _suite_deadline.get() is None
+
+
+def test_absolute_suite_deadline_scope_does_not_change_ordinary_runtime(monkeypatch):
+    """Conformance callback guards must not leak into the next ordinary invocation."""
+    from prosaic_runtime import ProsaicArtifact, ProsaicRuntime
+    from prosaic_runtime.conformance import _tool_evidence
+    clock, attempts = [100.0], []
+    class Response(io.BytesIO):
+        status = 200
+        headers = Message()
+        headers['Content-Type'] = 'application/json'
+    def local_open(*args, **kwargs):
+        attempts.append(round(clock[0] - 100, 3))
+        return Response(completion()[1])
+    def observer(event):
+        if event['event'] == 'invocation_started':
+            clock[0] += 0.08
+    monkeypatch.setattr('time.monotonic', lambda: clock[0])
+    monkeypatch.setattr('urllib.request.OpenerDirector.open', local_open)
+    config = suite_config('http://localhost:9/v1', streaming=False)
+    run(config, live=True, evidence_origin='fixture', observer=observer,
+        policy=RunPolicy(timeout_s=0.04, max_provider_requests=12, max_tool_calls=4,
+                         max_reported_tokens=32768))
+    assert attempts == []
+    assert _tool_evidence.get() is None
+    result = ProsaicRuntime(replace(config, tool_directories=())).run(
+        ProsaicArtifact('ordinary', 'subagent', {}, 'Return done.'),
+        observer=observer, policy=RunPolicy(timeout_s=0.04))
+    assert attempts == [0.16]
+    assert result.exit_code == 0 and result.stdout == 'done'

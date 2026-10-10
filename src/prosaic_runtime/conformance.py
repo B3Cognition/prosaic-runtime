@@ -20,6 +20,7 @@ _REASONS = {
 _MAX_BYTES = 65536
 _TOOL_NAME = 'conformance_lookup'
 _tool_evidence = ContextVar('prosaic_conformance_tool_evidence', default=None)
+_suite_deadline = ContextVar('prosaic_conformance_suite_deadline', default=None)
 
 
 def _digest(value):
@@ -155,6 +156,16 @@ def _record_stream_terminal():
         collector['terminal'] = True
 
 
+def _check_suite_deadline():
+    """Conformance-only effect guard; ordinary invocations keep their contract."""
+    deadline = _suite_deadline.get()
+    if deadline is not None:
+        import time
+        from .tools import ToolDeadlineExceeded
+        if time.monotonic() >= deadline:
+            raise ToolDeadlineExceeded('conformance suite deadline exceeded')
+
+
 def _strict_output(text):
     from .tools import unique_pairs, reject_constant
     try:
@@ -259,10 +270,12 @@ def _run_suite(config, profile, fingerprint, policy, observer, origin):
                 break
             allowance = replace(allowance, timeout_s=remaining)
             token = _tool_evidence.set(collector)
+            deadline_token = _suite_deadline.set(deadline)
             try:
                 result = runtime.run(artifact, cwd=directory, policy=allowance,
                     cancelled=lambda: cancelled, observer=observer)
             finally:
+                _suite_deadline.reset(deadline_token)
                 _tool_evidence.reset(token)
             counts = result.metadata['invocation_budgets_v1']
             for key in totals:
