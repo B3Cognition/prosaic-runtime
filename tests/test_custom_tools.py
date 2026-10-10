@@ -8,6 +8,15 @@ SCHEMA = {'type': 'object', 'required': ['sku'], 'properties': {
     'sku': {'type': 'string', 'pattern': '^SKU-[0-9]{3}$'}}, 'additionalProperties': False}
 
 
+def test_legacy_descriptor_golden():
+    schema = {'type': 'object', 'properties': {}, 'additionalProperties': False}
+    tool = prosaic_runtime.CustomTool('lookup', 'Lookup', schema, lambda args: {}, 'v1')
+    assert tool.descriptor == {
+        'name': 'lookup', 'description': 'Lookup', 'parameters': schema,
+        'version': 'v1', 'max_argument_bytes': 16384,
+        'max_result_bytes': 65536, 'authorization_required': False}
+
+
 def test_public_definition_snapshots_schema():
     assert hasattr(prosaic_runtime, 'CustomTool')
     schema = deepcopy(SCHEMA)

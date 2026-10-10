@@ -16,3 +16,5 @@ include docs/conformance.md
 include CHANGELOG.md
 recursive-include tests/support *.py
 include scripts/wheel_smoke.py
+include scripts/production_wheel_smoke.py
+include docs/production-acceptance.md
