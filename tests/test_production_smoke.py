@@ -58,3 +58,18 @@ def test_worker_watchdog_starts_before_sdk_imports(monkeypatch):
     with pytest.raises(ImportError, match='deliberate SDK import boundary'):
         load_smoke(monkeypatch)
     assert observed == [(10, {'repeat': True})]
+
+
+def test_numeric_fixture_bind_never_resolves_machine_hostname(monkeypatch):
+    import socket
+    smoke = load_smoke(monkeypatch)
+
+    def forbidden(*args, **kwargs):
+        pytest.fail('numeric owned loopback fixture must not perform hostname discovery')
+
+    monkeypatch.setattr(socket, 'getfqdn', forbidden)
+    with smoke.ProviderFixture([]) as provider:
+        assert provider.http.server_name == '127.0.0.1'
+        assert provider.http.server_port == provider.http.server_address[1]
+        assert provider.config().profiles['fixture'].base_url == (
+            f'http://127.0.0.1:{provider.http.server_port}/v1')

@@ -18,6 +18,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+from socketserver import TCPServer
 import tempfile
 from threading import Thread
 
@@ -30,6 +31,15 @@ from prosaic_runtime.diagnostics import conformance
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = ROOT / "tests/support/tool_journal.py"
 SCHEMA = {"type": "object", "properties": {}, "additionalProperties": False}
+
+
+class NumericLoopbackServer(ThreadingHTTPServer):
+    def server_bind(self):
+        # HTTPServer's default bind performs reverse DNS. This owned fixture
+        # uses a numeric loopback endpoint and needs no hostname discovery.
+        TCPServer.server_bind(self)
+        self.server_name = self.server_address[0]
+        self.server_port = self.server_address[1]
 
 
 def installed_origins():
@@ -101,7 +111,7 @@ class ProviderFixture:
                 self.wfile.write(body)
             def log_message(self, *args):
                 pass
-        self.http = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.http = NumericLoopbackServer(("127.0.0.1", 0), Handler)
         self.thread = Thread(target=self.http.serve_forever, daemon=True)
     def __enter__(self):
         self.thread.start()
