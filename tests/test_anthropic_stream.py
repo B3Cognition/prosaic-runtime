@@ -182,11 +182,17 @@ def test_native_compacted_tool_results_are_not_errors(native_server, tmp_path):
 def test_native_http_timeout_respects_invocation_budget(native_server, streaming):
     url, requests, responses = native_server
     value = sse(events()) if streaming else response()
-    responses.append((*value, 0.1))
-    result = native_runtime(url, features={'streaming': streaming}).run(artifact(), policy=RunPolicy(timeout_s=0.03))
+    # Leave preparation time before the HTTP attempt; the owned server's
+    # response delay still exceeds the invocation's absolute deadline.
+    responses.append((*value, 1.5))
+    started = time.monotonic()
+    result = native_runtime(url, features={'streaming': streaming}).run(artifact(),
+        policy=RunPolicy(timeout_s=0.5, max_provider_requests=1))
     assert result.exit_code == 1 and result.timed_out
     assert result.metadata['provider_error_code'] == 'timeout'
     assert len(requests) == 1
+    assert result.metadata['invocation_budgets_v1']['provider_requests'] == 1
+    assert time.monotonic() - started < 1.0
 
 
 @pytest.mark.parametrize('stop', ['max_tokens', 'refusal', 'pause_turn'])
