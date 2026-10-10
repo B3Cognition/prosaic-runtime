@@ -37,8 +37,14 @@ class InvocationBudget:
             raise InvocationBudgetExceeded(reason)
         setattr(self, name, getattr(self, name) + 1)
 
-    def before_provider(self):
+    def _check_provider(self):
         self._check_reported_allowance()
+        cap = self.policy.max_provider_requests
+        if cap is not None and self.provider_requests >= cap:
+            raise InvocationBudgetExceeded('provider_request_limit')
+
+    def before_provider(self):
+        self._check_provider()
         self._reserve('provider_requests', self.policy.max_provider_requests, 'provider_request_limit')
 
     def before_tool(self):

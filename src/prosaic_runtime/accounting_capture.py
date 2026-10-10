@@ -28,7 +28,7 @@ class Capture:
         self.call_ids = []
         self.provider = provider
 
-    def open(self, opener, request, timeout):
+    def open(self, opener, request, timeout, *, before_dispatch=None):
         call_id = uuid.uuid4().hex
         payload = json.loads(request.data)
         card = self.recorder.rate_card
@@ -47,9 +47,12 @@ class Capture:
         observer = AnthropicObservation if self.provider == 'anthropic' else Observation
         observation = observer(self.recorder, call_id)
         try:
+            if before_dispatch is not None:
+                timeout = before_dispatch(timeout)
             response = opener.open(request, timeout=timeout)
-        except BaseException:
-            observation.finish('failed')
+        except BaseException as exc:
+            from .events import Cancelled
+            observation.finish('cancelled' if isinstance(exc, (Cancelled, KeyboardInterrupt)) else 'failed')
             raise
         return RecordedResponse(response, observation)
 
@@ -240,7 +243,7 @@ class RecordedResponse:
         return raw
 
     def read_chunk(self, size):
-        """Native line assembly reads bounded chunks; evidence is admitted per line."""
+        """Line assembly reads bounded chunks; evidence is admitted per line."""
         return self.response.read1(size)
 
     def capture_line(self, raw):

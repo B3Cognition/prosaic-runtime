@@ -41,23 +41,6 @@ def _reported_usage(details):
     return details.get('total_tokens')
 
 
-class _BoundedStream:
-    def __init__(self, response, limit):
-        self.response = response
-        self.remaining = limit
-
-    def __getattr__(self, name):
-        return getattr(self.response, name)
-
-    def readline(self):
-        check_cancelled()
-        line = self.response.readline(self.remaining + 1)
-        self.remaining -= len(line)
-        if self.remaining < 0:
-            raise LimitExceeded("response exceeds max_response_bytes")
-        return line
-
-
 class _BoundedMixin:
     def __init__(self, endpoint, max_input_bytes, custom_tools, deadline, capture=None, budget=None,
                  scope=None, tool_journal=None, cancelled=None):
@@ -77,6 +60,7 @@ class _BoundedMixin:
         self._turn_usage_unknown = False
         self._latest_usage_complete = None
         self._previous_usage_details = {}
+        self._provider_attempts = 0
 
     def check_boundary(self):
         check_cancelled()
@@ -154,11 +138,19 @@ class _BoundedMixin:
     def preserve_malformed_tool_calls(self):
         return self.budget is not None and self.budget.enabled
 
+    def before_http_dispatch(self, timeout):
+        self.check_boundary()
+        timeout = min(timeout, self.deadline - time.monotonic())
+        if self.budget is not None:
+            self.budget.before_provider()
+        self._provider_attempts += 1
+        return timeout
+
     @contextmanager
     def open_http(self, request, *, timeout):
         self.check_boundary()
         if self.budget is not None:
-            self.budget.before_provider()
+            self.budget._check_provider()
         self._turn_usage_unknown = False
         self._latest_usage_complete = None
         self._previous_usage_details = {}
@@ -169,12 +161,12 @@ class _BoundedMixin:
         status = None
         opener = urllib.request.build_opener(_NoRedirect())
         try:
-            # A conformance observer can consume the remaining suite time.
-            # Recheck its absolute deadline after the callback, before dispatch.
-            from .conformance import _check_suite_deadline
-            _check_suite_deadline()
-            response = (self.capture.open(opener, request, timeout) if self.capture is not None
-                        else opener.open(request, timeout=timeout))
+            # Observers and persisted intent preparation can stop execution.
+            # Check both boundaries; reserve the attempt only at real dispatch.
+            self.check_boundary()
+            response = (self.capture.open(opener, request, timeout,
+                            before_dispatch=self.before_http_dispatch) if self.capture is not None
+                        else opener.open(request, timeout=self.before_http_dispatch(timeout)))
             with response:
                 status = response.status
                 yield response
@@ -198,7 +190,7 @@ class _BoundedMixin:
     def read_response(self, response):
         self.check_boundary()
         limit = self._config.max_response_bytes
-        if self._config.provider == 'anthropic' and callable(getattr(response, 'read1', None)):
+        if callable(getattr(response, 'read1', None)):
             chunks, size = [], 0
             while True:
                 self.check_boundary()
@@ -219,10 +211,8 @@ class _BoundedMixin:
         return body.decode("utf-8", errors="strict")
 
     def _read_sse_turn(self, response, deadline):
-        if self._config.provider == 'anthropic':
+        if not isinstance(response, BoundedNativeStream):
             response = BoundedNativeStream(response, self._config.max_response_bytes, min(deadline, self.deadline))
-        elif not isinstance(response, _BoundedStream):
-            response = _BoundedStream(response, self._config.max_response_bytes)
         turn = super()._read_sse_turn(response, deadline)
         # Readers may convert transport/deadline timeouts into Result instead
         # of raising. Carry that state to the still-active HTTP observation.
@@ -240,12 +230,14 @@ class _BoundedMixin:
         if time.monotonic() >= deadline:
             return Result(1, "", "invocation deadline exceeded", timed_out=True)
         self.validate_payload(payload)
-        attempted_before = self.budget.provider_requests if self.budget is not None else 0
+        attempted_before = self._provider_attempts
         turn = super()._post_chat_turn(payload, request, deadline, streaming)
-        native_failure = isinstance(turn, Result) and self._config.provider == 'anthropic'
+        attempted = self._provider_attempts > attempted_before
+        native_failure = (isinstance(turn, Result) and self._config.provider == 'anthropic' and
+            (attempted or _reported_usage(turn.metadata.get('token_usage_details')) is not None))
         strict_attempt_failure = (isinstance(turn, Result) and self.budget is not None and
             self.budget.policy.max_reported_tokens is not None and
-            self.budget.provider_requests > attempted_before)
+            attempted)
         if not isinstance(turn, Result) or native_failure or strict_attempt_failure:
             details = turn.metadata.get('token_usage_details') if isinstance(turn, Result) else turn.token_usage_details
             try:

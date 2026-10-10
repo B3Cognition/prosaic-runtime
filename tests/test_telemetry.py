@@ -264,7 +264,7 @@ def test_stream_timeout_result_is_observed_as_provider_timeout(monkeypatch, tool
             if timeout == 'deadline':
                 clock[0] = 11.0
             return super().__enter__()
-        def readline(self, *args):
+        def read1(self, *args):
             if timeout == 'deadline':
                 pytest.fail('expired stream deadline must precede read')
             raise TimeoutError('PRIVATE_SOCKET_TIMEOUT')

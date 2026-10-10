@@ -37,6 +37,11 @@ def budget_transport(monkeypatch):
                 raise TimeoutError('fixture timeout')
             return super().readline(*args)
 
+        def read1(self, *args):
+            if self.timed_out:
+                raise TimeoutError('fixture timeout')
+            return super().read1(*args)
+
     class Opener:
         def open(self, request, timeout=None):
             requests.append(json.loads(request.data))
@@ -253,7 +258,7 @@ def test_failed_request_attempts_are_counted_without_automatic_retry(native_serv
         artifact(), policy=RunPolicy(max_provider_requests=1))
     assert len(requests) == (0 if failure == 'prepare' else 1)
     assert result.exit_code != 0
-    assert result.metadata['invocation_budgets_v1']['provider_requests'] == 1
+    assert result.metadata['invocation_budgets_v1']['provider_requests'] == (0 if failure == 'prepare' else 1)
     if failure == 'http':
         assert result.metadata['provider_error_code'] == 'http_error'
     else:
