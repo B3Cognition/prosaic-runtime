@@ -1,8 +1,13 @@
 # Prosaic Runtime
 
-Version **0.7.1** exports pure execution-artifact and native registry validation
-for host workflow admission. Runtime execution reuses those checks and pins
-Prosaic **0.3.2** for canonical in-memory artifact validation.
+The **0.8.0** candidate is distributed as `b3-prosaic-runtime` and requires
+`b3-prosaic>=0.4,<0.5` from the package index. Python imports (`prosaic_runtime`)
+and the `prosaic-runtime` CLI remain unchanged. The separately installed recorder
+is `b3-prosaic-runtime-postgres` **0.2.0**, selecting Runtime 0.8.x.
+Candidates are not public index releases until the release qualification gate passes.
+
+Runtime exports pure execution-artifact and native registry validation for host
+workflow admission and reuses Core's canonical in-memory artifact validation.
 
 Version **0.7.0** adds bounded native Anthropic text, streaming and tools, alongside
 OpenAI-compatible execution. The separate `prosaic-runtime-postgres` **0.1.1**
@@ -19,8 +24,7 @@ capability. Ordinary observer exceptions leave execution results unchanged.
 The existing `on_event` callback remains a critical evidence hook. Operation
 scope supplies opaque host correlation without enabling accounting.
 
-Version 0.7.1 installs Python Prosaic 0.3.2 automatically at an immutable Git
-revision. Installation and CI no longer require Node.js or npm.
+Installation and CI do not require Node.js or npm.
 
 Version 0.5.3 retains trusted macOS framework Python startup probes using their
 declared sandbox working directory and pins the updated permission documentation.
@@ -124,16 +128,24 @@ an isolated Python environment; no sudo or global Python installation is needed:
 ```sh
 git clone https://github.com/B3Cognition/prosaic-runtime.git
 cd prosaic-runtime
-git checkout v0.7.1
+git checkout v0.8.0
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install .
 ```
 
-The package automatically installs Python Prosaic v0.3.2 at immutable commit
-`af7d90e178f61d53ba71bcc61c41c3ef7f941b4c` into the same environment. No global
-installation or retained TypeScript checkout is needed. Older Runtime release
-tags retain their historical installation docs.
+The package installs compatible `b3-prosaic` 0.4.x into the same environment.
+Use the release tag after publication; older release tags retain historical docs.
+
+For index installation after publication, create a fresh virtual environment or
+container image and run `python -m pip install 'b3-prosaic-runtime==0.8.0'`.
+Install the optional recorder with
+`python -m pip install 'b3-prosaic-runtime-postgres==0.2.0'`. Never add renamed
+packages to an environment containing legacy `prosaic`, `prosaic-runtime` or
+`prosaic-runtime-postgres`: they share import paths. Preserve old environments
+for historical reconstruction. PyPI's unrelated `prosaic` is not a dependency.
+Before publication, install only the explicit candidate wheels from an audited
+wheelhouse with `--no-index --find-links /path/to/qualified-wheelhouse`.
 
 Confirm both commands are available:
 
@@ -587,7 +599,14 @@ python -m pip install -e '.[test]'
 pytest
 ```
 
-Tests cover extracted transport edge cases, tool denial, path containment, artifact loading, routing, cancellation, and local HTTP/SSE integration. The end-to-end Prosaic test requires the CLI on PATH; CI installs the pinned Prosaic revision. Tests do not require paid LLM access. Successful conformance tests do not establish model quality; evaluate each agent/model pair against its own acceptance criteria.
+Tests cover extracted transport edge cases, tool denial, path containment, artifact loading, routing, cancellation, and local HTTP/SSE integration. The end-to-end Prosaic test requires the CLI on PATH; CI installs an explicit immutable Core candidate while index publication is pending. Tests do not require paid LLM access. Successful conformance tests do not establish model quality; evaluate each agent/model pair against its own acceptance criteria.
+
+`tests/test_distribution_metadata.py` builds both distributions from `git archive`
+(override the source with `PROSAIC_RUNTIME_RELEASE_REF`). The optional test extra
+includes the backend required for no-isolation source-artifact verification.
+Run `python -I scripts/wheel_smoke.py` with a fresh environment containing the
+explicit Core, Runtime and recorder candidate wheels to check installed ownership,
+CLI help, pure admission and documented recorder construction without model or DB calls.
 
 Licensed under the [Apache License, Version 2.0](LICENSE). See [NOTICE.md](NOTICE.md)
 for extraction provenance and [LICENSE-MIT](LICENSE-MIT) for the retained notice

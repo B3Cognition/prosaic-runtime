@@ -15,8 +15,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '${{ matrix.python }}'
-      - name: Install Runtime and its pinned Python Prosaic dependency
-        run: python -m pip install -e '.[test]' build
+      - name: Check out immutable Core candidate while index publication is pending
+        uses: actions/checkout@v4
+        with:
+          repository: B3Cognition/prosaic
+          ref: aad4bf45ae1c242f4451700ca59b27280010573a
+          path: .ci-prosaic
+      - name: Install explicit Core candidate and Runtime
+        run: |
+          python -m pip install ./.ci-prosaic
+          python -m pip install -e '.[test]'
       - name: Install Linux CLI sandbox backend
         if: runner.os == 'Linux'
         run: |
@@ -95,15 +103,22 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Check out immutable Core candidate while index publication is pending
+        uses: actions/checkout@v4
+        with:
+          repository: B3Cognition/prosaic
+          ref: aad4bf45ae1c242f4451700ca59b27280010573a
+          path: .ci-prosaic
       - name: Build core and separately installed recorder
         run: |
           python -m pip install build pytest
+          python -m pip install ./.ci-prosaic
           python -m build
           python -m build adapters/postgres
       - name: Install release wheels
         run: |
-          python -m pip install dist/prosaic_runtime-0.7.1-py3-none-any.whl
-          python -m pip install adapters/postgres/dist/prosaic_runtime_postgres-0.1.1-py3-none-any.whl
+          python -m pip install dist/b3_prosaic_runtime-0.8.0-py3-none-any.whl
+          python -m pip install adapters/postgres/dist/b3_prosaic_runtime_postgres-0.2.0-py3-none-any.whl
       - name: Required real-database accounting tests
         env:
           METERING_TEST_DSN: postgresql://postgres:metering-ci-only@127.0.0.1:5432/metering_test

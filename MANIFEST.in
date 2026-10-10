@@ -9,3 +9,9 @@ global-exclude *.local.yml *.local.yaml
 include docs/structured-tools.md
 include docs/workflow-factory-runtime-implementation.md
 include docs/release-0.7.1.md
+include docs/tool-effects.md
+include docs/accounting.md
+include docs/telemetry.md
+include CHANGELOG.md
+recursive-include tests/support *.py
+include scripts/wheel_smoke.py

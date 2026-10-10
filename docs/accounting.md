@@ -6,15 +6,13 @@ definitions do not contain customer identities.
 
 ## Installation
 
-Runtime 0.6.0 includes `accounting_v1`; the separately installed PostgreSQL recorder
-is version 0.1.0. Install the Runtime release wheel before the recorder release wheel.
-Harness 0.6.0 pins the corresponding Runtime release commit. Older unmetered callers
-remain supported. The commands below are the source-install equivalent for development.
+`b3-prosaic-runtime` 0.8.0 includes `accounting_v1`; the separately installed
+`b3-prosaic-runtime-postgres` recorder is 0.2.0 and selects Runtime 0.8.x.
+Install into a fresh environment/image; legacy distributions share import paths.
+Older unmetered callers remain supported. After publication use:
 
 ```sh
-uv pip install --python .venv/bin/python --no-deps -e .
-uv pip install --python .venv/bin/python 'psycopg[binary]>=3.2,<4'
-uv pip install --python .venv/bin/python --no-deps -e adapters/postgres
+python -m pip install 'b3-prosaic-runtime==0.8.0' 'b3-prosaic-runtime-postgres==0.2.0'
 ```
 
 ## Configure a recorder in trusted host code

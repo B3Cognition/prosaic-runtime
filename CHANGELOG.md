@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.8.0 — 2026-10-10
+
+- Rename the distribution to `b3-prosaic-runtime` with the index dependency
+  `b3-prosaic>=0.4,<0.5`; Python imports and the `prosaic-runtime` CLI stay unchanged.
+- Rename the separate PostgreSQL recorder to `b3-prosaic-runtime-postgres` 0.2.0,
+  selecting Runtime 0.8.x. Include local Apache license and provenance notices.
+- Export source versions and qualify clean Git archive wheels/sdists with matching
+  metadata, source payloads, license files and installed import ownership.
+- Migrate using a fresh environment or image: legacy and renamed distributions
+  share import paths. Candidate artifacts remain unpublished until qualification.
+
 ## 0.7.1 — 2026-10-10
 
 - Export validate_execution_artifact, validate_custom_tools and custom_descriptors

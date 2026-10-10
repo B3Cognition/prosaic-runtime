@@ -1,8 +1,13 @@
 # Prosaic Runtime PostgreSQL metering
 
-Install the separate recorder 0.1.1 release wheel alongside Runtime 0.7.x, which
+Install `b3-prosaic-runtime-postgres` 0.2.0 alongside `b3-prosaic-runtime` 0.8.x, which
 provides the accounting contracts. Install the Runtime wheel first. Runtime
 accounting off needs no database or psycopg dependency.
+
+Use a fresh virtual environment/image: legacy and renamed packages share imports.
+After publication, install with `python -m pip install 'b3-prosaic-runtime-postgres==0.2.0'`.
+Before publication use explicit qualified candidate wheels. The Python import
+remains `prosaic_runtime_postgres`; no stored accounting format changes are required.
 
 ```python
 from prosaic_runtime.accounting import ExecutionContext, RateCard
