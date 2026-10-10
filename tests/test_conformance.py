@@ -44,7 +44,7 @@ def test_canonical_order_owned_snapshot_and_source_version():
     encode = lambda value: json.dumps(value, sort_keys=True, ensure_ascii=False,
                                      separators=(',', ':'), allow_nan=False)
     assert encode(a) == encode(b)
-    assert a['version'] == 1 and a['runtimeVersion'] == '0.8.0'
+    assert a['version'] == 1 and a['runtimeVersion'] == '0.8.1'
     assert tuple(case['id'] for case in a['cases']) == CASES
     assert a['cases'][0]['origin'] == 'fixture'
     assert a['cases'][1]['state'] == 'not_run'
