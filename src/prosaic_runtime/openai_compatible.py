@@ -289,7 +289,12 @@ class OpenAICompatibleBackend(ExecutionBackend):
         except socket.timeout as exc:
             return _timeout_result(self.name, str(exc))
         except urllib.error.HTTPError as exc:
-            body = self.read_response(exc)
+            try:
+                body = self.read_response(exc)
+            except (TimeoutError, socket.timeout) as read_error:
+                return _timeout_result(self.name, str(read_error))
+            finally:
+                exc.close()
             return CliRunResult(
                 exit_code=int(exc.code),
                 stdout="",
@@ -447,7 +452,12 @@ class OpenAICompatibleBackend(ExecutionBackend):
         except socket.timeout as exc:
             return _timeout_result(self.name, str(exc))
         except urllib.error.HTTPError as exc:
-            body = self.read_response(exc)
+            try:
+                body = self.read_response(exc)
+            except (TimeoutError, socket.timeout) as read_error:
+                return _timeout_result(self.name, str(read_error))
+            finally:
+                exc.close()
             return CliRunResult(
                 exit_code=int(exc.code),
                 stdout="",

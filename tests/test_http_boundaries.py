@@ -98,8 +98,9 @@ def test_dispatch_timeout_is_refreshed_after_callback(monkeypatch, boundary):
 
 
 @pytest.fixture
-def drip_server():
+def drip_server(request):
     requests, stop, sent = [], Event(), Event()
+    status = getattr(request, 'param', 200)
 
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self):
@@ -108,9 +109,11 @@ def drip_server():
             value = json.dumps({'model': 'small', 'choices': [
                 {'message': {'content': 'done'}, 'finish_reason': 'stop'}],
                 'usage': {'prompt_tokens': 2, 'completion_tokens': 3, 'total_tokens': 5}})
-            streaming = request.get('stream', False)
+            if status != 200:
+                value = json.dumps({'error': 'fixture error ' * 25})
+            streaming = status == 200 and request.get('stream', False)
             body = ('data: ' + value + '\n\ndata: [DONE]\n\n' if streaming else value).encode()
-            self.send_response(200)
+            self.send_response(status)
             self.send_header('Content-Type', 'text/event-stream' if streaming else 'application/json')
             self.send_header('Content-Length', str(len(body)))
             self.end_headers()
@@ -208,3 +211,36 @@ def test_openai_buffered_sse_fallback_keeps_legacy_admission(server):
     assert len(requests) == 1 and result.exit_code == 0
     assert result.stdout == 'done' and result.token_usage == 7
     assert next(iter(recorder.observations.values()))['usage']['total_tokens'] == 7
+
+
+@pytest.mark.parametrize('drip_server', [503], indirect=True)
+@pytest.mark.parametrize('tools', [False, True])
+@pytest.mark.parametrize('accounted', [False, True])
+@pytest.mark.parametrize('cap', [None, 20])
+def test_openai_drip_http_error_returns_timeout_result(drip_server, tools, accounted, cap):
+    url, requests, _ = drip_server
+    recorder, events = MemoryRecorder() if accounted else None, []
+    runner = runtime(EndpointConfig(url, 'small', features={'streaming': False}), accounting=recorder)
+    started = time.monotonic()
+    result = runner.run(artifact('read' if tools else ''), observer=events.append,
+        policy=RunPolicy(timeout_s=0.1, max_provider_requests=1, max_reported_tokens=cap,
+            allowed_tools=frozenset({'read_file'}) if tools else frozenset()))
+    assert time.monotonic() - started < 0.35
+    assert result.exit_code != 0 and result.timed_out
+    assert result.metadata['provider_error_code'] == 'timeout'
+    assert result.token_usage is None
+    assert len(requests) == 1
+    budget = result.metadata['invocation_budgets_v1']
+    assert budget['provider_requests'] == 1 and budget['tool_calls'] == 0
+    assert budget['reported_tokens'] == 0
+    if cap is not None:
+        assert result.metadata['failure_reason'] == 'usage_unknown'
+        assert budget['usage_complete'] is False
+    assert events[-1]['event'] == 'invocation_completed'
+    assert events[-1]['outcome'] == 'timed_out'
+    if accounted:
+        ids = result.metadata['accounting_v1']['provider_call_ids']
+        assert len(ids) == 1 and ids == list(recorder.intents) == list(recorder.observations)
+        observation = recorder.observations[ids[0]]
+        assert observation['outcome'] == 'failed'
+        assert observation['usage']['status'] == 'unknown'
