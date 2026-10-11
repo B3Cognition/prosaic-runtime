@@ -113,6 +113,9 @@ class OpenAICompatibleBackend(ExecutionBackend):
     def preserve_malformed_tool_calls(self):
         return False
 
+    def strict_conversation_calls(self):
+        return False
+
     def open_transcript(self, request):
         return open_provider_transcript(Path(request.cwd), self._config.features, request.metadata)
 
@@ -508,6 +511,7 @@ class OpenAICompatibleBackend(ExecutionBackend):
             raw_response_headers=raw_response_headers,
             strict_tool_names=self.strict_tool_names(),
             preserve_malformed=self.preserve_malformed_tool_calls(),
+            strict_full=self.strict_conversation_calls(),
         )
         turn.token_usage_details = self.usage_details(parsed)
         return turn
@@ -571,7 +575,8 @@ class OpenAICompatibleBackend(ExecutionBackend):
         reasoning_content_observed = False
         raw_response_metadata: dict[str, object] = {}
         event_data: list[str] = []
-        tool_accumulator = _ToolCallAccumulator(self.strict_tool_names(), self.preserve_malformed_tool_calls())
+        tool_accumulator = _ToolCallAccumulator(self.strict_tool_names(), self.preserve_malformed_tool_calls(),
+                                               strict_full=self.strict_conversation_calls())
         progress_detail = _feature_str(
             self._config.features,
             "progress_detail",
@@ -734,10 +739,12 @@ class _BodyResponse:
 
 
 class _ToolCallAccumulator:
-    def __init__(self, strict_tool_names=frozenset(), preserve_malformed=False) -> None:
+    def __init__(self, strict_tool_names=frozenset(), preserve_malformed=False, *, strict_full=False) -> None:
         self._calls: dict[int, dict[str, object]] = {}
         self._strict_tool_names = strict_tool_names
         self._preserve_malformed = preserve_malformed
+        self._strict_full = strict_full
+        self._invalid_batch = False
 
     def add_event(self, event: object) -> None:
         choice = _first_choice(event)
@@ -749,13 +756,20 @@ class _ToolCallAccumulator:
                 continue
             raw_calls = container.get("tool_calls")
             if not isinstance(raw_calls, list):
+                if self._strict_full and 'tool_calls' in container and raw_calls is not None:
+                    self._invalid_batch = True
                 continue
             for offset, raw_call in enumerate(raw_calls):
+                if self._strict_full and (type(raw_call) is not dict or
+                        set(raw_call) - {'index', 'id', 'type', 'function'}):
+                    self._invalid_batch = True
                 if not isinstance(raw_call, dict):
                     if not self._preserve_malformed:
                         continue
                     raw_call = {}
                 index = raw_call.get("index")
+                if self._strict_full and (type(index) is not int or index < 0):
+                    self._invalid_batch = True
                 if not isinstance(index, int):
                     index = offset
                 call = self._calls.setdefault(
@@ -767,31 +781,42 @@ class _ToolCallAccumulator:
                     },
                 )
                 call_id = raw_call.get("id")
+                if self._strict_full and 'id' in raw_call and (type(call_id) is not str or not call_id or
+                        (call['id'] and call['id'] != call_id)):
+                    self._invalid_batch = True
                 if isinstance(call_id, str) and call_id:
                     call["id"] = call_id
                 call_type = raw_call.get("type")
-                if self._strict_tool_names and 'type' in raw_call:
+                if (self._strict_full or self._strict_tool_names) and 'type' in raw_call:
                     call['_type_seen'] = True
                     if call_type != 'function':
                         call['_invalid_shape'] = True
                 if isinstance(call_type, str) and call_type:
                     call["type"] = call_type
                 raw_function = raw_call.get("function")
+                if self._strict_full and 'function' in raw_call and (type(raw_function) is not dict or
+                        set(raw_function) - {'name', 'arguments'}):
+                    self._invalid_batch = True
                 if isinstance(raw_function, dict):
                     function = call["function"]
                     if not isinstance(function, dict):
                         function = {"name": "", "arguments": ""}
                         call["function"] = function
                     name = raw_function.get("name")
+                    if self._strict_full and 'name' in raw_function and (type(name) is not str or not name or
+                            (function['name'] and function['name'] != name)):
+                        self._invalid_batch = True
                     if isinstance(name, str) and name:
                         function["name"] = name
                     arguments = raw_function.get("arguments")
-                    if self._strict_tool_names and 'arguments' in raw_function and not isinstance(arguments, str):
+                    if (self._strict_full or self._strict_tool_names) and 'arguments' in raw_function and not isinstance(arguments, str):
                         call['_invalid_arguments'] = True
                     if isinstance(arguments, str):
                         function["arguments"] = str(function.get("arguments") or "") + arguments
 
     def tool_calls(self) -> list[dict[str, object]]:
+        if self._strict_full and self._invalid_batch:
+            return [{}]
         result = []
         for _, call in sorted(self._calls.items()):
             function = call.get('function')
@@ -799,7 +824,7 @@ class _ToolCallAccumulator:
                 if not self._preserve_malformed:
                     continue
             normalized = {key: value for key, value in call.items() if not key.startswith('_')}
-            if isinstance(function, dict) and function.get('name') in self._strict_tool_names:
+            if isinstance(function, dict) and (self._strict_full or function.get('name') in self._strict_tool_names):
                 normalized['function'] = dict(function)
                 if call.get('_invalid_arguments'):
                     normalized['function']['arguments'] = None
@@ -1728,6 +1753,7 @@ def _completion_turn_from_parsed(
     raw_response_headers: dict[str, str],
     strict_tool_names=frozenset(),
     preserve_malformed=False,
+    strict_full=False,
 ) -> _OpenAICompletionTurn:
     return _OpenAICompletionTurn(
         text=_assistant_text(parsed),
@@ -1737,7 +1763,7 @@ def _completion_turn_from_parsed(
         raw_response_metadata=_raw_response_metadata(parsed),
         reasoning_content_observed=_has_reasoning_content(parsed),
         tool_calls=_message_tool_calls(parsed, strict_tool_names=strict_tool_names,
-                                      preserve_malformed=preserve_malformed),
+                                      preserve_malformed=preserve_malformed, strict_full=strict_full),
         streamed=streamed,
         http_status=http_status,
         raw_response_headers=raw_response_headers,
@@ -1751,7 +1777,7 @@ def _transcript_metadata(transcript: object) -> dict[str, object]:
     return {}
 
 
-def _message_tool_calls(parsed: object, *, strict_tool_names=frozenset(), preserve_malformed=False) -> list[dict[str, object]]:
+def _message_tool_calls(parsed: object, *, strict_tool_names=frozenset(), preserve_malformed=False, strict_full=False) -> list[dict[str, object]]:
     if not isinstance(parsed, dict):
         return []
     choices = parsed.get("choices")
@@ -1764,6 +1790,9 @@ def _message_tool_calls(parsed: object, *, strict_tool_names=frozenset(), preser
     if not isinstance(message, dict):
         return []
     raw_calls = message.get("tool_calls")
+    if strict_full and 'tool_calls' in message and raw_calls is not None:
+        # Retain every invalid/unknown field for pure whole-batch validation.
+        return raw_calls if type(raw_calls) is list else [{}]
     if not isinstance(raw_calls, list):
         return []
     calls: list[dict[str, object]] = []

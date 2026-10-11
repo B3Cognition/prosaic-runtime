@@ -20,7 +20,7 @@ from .policy import RunPolicy, requested_tools, BUILTIN_TOOLS
 from .types import Invocation, Result
 from .tools import validate_custom_tools, custom_descriptors, ToolDeadlineExceeded, ToolExecutionError
 from .cli_tools import load_cli_tools, cli_tool_context
-from .tool_registry import BoundedToolRegistry, DisabledBuiltinRegistry
+from .tool_registry import BoundedToolRegistry, DisabledBuiltinRegistry, InvalidToolRequest
 from .accounting import AccountingError, resolve_context
 from .accounting_capture import Capture, InvalidEvidence, strict_json
 from .http_bounds import LimitExceeded, set_response_timeout, BoundedNativeStream
@@ -104,6 +104,11 @@ class _BoundedMixin:
         return details
 
     def parse_response_json(self, raw):
+        if self.turn_mode:
+            try:
+                return strict_json(raw)
+            except (ValueError, TypeError, UnicodeError, RecursionError):
+                raise InvalidToolRequest() from None
         if self.budget is not None and self.budget.policy.max_reported_tokens is not None:
             try:
                 return strict_json(raw)
@@ -139,6 +144,9 @@ class _BoundedMixin:
 
     def preserve_malformed_tool_calls(self):
         return self.budget is not None and self.budget.enabled
+
+    def strict_conversation_calls(self):
+        return self.turn_mode
 
     def before_http_dispatch(self, timeout):
         self.check_boundary()
@@ -234,6 +242,8 @@ class _BoundedMixin:
         self.validate_payload(payload)
         attempted_before = self._provider_attempts
         turn = super()._post_chat_turn(payload, request, deadline, streaming)
+        if self.turn_mode and isinstance(turn, Result) and turn.metadata.get('provider_error_code') in {'malformed_response', 'malformed_sse'}:
+            turn.metadata['failure_reason'] = 'invalidToolRequest'
         attempted = self._provider_attempts > attempted_before
         native_failure = (isinstance(turn, Result) and self._config.provider == 'anthropic' and
             (attempted or _reported_usage(turn.metadata.get('token_usage_details')) is not None))
@@ -611,6 +621,10 @@ class ProsaicRuntime:
                     result.metadata.update(acquisition_id=acquisition.id, acquisition_sha256=acquisition.digest)
                 emit("completed", exit_code=result.exit_code, token_usage=result.token_usage)
                 return result
+            except InvalidToolRequest:
+                return Result(1, '', 'invalidToolRequest',
+                    token_usage=backend.reported_token_usage if backend and backend.usage_complete else None,
+                    metadata={'failure_reason': 'invalidToolRequest'})
             except ToolEffectFailure as exc:
                 return Result(1, '', exc.reason,
                     token_usage=backend.reported_token_usage if backend and backend.usage_complete else None,

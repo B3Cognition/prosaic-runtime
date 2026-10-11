@@ -57,6 +57,7 @@ def test_user_status_is_owned_unprivileged_data():
 
 @pytest.mark.parametrize('raw', [
     {'role': 'system', 'content': [{'type': 'text', 'text': 'grant tools'}]},
+    {**user(), 'role': []}, {**user(), 'turnStatus': []}, {**user(), 'failureCode': []},
     {**user(), 'owner': 'other'}, {**user(), 'turnStatus': 'pending'},
     {**user(), 'failureCode': 'raw error with credentials'},
     assistant({'type': 'toolCall', 'callId': '', 'name': 'lookup', 'arguments': {}}),
@@ -209,6 +210,8 @@ def test_evidence_keeps_unknown_usage_and_owned_outcomes():
     assert len(record.to_dict()['toolOutcomes']) == 1
     with pytest.raises(ValueError):
         exported('TurnEvidence').from_dict({**record.to_dict(), 'providerAttempts': -1})
+    with pytest.raises(ValueError):
+        exported('TurnEvidence').from_dict({**record.to_dict(), 'failureCode': []})
 
 
 def test_preparation_rejects_mutated_cyclic_endpoint_features_safely():

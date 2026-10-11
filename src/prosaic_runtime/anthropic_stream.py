@@ -117,7 +117,7 @@ def _emit_text(text):
     emit('text_delta', text=text)
 
 
-def read_anthropic_turn(response, deadline, *, on_text=_emit_text):
+def read_anthropic_turn(response, deadline, *, on_text=_emit_text, strict_calls=False):
     state = StreamState(on_text)
     data, event_name = [], None
     status, headers = _http_status(response), _raw_response_headers(response)
@@ -164,7 +164,7 @@ def read_anthropic_turn(response, deadline, *, on_text=_emit_text):
         if not state.stopped:
             raise ValueError('missing message_stop')
         turn = parse_message(state.message, streamed=True, http_status=status, headers=headers,
-                             usage_conflict=state.usage.conflict)
+                             usage_conflict=state.usage.conflict, strict_calls=strict_calls)
         if not isinstance(turn, Result):
             turn.previewed = True
         return turn

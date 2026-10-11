@@ -14,7 +14,8 @@ from .conversation import (PreparedTurn, TurnLimits, TurnAdmissionError, encode_
 
 
 def policy_document(policy):
-    return {**asdict(policy), 'allowed_tools': sorted(policy.allowed_tools),
+    return {**{f.name: getattr(policy, f.name) for f in fields(policy)},
+            'allowed_tools': sorted(policy.allowed_tools),
             'read_roots': list(policy.read_roots), 'write_paths': list(policy.write_paths),
             'forbidden_roots': list(policy.forbidden_roots)}
 
@@ -140,6 +141,12 @@ def prepare_turn(runtime, artifact, *, message, history=(), input_data=None, pol
             max_provider_requests=8, max_tool_calls=16)
         if type(policy) is not RunPolicy or policy.max_provider_requests is None or policy.max_tool_calls is None:
             raise ValueError('finite caps required')
+        if type(policy.allowed_tools) is not frozenset or any(type(n) is not str for n in policy.allowed_tools):
+            raise ValueError('invalid tool grant')
+        for root_field in ('read_roots', 'write_paths', 'forbidden_roots'):
+            roots = getattr(policy, root_field)
+            if type(roots) is not tuple or any(type(p) is not str or not p or '\x00' in p or len(p.encode('utf-8')) > 4096 for p in roots):
+                raise ValueError('invalid path scope')
         policy = policy_from_document(json.loads(encode_owned(policy_document(policy))))
         names = requested & runtime.config.allowed_tools & policy.allowed_tools
         if names != requested or requested - BUILTIN_TOOLS - runtime.tool_descriptors.keys():

@@ -191,6 +191,9 @@ class ExecutionBackend:
                         },
                     )
             if turn.tool_calls:
+                if initial_messages is not None:
+                    # No model field may opt into or out of this boundary.
+                    turn.tool_calls = list(registry.validate_batch(turn.tool_calls))
                 if tools_disabled:
                     return CliRunResult(
                         exit_code=1,

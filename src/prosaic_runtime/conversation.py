@@ -107,12 +107,12 @@ def _reference(value):
 def _message(value):
     _closed(value, {'role', 'content'}, {'turnStatus', 'failureCode'})
     role, content = value['role'], value['content']
-    if role not in {'user', 'assistant', 'tool'} or type(content) is not list or not content:
+    if type(role) is not str or role not in {'user', 'assistant', 'tool'} or type(content) is not list or not content:
         raise ValueError('invalid message')
     if role == 'user':
-        if value.get('turnStatus') not in {'completed', 'failed'}:
+        if type(value.get('turnStatus')) is not str or value['turnStatus'] not in {'completed', 'failed'}:
             raise ValueError('invalid user status')
-        if value['turnStatus'] == 'failed' and value.get('failureCode') not in FAILURE_CODES:
+        if value['turnStatus'] == 'failed' and (type(value.get('failureCode')) is not str or value['failureCode'] not in FAILURE_CODES):
             raise ValueError('invalid failure code')
         if value['turnStatus'] == 'completed' and 'failureCode' in value:
             raise ValueError('completed message has failure')
@@ -136,7 +136,8 @@ def _message(value):
         elif kind == 'toolOutcome' and role == 'tool':
             _closed(block, {'type', 'callId', 'outcome'})
             _reference(block['callId'])
-            if type(block['outcome']) is not dict or block['outcome'].get('status') not in {'ok', 'error'}:
+            if (type(block['outcome']) is not dict or type(block['outcome'].get('status')) is not str or
+                    block['outcome']['status'] not in {'ok', 'error'}):
                 raise ValueError('invalid tool outcome')
         else:
             raise ValueError('unsupported content block')
@@ -244,7 +245,8 @@ class TurnEvidence(_OwnedRecord):
         for key in ('providerAttempts', 'toolAttempts'):
             if type(value[key]) is not int or value[key] < 0:
                 raise ValueError('invalid attempt count')
-        if type(value['usageComplete']) is not bool or value['failureCode'] not in FAILURE_CODES | {None}:
+        if (type(value['usageComplete']) is not bool or
+                (value['failureCode'] is not None and (type(value['failureCode']) is not str or value['failureCode'] not in FAILURE_CODES))):
             raise ValueError('invalid evidence status')
         _closed(value['knownUsage'], (), {'inputTokens', 'outputTokens', 'totalTokens'})
         if any(type(n) is not int or n < 0 for n in value['knownUsage'].values()):
@@ -255,7 +257,7 @@ class TurnEvidence(_OwnedRecord):
             _closed(outcome, {'callId', 'name', 'status'}, {'outcome', 'operationId'})
             _reference(outcome['callId'])
             _reference(outcome['name'])
-            if outcome['status'] not in {'completed', 'replayed', 'uncertain'}:
+            if type(outcome['status']) is not str or outcome['status'] not in {'completed', 'replayed', 'uncertain'}:
                 raise ValueError('invalid effect status')
             if 'outcome' in outcome and type(outcome['outcome']) is not dict:
                 raise ValueError('invalid effect outcome')

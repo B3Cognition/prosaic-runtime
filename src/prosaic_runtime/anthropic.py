@@ -87,7 +87,7 @@ def usage_details(raw):
             'total_tokens': usage['total_tokens']}
 
 
-def parse_message(value, *, streamed=False, http_status=200, headers=None, usage_conflict=False):
+def parse_message(value, *, streamed=False, http_status=200, headers=None, usage_conflict=False, strict_calls=False):
     """Validate native content before exposing any executable tool request."""
     if (not isinstance(value, dict) or value.get('type') != 'message' or
             value.get('role') != 'assistant' or not isinstance(value.get('content'), list) or
@@ -102,6 +102,8 @@ def parse_message(value, *, streamed=False, http_status=200, headers=None, usage
         if block.get('type') == 'text' and isinstance(block.get('text'), str):
             text.append(block['text'])
         elif block.get('type') == 'tool_use':
+            if strict_calls and set(block) != {'type', 'id', 'name', 'input'}:
+                raise ValueError('invalid tool_use fields')
             if (not isinstance(block.get('id'), str) or not block['id'] or block['id'] in ids or
                     not isinstance(block.get('name'), str) or not block['name'] or
                     type(block.get('input')) is not dict):
@@ -147,6 +149,9 @@ class AnthropicBackend(ExecutionBackend):
 
     def strict_tool_names(self):
         return frozenset()
+
+    def strict_conversation_calls(self):
+        return False
 
     def open_transcript(self, request):
         return ProviderTranscript(None)
@@ -194,7 +199,8 @@ class AnthropicBackend(ExecutionBackend):
             return Result(1, '', 'Anthropic transport failed', metadata={
                 'provider': self.name, 'provider_error_code': 'url_error'})
         try:
-            return parse_message(strict_json(body), http_status=status, headers=headers)
+            return parse_message(strict_json(body), http_status=status, headers=headers,
+                                 strict_calls=self.strict_conversation_calls())
         except (ValueError, TypeError, UnicodeError, RecursionError):
             return Result(1, '', 'Malformed or unsupported Anthropic response', metadata={
                 'provider': self.name, 'http_status': status, 'provider_error_code': 'malformed_response'})
@@ -202,4 +208,4 @@ class AnthropicBackend(ExecutionBackend):
     def _read_sse_turn(self, response, deadline):
         # Implemented separately from JSON framing; partial tool inputs are never executable.
         from .anthropic_stream import read_anthropic_turn
-        return read_anthropic_turn(response, deadline)
+        return read_anthropic_turn(response, deadline, strict_calls=self.strict_conversation_calls())
