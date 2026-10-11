@@ -83,6 +83,10 @@ class OpenAICompatibleBackend(ExecutionBackend):
         """Host-specific guards may reject a request before transport."""
         pass
 
+    def encode_payload(self, payload):
+        """Produce the single byte envelope used at the transport boundary."""
+        return json.dumps(payload, allow_nan=False).encode('utf-8')
+
     def open_http(self, request, *, timeout):
         return urllib.request.urlopen(request, timeout=timeout)
 
@@ -420,7 +424,7 @@ class OpenAICompatibleBackend(ExecutionBackend):
     ) -> "_OpenAICompletionTurn | CliRunResult":
         llm = self._config
         assert llm.base_url is not None
-        data = json.dumps(payload).encode("utf-8")
+        data = self.encode_payload(payload)
         headers = {"Content-Type": "application/json"}
         token, token_error = _api_key(llm.api_key_env, llm.api_key_file, request.env)
         if token_error:

@@ -153,6 +153,9 @@ class AnthropicBackend(ExecutionBackend):
     def strict_conversation_calls(self):
         return False
 
+    def encode_payload(self, payload):
+        return json.dumps(payload, allow_nan=False).encode('utf-8')
+
     def open_transcript(self, request):
         return ProviderTranscript(None)
 
@@ -174,11 +177,12 @@ class AnthropicBackend(ExecutionBackend):
     def _post_chat_turn(self, payload, request, deadline, streaming):
         native = encode_messages(payload)
         self.validate_payload(native)
+        data = self.encode_payload(native)
         token, error = _api_key(self._config.api_key_env, self._config.api_key_file, request.env)
         if error:
             return Result(1, '', error, metadata={'provider': self.name, 'provider_error_code': 'api_key_file_error'})
         http_request = urllib.request.Request(self._config.base_url.rstrip('/') + '/messages',
-            data=json.dumps(native, allow_nan=False).encode('utf-8'), headers=native_headers(token), method='POST')
+            data=data, headers=native_headers(token), method='POST')
         try:
             with self.open_http(http_request, timeout=max(0.001, min(request.timeout_s, deadline - time.monotonic()))) as response:
                 status, headers = _http_status(response), _raw_response_headers(response)

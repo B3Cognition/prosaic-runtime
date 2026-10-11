@@ -6,7 +6,7 @@ from threading import Thread
 
 import pytest
 from prosaic_runtime import (CustomTool, EndpointConfig, ProsaicArtifact,
-                             ProsaicRuntime, RunPolicy, RuntimeConfig)
+                             ProsaicRuntime, RunPolicy, RuntimeConfig, TurnLimits, ConversationMessage)
 
 
 class ConversationFixture:
@@ -118,6 +118,25 @@ class ConversationFixture:
                  'usage': {'prompt_tokens': 2, 'completion_tokens': 3, 'total_tokens': 5}}]
             data = ''.join(f'data: {json.dumps(value)}\n\n' for value in chunks) + 'data: [DONE]\n\n'
         self.responses.append((200, 'text/event-stream', data.encode()))
+
+    @property
+    def large_policy(self):
+        return replace(self.policy, max_input_bytes=2_097_152, max_tool_calls=64, max_provider_requests=64)
+
+    @property
+    def large_limits(self):
+        return TurnLimits(max_turn_bytes=1_048_576, max_input_bytes=2_097_152)
+
+    def compaction_history(self, *, outcomes=9, older_result_chars=100_000):
+        calls = [{'type': 'toolCall', 'callId': f'prior:{i}', 'name': 'lookup', 'arguments': {}}
+                 for i in range(outcomes)]
+        messages = [{'role': 'user', 'content': [{'type': 'text', 'text': 'Previous lookup'}],
+                     'turnStatus': 'completed'}, {'role': 'assistant', 'content': calls}]
+        messages.extend({'role': 'tool', 'content': [{'type': 'toolOutcome', 'callId': f'prior:{i}',
+            'outcome': {'status': 'ok', 'result': {'content': 'x' * older_result_chars if i == 0 else 'small'}}}]}
+            for i in range(outcomes))
+        messages.append({'role': 'assistant', 'content': [{'type': 'text', 'text': 'Previous answer'}]})
+        return tuple(ConversationMessage.from_dict(m) for m in messages)
 
 
 @pytest.fixture

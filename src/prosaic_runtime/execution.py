@@ -5,7 +5,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from .types import Invocation as CliRunRequest, Result as CliRunResult
 from .events import print, emit
-from .openai_compatible_compaction import compact_tool_result_messages
+from .openai_compatible_compaction import compact_tool_result_messages, ToolResultCompactionStats
 from .openai_compatible_progress import (_progress, _progress_llm_preview, _progress_turn_summary, _single_line_preview, _tool_call_name, _tool_result_status, _elapsed_s)
 
 
@@ -76,10 +76,10 @@ class ExecutionBackend:
         while True:
             turn_number = tool_rounds + 1
             turn_started = time.monotonic()
-            payload_messages, compaction = compact_tool_result_messages(
-                messages,
-                llm.features,
-            )
+            if execution_options is not None and execution_options.get('compact_tool_results') is False:
+                payload_messages, compaction = list(messages), ToolResultCompactionStats()
+            else:
+                payload_messages, compaction = compact_tool_result_messages(messages, llm.features)
             if compaction.compacted:
                 tool_result_compactions += compaction.compacted
                 tool_result_compaction_saved_chars += compaction.saved_chars

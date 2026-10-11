@@ -35,6 +35,10 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+class _TurnContextExceeded(LimitExceeded):
+    pass
+
+
 def _reported_usage(details):
     if not isinstance(details, dict) or any(type(v) is not int or v < 0 for v in details.values()):
         return None
@@ -232,8 +236,17 @@ class _BoundedMixin:
 
     def validate_payload(self, payload):
         check_cancelled()
+        if self.turn_mode:
+            # Turn requests are guarded once, on their actual native bytes.
+            return
         if len(json.dumps(payload).encode()) > self.max_input_bytes:
             raise LimitExceeded("conversation exceeds max_input_bytes")
+
+    def encode_payload(self, payload):
+        data = super().encode_payload(payload)
+        if self.turn_mode and len(data) > self.max_input_bytes:
+            raise _TurnContextExceeded('contextLimit')
+        return data
 
     def _post_chat_turn(self, payload, request, deadline, streaming):
         check_cancelled()
@@ -586,7 +599,7 @@ class ProsaicRuntime:
                     result = backend._run_prompt_with_tools(request, metadata,
                         _feature_enabled(endpoint.features, 'streaming', default=True),
                         initial_messages=_turn_prepared['messages'],
-                        execution_options={'full_history': True}, turn_capture=_turn_capture)
+                        execution_options={'compact_tool_results': False}, turn_capture=_turn_capture)
                 # The OpenAI text-only path returns Result directly and bypasses
                 # _post_chat_turn. Account its terminal usage once, after Capture
                 # has persisted the response context, preserving the returned text.
@@ -642,6 +655,10 @@ class ProsaicRuntime:
                 return Result(1, '', 'invocation deadline exceeded', timed_out=True,
                               token_usage=backend.reported_token_usage if backend and backend.usage_complete else None,
                               metadata={'failure_reason': 'invocation_timeout', 'usage_scope': 'reported_completed_turns'})
+            except _TurnContextExceeded:
+                return Result(1, '', 'contextLimit',
+                    token_usage=backend.reported_token_usage if backend and backend.usage_complete else None,
+                    metadata={'failure_reason': 'contextLimit'})
             except LimitExceeded as exc:
                 return Result(1, "", str(exc), token_usage=backend.reported_token_usage if backend and backend.usage_complete else None,
                               metadata={"failure_reason": "budget_exceeded", 'usage_scope': 'reported_completed_turns'})
