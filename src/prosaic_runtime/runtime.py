@@ -288,6 +288,13 @@ class ProsaicRuntime:
     def cli_tool_names(self):
         return frozenset(self._cli_tools)
 
+    def prepare_turn(self, artifact, *, message, history=(), input_data=None,
+                     policy=None, limits=None, workspace=None):
+        """Purely admit and own one role-aware conversational input."""
+        from .conversation_preparation import prepare_turn
+        return prepare_turn(self, artifact, message=message, history=history,
+                            input_data=input_data, policy=policy, limits=limits, workspace=workspace)
+
     @classmethod
     def from_config(cls, path=None, **kwargs):
         return cls(RuntimeConfig.load(path), **kwargs)

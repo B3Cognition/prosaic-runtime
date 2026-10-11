@@ -25,3 +25,8 @@ __all__ += ["AccountingError", "ExecutionContext", "ResolvedContext", "RateCard"
 __all__ += ["InvocationScope", "ObserverEmitter"]
 __all__ += ["ToolExecutionContext", "ToolClaim", "ToolJournal", "tool_journal_descriptor"]
 __all__ += ["evaluate_conformance"]
+
+from .conversation import (ConversationMessage, CompletedTurn, TurnEvidence,
+                           TurnResult, TurnLimits, PreparedTurn, TurnAdmissionError)
+__all__ += ["ConversationMessage", "CompletedTurn", "TurnEvidence", "TurnResult",
+            "TurnLimits", "PreparedTurn", "TurnAdmissionError"]

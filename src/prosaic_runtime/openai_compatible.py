@@ -1352,7 +1352,8 @@ class _OpenAIToolRegistry:
         if Path(pattern).is_absolute() or ".." in Path(pattern).parts:
             raise ValueError(f"Pattern escapes provider root: {pattern}")
 
-    def _tools(self) -> list[_OpenAITool]:
+    @staticmethod
+    def _tools() -> list[_OpenAITool]:
         tools = [
             _OpenAITool(
                 "read_file",
