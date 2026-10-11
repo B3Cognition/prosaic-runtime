@@ -3,6 +3,7 @@ from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from threading import Thread
+from tempfile import TemporaryDirectory
 
 import pytest
 from prosaic_runtime import (CustomTool, EndpointConfig, ProsaicArtifact,
@@ -35,6 +36,7 @@ class ConversationFixture:
         self.http.daemon_threads = True
         self.thread = Thread(target=self.http.serve_forever, daemon=True)
         self.thread.start()
+        self.journal_directory = TemporaryDirectory(prefix='prosaic-turn-journal-')
         return self
 
     def __exit__(self, *args):
@@ -42,6 +44,7 @@ class ConversationFixture:
         self.http.server_close()
         self.thread.join(timeout=5)
         assert not self.thread.is_alive(), 'fixture server did not stop'
+        self.journal_directory.cleanup()
 
     @property
     def runtime(self):
@@ -137,6 +140,33 @@ class ConversationFixture:
             for i in range(outcomes))
         messages.append({'role': 'assistant', 'content': [{'type': 'text', 'text': 'Previous answer'}]})
         return tuple(ConversationMessage.from_dict(m) for m in messages)
+
+    def cancel_after_journal_commit(self):
+        from pathlib import Path
+        from support.tool_journal import SqliteJournal
+        fixture = self
+        self.cancelled, self._handler_calls = False, 0
+        class Journal(SqliteJournal):
+            def commit(self, *args):
+                super().commit(*args)
+                fixture.cancelled = True
+        self.journal = Journal(Path(self.journal_directory.name) / 'effects.sqlite')
+        def handler(args, context):
+            self._handler_calls += 1
+            return {'completed': True}
+        self.add_tool('charge', handler, operation_key=lambda args, context: 'effect-1')
+
+    @property
+    def handler_calls(self):
+        return self._handler_calls
+
+    def run_journaled_turn(self):
+        from prosaic_runtime import InvocationScope
+        self.queue_calls([{'id': 'native-effect', 'name': 'charge', 'arguments': '{}'}])
+        self.queue_text('done')
+        return self.runtime.turn(self.agent, message='Perform approved operation', policy=self.policy,
+            operation_context=InvocationScope('attempt', operation_namespace='fixture-ops'),
+            tool_journal=self.journal, cancelled=lambda: self.cancelled)
 
 
 @pytest.fixture

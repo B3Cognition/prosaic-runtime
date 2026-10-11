@@ -156,6 +156,9 @@ class AnthropicBackend(ExecutionBackend):
     def encode_payload(self, payload):
         return json.dumps(payload, allow_nan=False).encode('utf-8')
 
+    def parse_response_json(self, raw):
+        return strict_json(raw)
+
     def open_transcript(self, request):
         return ProviderTranscript(None)
 
@@ -203,7 +206,7 @@ class AnthropicBackend(ExecutionBackend):
             return Result(1, '', 'Anthropic transport failed', metadata={
                 'provider': self.name, 'provider_error_code': 'url_error'})
         try:
-            return parse_message(strict_json(body), http_status=status, headers=headers,
+            return parse_message(self.parse_response_json(body), http_status=status, headers=headers,
                                  strict_calls=self.strict_conversation_calls())
         except (ValueError, TypeError, UnicodeError, RecursionError):
             return Result(1, '', 'Malformed or unsupported Anthropic response', metadata={
@@ -212,4 +215,5 @@ class AnthropicBackend(ExecutionBackend):
     def _read_sse_turn(self, response, deadline):
         # Implemented separately from JSON framing; partial tool inputs are never executable.
         from .anthropic_stream import read_anthropic_turn
-        return read_anthropic_turn(response, deadline, strict_calls=self.strict_conversation_calls())
+        return read_anthropic_turn(response, deadline, strict_calls=self.strict_conversation_calls(),
+                                   parse_event=self.parse_response_json)

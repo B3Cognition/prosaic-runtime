@@ -117,7 +117,7 @@ def _emit_text(text):
     emit('text_delta', text=text)
 
 
-def read_anthropic_turn(response, deadline, *, on_text=_emit_text, strict_calls=False):
+def read_anthropic_turn(response, deadline, *, on_text=_emit_text, strict_calls=False, parse_event=strict_json):
     state = StreamState(on_text)
     data, event_name = [], None
     status, headers = _http_status(response), _raw_response_headers(response)
@@ -125,7 +125,7 @@ def read_anthropic_turn(response, deadline, *, on_text=_emit_text, strict_calls=
     def flush():
         nonlocal data, event_name
         if data:
-            event = strict_json('\n'.join(data))
+            event = parse_event('\n'.join(data))
             if event_name is not None and (not isinstance(event, dict) or event.get('type') != event_name):
                 raise ValueError('SSE event name mismatch')
             state.push(event)

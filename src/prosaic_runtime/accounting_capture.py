@@ -22,11 +22,12 @@ def strict_json(raw):
 
 
 class Capture:
-    def __init__(self, recorder, context, artifact, profile, provider='openai-compatible'):
+    def __init__(self, recorder, context, artifact, profile, provider='openai-compatible', *, on_observation=None):
         self.recorder, self.context = recorder, context
         self.artifact, self.profile = artifact, profile
         self.call_ids = []
         self.provider = provider
+        self.on_observation = on_observation
 
     def open(self, opener, request, timeout, *, before_dispatch=None):
         call_id = uuid.uuid4().hex
@@ -45,10 +46,11 @@ class Capture:
             raise AccountingError('intent persistence failed') from exc
         self.call_ids.append(call_id)
         observer = AnthropicObservation if self.provider == 'anthropic' else Observation
-        observation = observer(self.recorder, call_id)
+        observation = observer(self.recorder, call_id, on_observation=self.on_observation)
         try:
             if before_dispatch is not None:
                 timeout = before_dispatch(timeout)
+            observation.dispatched = True
             response = opener.open(request, timeout=timeout)
         except BaseException as exc:
             from .events import Cancelled
@@ -59,12 +61,14 @@ class Capture:
 
 class Observation:
     eager_events = True
-    def __init__(self, recorder, call_id):
+    def __init__(self, recorder, call_id, *, on_observation=None):
         self.recorder, self.call_id = recorder, call_id
         self.usage, self.model, self.request_id, self.tier = None, None, None, None
         self.conflict = False
         self.finished = False
         self.terminal = False
+        self.on_observation = on_observation
+        self.dispatched = False
 
     def capture(self, event):
         if type(event) is not dict:
@@ -99,6 +103,8 @@ class Observation:
                  'finished_at': utc_now(), 'outcome': outcome,
                  'response_model': self.model, 'provider_request_id': self.request_id,
                  'service_tier': self.tier, 'usage': usage}
+        if self.on_observation is not None and self.dispatched:
+            self.on_observation(self.call_id, value)
         try:
             self.recorder.observe(self.call_id, value)
         except Exception as exc:
@@ -109,8 +115,8 @@ class Observation:
 class AnthropicObservation(Observation):
     eager_events = False
 
-    def __init__(self, recorder, call_id):
-        super().__init__(recorder, call_id)
+    def __init__(self, recorder, call_id, *, on_observation=None):
+        super().__init__(recorder, call_id, on_observation=on_observation)
         from .anthropic_stream import StreamState
         self.state = StreamState(lambda text: None)
 

@@ -273,7 +273,7 @@ class ExecutionBackend:
                 )
                 if turn_capture is not None:
                     turn_capture.assistant(turn)
-                messages.append(_assistant_tool_message(turn))
+                messages.append(_assistant_tool_message(turn_capture.wire_turn(turn) if turn_capture is not None else turn))
                 tool_signature = _tool_round_signature(turn.tool_calls)
                 if tool_signature == previous_tool_signature:
                     identical_tool_rounds += 1
@@ -321,7 +321,7 @@ class ExecutionBackend:
                         tool_name=tool_name,
                         tool_result=tool_result,
                     )
-                    messages.append(tool_message)
+                    messages.append(turn_capture.wire_tool(tool_message) if turn_capture is not None else tool_message)
                     if acquiring and status != 'ok':
                         return CliRunResult(
                             exit_code=1, stdout='', stderr='required acquisition tool failed',

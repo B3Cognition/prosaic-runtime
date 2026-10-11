@@ -7,6 +7,7 @@ from dataclasses import dataclass, fields
 import json
 import math
 import re
+from .operation_context import bounded_reference
 
 from .types import Result
 
@@ -254,7 +255,8 @@ class TurnEvidence(_OwnedRecord):
         if type(value['toolOutcomes']) is not list:
             raise ValueError('invalid effect evidence')
         for outcome in value['toolOutcomes']:
-            _closed(outcome, {'callId', 'name', 'status'}, {'outcome', 'operationId'})
+            _closed(outcome, {'callId', 'name', 'status'},
+                    {'outcome', 'operationId', 'callIndex', 'signature', 'operationNamespace', 'operationKey'})
             _reference(outcome['callId'])
             _reference(outcome['name'])
             if type(outcome['status']) is not str or outcome['status'] not in {'completed', 'replayed', 'uncertain'}:
@@ -263,6 +265,13 @@ class TurnEvidence(_OwnedRecord):
                 raise ValueError('invalid effect outcome')
             if 'operationId' in outcome:
                 _reference(outcome['operationId'])
+            if 'callIndex' in outcome and (type(outcome['callIndex']) is not int or outcome['callIndex'] < 0):
+                raise ValueError('invalid tool index')
+            if 'signature' in outcome and (type(outcome['signature']) is not str or not re.fullmatch('[0-9a-f]{64}', outcome['signature'])):
+                raise ValueError('invalid effect signature')
+            if {'operationNamespace', 'operationKey'} & outcome.keys():
+                if not bounded_reference(outcome.get('operationNamespace')) or not bounded_reference(outcome.get('operationKey'), 256):
+                    raise ValueError('invalid logical effect address')
         if value['accounting'] is not None and type(value['accounting']) is not dict:
             raise ValueError('invalid accounting correlation')
         return cls._create(encoded)

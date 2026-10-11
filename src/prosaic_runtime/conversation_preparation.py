@@ -162,6 +162,9 @@ def prepare_turn(runtime, artifact, *, message, history=(), input_data=None, pol
         if policy.initial_tool is not None and policy.initial_tool not in names:
             raise ValueError('initial tool not granted')
         policy = replace(policy, max_input_bytes=min(policy.max_input_bytes, limits.max_input_bytes))
+        if (limits.max_evidence_bytes < 1024 + (policy.max_tool_calls * 1536 if names else 0) or
+                limits.max_metadata_bytes < 128 or limits.max_event_bytes < 128):
+            raise ValueError('terminal evidence headroom required')
     except (TypeError, ValueError, AttributeError, UnicodeError) as exc:
         raise TurnAdmissionError('invalidPolicy') from exc
     try:
@@ -205,3 +208,13 @@ def prepare_turn(runtime, artifact, *, message, history=(), input_data=None, pol
         raise
     except (ValueError, TypeError, KeyError, AttributeError, UnicodeError) as exc:
         raise TurnAdmissionError('invalidPolicy') from exc
+
+
+def execution_snapshot(runtime, material):
+    """Own the selected execution mapping before any invocation callbacks."""
+    profile = material['profile']
+    endpoint = replace(runtime.config.profiles[profile], **material['endpoint'])
+    tier = material['agent']['frontmatter'].get('model_tier')
+    config = replace(runtime.config, profiles={profile: endpoint}, default_profile=profile,
+                     routes={tier: profile} if tier is not None else {})
+    return config, dict(runtime._custom_tools), dict(runtime._cli_tools)

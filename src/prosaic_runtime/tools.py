@@ -179,12 +179,16 @@ def bounded_result(value, maximum):
 
 
 def execute_custom_tool(tool, raw_arguments, *, check_boundary, scope=None,
-                        deadline=None, cancelled=lambda: False, call_index=0, tool_journal=None):
+                        deadline=None, cancelled=lambda: False, call_index=0, tool_journal=None,
+                        on_completion=None):
     check_boundary()
     try:
         arguments = parse_arguments(raw_arguments, tool.parameters, tool.max_argument_bytes)
     except (TypeError, ValueError, RecursionError, OverflowError, ValidationError):
         return {'status': 'error', 'error': 'invalid_arguments'}
+    completion_signature = (hashlib.sha256(canonical_json({'tool_name': tool.name,
+        'tool_version': tool.version, 'arguments': arguments}).encode('utf-8')).hexdigest()
+        if on_completion is not None else None)
     context = None
     if tool.with_context:
         try:
@@ -225,24 +229,42 @@ def execute_custom_tool(tool, raw_arguments, *, check_boundary, scope=None,
         try:
             claim = tool_journal.claim(scope.operation_namespace, key, signature)
         except Exception:
+            if on_completion is not None:
+                on_completion(None, 'uncertain', operation_key=key, signature=signature)
             raise ToolEffectFailure('tool_journal_failed') from None
-        replay = validate_claim(claim, signature, tool.max_result_bytes)
+        try:
+            replay = validate_claim(claim, signature, tool.max_result_bytes)
+        except ToolEffectFailure:
+            if on_completion is not None:
+                on_completion(None, 'uncertain', operation_key=key, signature=signature)
+            raise
         if claim.state == 'uncertain':
+            if on_completion is not None:
+                on_completion(None, 'uncertain', operation_key=key, signature=signature)
             raise ToolEffectFailure('tool_effect_uncertain')
-        check_boundary()
         if claim.state == 'replay':
+            if on_completion is not None:
+                on_completion(replay, 'replayed', operation_key=key, signature=signature)
+            check_boundary()
             return replay
+        check_boundary()
         try:
             value = invoke(tool.handler, context)
             outcome = snapshot_outcome({'status': 'ok', 'result': value}, tool.max_result_bytes)
         except Exception:
             # Dispatch errors and unusable results cannot establish completion.
+            if on_completion is not None:
+                on_completion(None, 'uncertain', operation_key=key, signature=signature)
             raise ToolEffectFailure('tool_effect_uncertain') from None
         try:
             tool_journal.commit(scope.operation_namespace, key, claim.claim_token, deepcopy(outcome))
         except Exception:
+            if on_completion is not None:
+                on_completion(None, 'uncertain', operation_key=key, signature=signature)
             raise ToolEffectFailure('tool_journal_failed') from None
         # Commit valid completion before observing cancellation or deadline.
+        if on_completion is not None:
+            on_completion(outcome, 'completed', operation_key=key, signature=signature)
         check_boundary()
         return outcome
     try:
@@ -255,7 +277,8 @@ def execute_custom_tool(tool, raw_arguments, *, check_boundary, scope=None,
     except Exception:
         check_boundary()
         return {'status': 'error', 'error': 'handler_error'}
-    check_boundary()
     result = bounded_result(value, tool.max_result_bytes)
+    if on_completion is not None:
+        on_completion(result, signature=completion_signature)
     check_boundary()
     return result

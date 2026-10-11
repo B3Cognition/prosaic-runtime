@@ -110,3 +110,23 @@ def test_provider_failure_has_no_completed_assistant_history(turn_fixture, provi
         assert result.result.stderr == 'providerFailure'
         assert 'credentials' not in json.dumps(asdict(result.result))
         assert result.evidence.to_dict()['usageComplete'] is False
+
+
+@pytest.mark.parametrize('provider', ['openai-compatible', 'anthropic'])
+def test_repeated_native_ids_within_one_turn_are_remapped_per_exchange(turn_fixture, provider):
+    with turn_fixture(provider) as fx:
+        effects = []
+        fx.add_tool('lookup', lambda args: effects.append(1) or {})
+        for _ in range(2):
+            fx.queue_calls([{'id': 'call_0', 'name': 'lookup', 'arguments': '{}'}])
+        fx.queue_text('done')
+        result = execute(fx, message='Find')
+        assert result.result.exit_code == 0 and effects == [1, 1]
+        if provider == 'anthropic':
+            ids = [b['id'] for m in fx.requests[-1]['messages'] for b in m['content'] if b['type'] == 'tool_use']
+            outcomes = [b['tool_use_id'] for m in fx.requests[-1]['messages'] for b in m['content'] if b['type'] == 'tool_result']
+        else:
+            ids = [c['id'] for m in fx.requests[-1]['messages'] for c in m.get('tool_calls', [])]
+            outcomes = [m['tool_call_id'] for m in fx.requests[-1]['messages'] if m['role'] == 'tool']
+        assert len(ids) == len(set(ids)) == 2
+        assert outcomes == ids

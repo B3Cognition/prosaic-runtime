@@ -28,6 +28,7 @@ from .operation_context import InvocationScope
 from .tool_effects import admit_tool_effects, ToolEffectFailure
 from .telemetry import ObserverEmitter, observation_context, observe, execution_started
 from .budgets import InvocationBudget, InvocationBudgetExceeded
+from .turn_capture import TurnOutputExceeded
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -66,6 +67,8 @@ class _BoundedMixin:
         self._previous_usage_details = {}
         self._provider_attempts = 0
         self.turn_mode = False
+        self.turn_capture = None
+        self.known_usage_details = {}
 
     def check_boundary(self):
         check_cancelled()
@@ -84,14 +87,18 @@ class _BoundedMixin:
     def tool_execution_options(self):
         index = self.tool_call_index
         self.tool_call_index += 1
-        return dict(scope=self.scope, deadline=self.deadline, cancelled=self.cancelled,
-                    call_index=index, tool_journal=self.tool_journal)
+        options = dict(scope=self.scope, deadline=self.deadline, cancelled=self.cancelled,
+                       call_index=index, tool_journal=self.tool_journal)
+        if self.turn_capture is not None:
+            options['on_completion'] = lambda outcome, status='completed', **refs: self.turn_capture.record_tool_completion(
+                index, outcome, status, **refs)
+        return options
 
     def usage_details(self, parsed):
         details = super().usage_details(parsed)
         # Compatibility parsers omit invalid quantities. A strict cap must see
         # those fields before omission could turn them into trusted evidence.
-        if self.budget is not None and self.budget.policy.max_reported_tokens is not None:
+        if self.turn_mode or (self.budget is not None and self.budget.policy.max_reported_tokens is not None):
             usage = parsed.get('usage') if isinstance(parsed, dict) else None
             if usage is not None:
                 self._latest_usage_complete = _reported_usage(details) is not None
@@ -110,7 +117,12 @@ class _BoundedMixin:
     def parse_response_json(self, raw):
         if self.turn_mode:
             try:
-                return strict_json(raw)
+                from .conversation import encode_owned
+                value = strict_json(raw)
+                encode_owned(value, max_bytes=self._config.max_response_bytes,
+                             max_depth=self.turn_capture.limits.max_json_depth,
+                             max_nodes=self.turn_capture.limits.max_json_nodes)
+                return value
             except (ValueError, TypeError, UnicodeError, RecursionError):
                 raise InvalidToolRequest() from None
         if self.budget is not None and self.budget.policy.max_reported_tokens is not None:
@@ -131,6 +143,7 @@ class _BoundedMixin:
             self.usage_complete = False
         else:
             self.reported_token_usage = (self.reported_token_usage or 0) + usage
+            self.known_usage_details = _merge_token_usage_details(self.known_usage_details, details or {})
         if self.budget is not None:
             self.budget.record_usage(usage)
 
@@ -326,7 +339,7 @@ class ProsaicRuntime:
              operation_context=None, tool_journal=None):
         """Execute one bounded role-aware turn; streamed events are provisional."""
         from .conversation import PreparedTurn, ConversationMessage, TurnLimits, TurnAdmissionError
-        from .conversation_preparation import policy_from_document
+        from .conversation_preparation import policy_from_document, execution_snapshot
         from .turn_capture import TurnCapture
         if type(artifact) is PreparedTurn:
             if message is not None or history or input_data is not None or policy is not None or limits is not None or workspace is not None:
@@ -351,6 +364,7 @@ class ProsaicRuntime:
             approved = ProsaicArtifact.from_inspection(owned['agent'])
         policy = policy_from_document(owned['policy'])
         limits = TurnLimits(**owned['limits'])
+        snapshot = execution_snapshot(self, owned)
         scope = InvocationScope(str(uuid4())) if operation_context is None else operation_context
         # Static effect admission precedes callbacks/observation as well as I/O.
         try:
@@ -364,9 +378,11 @@ class ProsaicRuntime:
             try:
                 emitter.emit('invocation_started')
                 result = self._run_accounted(approved, cwd=owned['workspace'], policy=policy,
-                    on_event=on_event, cancelled=cancelled, env=env, context=context, accounting=accounting,
+                    on_event=lambda event: capture.event(event, on_event), cancelled=cancelled, env=env, context=context, accounting=accounting,
                     operation_context=scope, tool_journal=tool_journal,
-                    _turn_prepared=owned, _turn_capture=capture, _budget=budget)
+                    _turn_prepared=owned, _turn_capture=capture, _budget=budget, _turn_snapshot=snapshot)
+            except TurnAdmissionError:
+                raise
             except Exception:
                 # Callback failures can happen after a provider/tool effect.
                 # They must still return bounded evidence to the session host.
@@ -381,17 +397,18 @@ class ProsaicRuntime:
     def from_config(cls, path=None, **kwargs):
         return cls(RuntimeConfig.load(path), **kwargs)
 
-    def _preflight_names(self, names, cwd, policy, env, deadline):
+    def _preflight_names(self, names, cwd, policy, env, deadline, *, _snapshot=None):
+        config, custom, cli = _snapshot if _snapshot is not None else (self.config, self._custom_tools, self._cli_tools)
         checks = {}
         for name in sorted(names):
             error = None
-            if name not in BUILTIN_TOOLS and name not in self._custom_tools:
+            if name not in BUILTIN_TOOLS and name not in custom:
                 error = 'not_registered'
-            elif name not in self.config.allowed_tools or name not in policy.allowed_tools:
+            elif name not in config.allowed_tools or name not in policy.allowed_tools:
                 error = 'not_granted'
-            elif name in self._cli_tools:
+            elif name in cli:
                 try:
-                    self._cli_tools[name].preflight(cwd, policy, env, deadline, self.config.cli_sandbox)
+                    cli[name].preflight(cwd, policy, env, deadline, config.cli_sandbox)
                 except ToolExecutionError as exc:
                     error = exc.code
             else:
@@ -401,7 +418,7 @@ class ProsaicRuntime:
                 elif name in WRITE_TOOLS and not policy.write_paths:
                     error = 'missing_write_paths'
             checks[name] = {'status': 'error' if error else 'ok',
-                            'message': error or ('registration_available' if name not in self._cli_tools else 'cli_available')}
+                            'message': error or ('registration_available' if name not in cli else 'cli_available')}
         return {'ok': all(c['status'] == 'ok' for c in checks.values()), 'checks': checks,
                 'inference': False}
 
@@ -465,20 +482,24 @@ class ProsaicRuntime:
             cwd: str | Path = '.', policy: RunPolicy | None = None,
             on_event=None, cancelled=None, env=None,
             acquisition: str | ProsaicArtifact | None = None, context=None, accounting=None,
-            operation_context=None, tool_journal=None, _turn_prepared=None, _turn_capture=None, _budget=None) -> Result:
+            operation_context=None, tool_journal=None, _turn_prepared=None, _turn_capture=None, _budget=None,
+            _turn_snapshot=None) -> Result:
         policy = policy or RunPolicy(timeout_s=self.config.limits.timeout_s,
                                      max_tool_rounds=self.config.limits.max_tool_rounds)
         budget = _budget if _budget is not None else InvocationBudget(policy)
         recorder = accounting if accounting is not None else self.accounting
         enabled = recorder is not None or context is not None or self.context_defaults is not None
         resolved = resolve_context(context, getattr(recorder, 'defaults', None) or self.context_defaults) if enabled else None
+        if _turn_capture is not None and enabled:
+            _turn_capture.bind_accounting(resolved, recorder, policy.max_provider_requests,
+                                          policy.max_tool_calls if requested_tools(artifact.frontmatter.get('tools')) else 0)
         captures = []
         try:
             result = self._run(artifact, arguments, _recorder=recorder, _context=resolved,
                                _capture_ref=captures.append, _budget=budget, cwd=cwd, policy=policy, on_event=on_event,
                                cancelled=cancelled, env=env, acquisition=acquisition,
                                _operation_context=operation_context, _tool_journal=tool_journal,
-                               _turn_prepared=_turn_prepared, _turn_capture=_turn_capture)
+                               _turn_prepared=_turn_prepared, _turn_capture=_turn_capture, _turn_snapshot=_turn_snapshot)
         except AccountingError:
             result = Result(1, '', 'accounting persistence failed; do not retry the provider automatically',
                             metadata={'failure_reason': 'accounting_failed'})
@@ -497,14 +518,15 @@ class ProsaicRuntime:
             on_event=None, cancelled=None, env=None,
             acquisition: str | ProsaicArtifact | None = None, _recorder=None, _context=None, _capture_ref=None,
             _budget=None, _operation_context=None, _tool_journal=None,
-            _turn_prepared=None, _turn_capture=None) -> Result:
+            _turn_prepared=None, _turn_capture=None, _turn_snapshot=None) -> Result:
+        config, custom, cli = _turn_snapshot if _turn_snapshot is not None else (self.config, self._custom_tools, self._cli_tools)
         policy = policy or RunPolicy(timeout_s=self.config.limits.timeout_s,
                                      max_tool_rounds=self.config.limits.max_tool_rounds)
         started = time.monotonic()
         backend = None
         invocation_env = dict(os.environ if env is None else env)
         cli_context = (nullcontext() if cwd is None else cli_tool_context(
-            cwd, policy, invocation_env, started + policy.timeout_s, self.config.cli_sandbox))
+            cwd, policy, invocation_env, started + policy.timeout_s, config.cli_sandbox))
         with event_context(on_event, cancelled), cli_context:
             try:
                 check_cancelled()
@@ -516,20 +538,20 @@ class ProsaicRuntime:
                 artifact = ProsaicArtifact.from_inspection({
                     "id": artifact.id, "type": artifact.type, "frontmatter": artifact.frontmatter,
                     "body": artifact.body, "resources": list(artifact.resources)})
-                validate_execution_artifact(artifact, self.config)
+                validate_execution_artifact(artifact, config)
                 requested = requested_tools(artifact.frontmatter.get("tools"))
-                admit_tool_effects(self._custom_tools, requested, _operation_context, _tool_journal)
-                unsupported = requested - BUILTIN_TOOLS - self._custom_tools.keys()
+                admit_tool_effects(custom, requested, _operation_context, _tool_journal)
+                unsupported = requested - BUILTIN_TOOLS - custom.keys()
                 if unsupported:
                     raise ValueError(f"unsupported tools: {sorted(unsupported)}")
-                cli_requested = requested & self._cli_tools.keys()
+                cli_requested = requested & cli.keys()
                 if cli_requested:
                     report = self._preflight_names(cli_requested, str(Path(cwd).resolve()), policy,
-                                                   invocation_env, started + policy.timeout_s)
+                                                   invocation_env, started + policy.timeout_s, _snapshot=_turn_snapshot)
                     if not report['ok']:
                         failed = {name: check['message'] for name, check in report['checks'].items() if check['status'] != 'ok'}
                         raise ValueError(f'CLI tool preflight failed: {failed}')
-                tools = requested & self.config.allowed_tools & frozenset(policy.allowed_tools)
+                tools = requested & config.allowed_tools & frozenset(policy.allowed_tools)
                 if policy.initial_tool is not None and policy.initial_tool not in tools:
                     raise ValueError('initial_tool must be granted by prose, runtime and host')
                 if acquisition is not None:
@@ -544,14 +566,14 @@ class ProsaicRuntime:
                     acquisition = ProsaicArtifact.from_inspection({
                         'id': acquisition.id, 'type': acquisition.type, 'frontmatter': acquisition.frontmatter,
                         'body': acquisition.body, 'resources': list(acquisition.resources)})
-                    validate_execution_artifact(artifact, self.config, acquisition=acquisition)
+                    validate_execution_artifact(artifact, config, acquisition=acquisition)
                     acquisition_tools = requested_tools(acquisition.frontmatter.get('tools'))
                     if acquisition_tools - requested or policy.initial_tool not in acquisition_tools:
                         raise ValueError('acquisition requires an explicit initial_tool and tools granted by final prose, runtime and host')
                     acquisition_tools &= tools
                 tier = artifact.frontmatter.get("model_tier")
-                profile = self.config.routes[tier] if tier is not None else self.config.default_profile
-                endpoint = self.config.profiles[profile]
+                profile = config.routes[tier] if tier is not None else config.default_profile
+                endpoint = config.profiles[profile]
                 if _recorder is not None and _recorder.provider_id != endpoint.provider:
                     raise ValueError('accounting provider_id must match endpoint provider')
                 features = {**endpoint.features, "tool_calls": bool(tools), "max_tool_rounds": policy.max_tool_rounds,
@@ -581,11 +603,12 @@ class ProsaicRuntime:
                 execution_started()
                 emit("started", artifact_id=artifact.id, artifact_sha256=artifact.digest, profile=profile,
                      model=endpoint.model, tools=sorted(tools))
-                capture = Capture(_recorder, _context, artifact, profile, endpoint.provider) if _recorder is not None else None
+                capture = Capture(_recorder, _context, artifact, profile, endpoint.provider,
+                    on_observation=_turn_capture.record_provider_observation if _turn_capture is not None else None) if _recorder is not None else None
                 if capture is not None:
                     _capture_ref(capture)
                 backend_type = _BoundedAnthropicBackend if endpoint.provider == 'anthropic' else _BoundedBackend
-                backend = backend_type(endpoint, policy.max_input_bytes, self._custom_tools,
+                backend = backend_type(endpoint, policy.max_input_bytes, custom,
                                        started + policy.timeout_s, capture, _budget,
                                        _operation_context, _tool_journal, cancelled)
                 request = Invocation(str(Path(cwd).resolve()) if cwd is not None else None,
@@ -595,6 +618,7 @@ class ProsaicRuntime:
                 else:
                     from .openai_compatible import _feature_enabled
                     backend.turn_mode = True
+                    backend.turn_capture = _turn_capture
                     _turn_capture.backend = backend
                     result = backend._run_prompt_with_tools(request, metadata,
                         _feature_enabled(endpoint.features, 'streaming', default=True),
@@ -634,6 +658,8 @@ class ProsaicRuntime:
                     result.metadata.update(acquisition_id=acquisition.id, acquisition_sha256=acquisition.digest)
                 emit("completed", exit_code=result.exit_code, token_usage=result.token_usage)
                 return result
+            except TurnOutputExceeded:
+                return Result(1, '', 'outputLimit', metadata={'failure_reason': 'outputLimit'})
             except InvalidToolRequest:
                 return Result(1, '', 'invalidToolRequest',
                     token_usage=backend.reported_token_usage if backend and backend.usage_complete else None,
