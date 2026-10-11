@@ -20,3 +20,5 @@ include scripts/production_wheel_smoke.py
 include docs/production-acceptance.md
 include scripts/release_artifacts.py
 include docs/package-index.md
+include docs/conversations.md
+include scripts/conversation_wheel_smoke.py

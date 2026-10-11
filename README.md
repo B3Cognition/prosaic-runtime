@@ -1,10 +1,15 @@
 # Prosaic Runtime
 
-The **0.8.1** candidate is distributed as `b3-prosaic-runtime` and requires
+The **0.9.0** candidate is distributed as `b3-prosaic-runtime` and requires
 `b3-prosaic>=0.4,<0.5` from the package index. Python imports (`prosaic_runtime`)
 and the `prosaic-runtime` CLI remain unchanged. The separately installed recorder
-is `b3-prosaic-runtime-postgres` **0.2.1**, selecting Runtime 0.8.x.
+is `b3-prosaic-runtime-postgres` **0.3.0**, selecting Runtime 0.9.x.
 Candidates are not public index releases until the release qualification gate passes.
+
+The optional [stateless conversation API](docs/conversations.md) uses complete,
+bounded portable history through `prepare_turn()` and `turn()`. It requires no
+workspace for ordinary callbacks or tool-free turns. Durable sessions and human
+approval belong to Harness or the host; no graph framework is required.
 
 Runtime exports pure execution-artifact and native registry validation for host
 workflow admission and reuses Core's canonical in-memory artifact validation.

@@ -225,7 +225,32 @@ def validate_conversation_history(history, *, limits):
     if type(history) is not tuple or any(type(m) is not ConversationMessage for m in history):
         raise TurnAdmissionError('invalidHistory')
     try:
-        encoded = encode_owned([m.to_dict() for m in history], max_bytes=limits.max_history_bytes,
+        # Records already own canonical bytes. Reject aggregate amplification
+        # before decoding even a single caller-repeated record.
+        size = 2
+        if len(history) + 1 > limits.max_json_nodes:
+            raise ValueError('history node limit')
+        for index, message in enumerate(history):
+            if type(message._encoded) is not bytes:
+                raise ValueError('history encoding')
+            size += len(message._encoded) + (1 if index else 0)
+            if size > limits.max_history_bytes:
+                raise ValueError('history byte limit')
+        values, nodes = [], 1
+        for message in history:
+            value = message.to_dict()
+            stack = [value]
+            while stack:
+                child = stack.pop()
+                nodes += 1
+                if nodes > limits.max_json_nodes:
+                    raise ValueError('history node limit')
+                if type(child) is dict:
+                    stack.extend(child.values())
+                elif type(child) is list:
+                    stack.extend(child)
+            values.append(value)
+        encoded = encode_owned(values, max_bytes=limits.max_history_bytes,
                                max_depth=limits.max_json_depth, max_nodes=limits.max_json_nodes)
         owned = json.loads(encoded)
         _validate_groups(owned)

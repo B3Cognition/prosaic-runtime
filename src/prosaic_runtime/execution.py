@@ -192,6 +192,11 @@ class ExecutionBackend:
                     )
             if turn.tool_calls:
                 if initial_messages is not None:
+                    if turn.finish_reason not in {'tool_calls', 'tool_use'}:
+                        return CliRunResult(1, '', 'incomplete tool batch', token_usage=token_usage,
+                            metadata={'provider': self.name, 'streamed': turn.streamed,
+                                      'failure_reason': 'incomplete_response',
+                                      'token_usage_details': token_usage_details})
                     # No model field may opt into or out of this boundary.
                     turn.tool_calls = list(registry.validate_batch(turn.tool_calls))
                 if tools_disabled:

@@ -14,10 +14,10 @@ import pytest
 
 
 @pytest.mark.parametrize("project,name,version,package,dependency,licenses", [
-    (".", "b3-prosaic-runtime", "0.8.1", "prosaic_runtime", "b3-prosaic<0.5,>=0.4",
+    (".", "b3-prosaic-runtime", "0.9.0", "prosaic_runtime", "b3-prosaic<0.5,>=0.4",
      ("LICENSE", "LICENSE-MIT", "NOTICE.md")),
-    ("adapters/postgres", "b3-prosaic-runtime-postgres", "0.2.1", "prosaic_runtime_postgres",
-     "b3-prosaic-runtime<0.9,>=0.8", ("LICENSE", "LICENSE-MIT", "NOTICE.md")),
+    ("adapters/postgres", "b3-prosaic-runtime-postgres", "0.3.0", "prosaic_runtime_postgres",
+     "b3-prosaic-runtime<0.10,>=0.9", ("LICENSE", "LICENSE-MIT", "NOTICE.md")),
 ])
 def test_clean_archives_ship_index_metadata_and_owned_payloads(
         tmp_path, project, name, version, package, dependency, licenses):
@@ -88,3 +88,5 @@ def test_clean_archives_ship_index_metadata_and_owned_payloads(
         if project == ".":
             assert "docs/tool-effects.md" in entries
             assert "tests/support/tool_journal.py" in entries
+            assert "docs/conversations.md" in entries
+            assert "scripts/conversation_wheel_smoke.py" in entries

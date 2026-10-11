@@ -1,6 +1,8 @@
 # Prosaic Runtime PostgreSQL metering
 
-Install `b3-prosaic-runtime-postgres` 0.2.0 alongside `b3-prosaic-runtime` 0.8.x, which
+The `b3-prosaic-runtime-postgres` 0.3.0 candidate selects Runtime 0.9.x. Its
+accounting schema/data are unchanged; use explicit qualified wheels until index
+publication is verified. The released 0.2.1 adapter selects Runtime 0.8.x, which
 provides the accounting contracts. Install the Runtime wheel first. Runtime
 accounting off needs no database or psycopg dependency.
 
@@ -11,7 +13,7 @@ record the packaging correction. The Harness PostgreSQL store has a separate
 libpq 17 requirement and therefore a higher binary-package floor.
 
 Use a fresh virtual environment/image: legacy and renamed packages share imports.
-After publication, install with `python -m pip install 'b3-prosaic-runtime-postgres==0.2.0'`.
+For the released train, install with `python -m pip install 'b3-prosaic-runtime-postgres==0.2.1'`.
 Before publication use explicit qualified candidate wheels. The Python import
 remains `prosaic_runtime_postgres`; no stored accounting format changes are required.
 

@@ -196,6 +196,8 @@ def prepare_turn(runtime, artifact, *, message, history=(), input_data=None, pol
                     'policy': policy_document(policy), 'limits': asdict(limits), 'workspace': str(workspace) if workspace is not None else None,
                     'profile': profile, 'endpoint': endpoint_identity,
                     'tools': {n: runtime.tool_descriptors[n] for n in sorted(names - BUILTIN_TOOLS)},
+                    'cliSandbox': {'mode': runtime.config.cli_sandbox.mode,
+                                   'runtimeRoots': list(runtime.config.cli_sandbox.runtime_roots)},
                     'messages': messages}
         encoded = encode_owned(material, max_bytes=limits.max_history_bytes + limits.max_input_bytes * 2,
             max_depth=limits.max_json_depth, max_nodes=limits.max_json_nodes)
@@ -214,7 +216,9 @@ def execution_snapshot(runtime, material):
     """Own the selected execution mapping before any invocation callbacks."""
     profile = material['profile']
     endpoint = replace(runtime.config.profiles[profile], **material['endpoint'])
+    from .config import CliSandboxConfig
+    sandbox = CliSandboxConfig(material['cliSandbox']['mode'], tuple(material['cliSandbox']['runtimeRoots']))
     tier = material['agent']['frontmatter'].get('model_tier')
     config = replace(runtime.config, profiles={profile: endpoint}, default_profile=profile,
-                     routes={tier: profile} if tier is not None else {})
+                     routes={tier: profile} if tier is not None else {}, cli_sandbox=sandbox)
     return config, dict(runtime._custom_tools), dict(runtime._cli_tools)

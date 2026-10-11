@@ -82,7 +82,7 @@ class _BoundedMixin:
         return BoundedToolRegistry(builtin,
                                    self.custom_tools, metadata.get('allowed_tools', ()), self.check_boundary,
                                    self.budget.before_tool if self.budget is not None else None,
-                                   self.tool_execution_options)
+                                   self.tool_execution_options, index_all_calls=self.turn_mode)
 
     def tool_execution_options(self):
         index = self.tool_call_index
@@ -305,6 +305,7 @@ class _BoundedAnthropicBackend(_BoundedMixin, AnthropicBackend):
 class ProsaicRuntime:
     capabilities = frozenset({'conformance_v1', 'invocation_budgets_v1', 'observer_v1', 'accounting_v1', 'read_receipts_v1', 'initial_tool_v1', 'initial_tool_enforcement_v1', 'acquisition_v1', 'custom_tools_v1', 'cli_tools_v1', 'cli_sandbox_v1'})
     capabilities |= frozenset({'tool_context_v1', 'tool_journal_v1'})
+    capabilities |= frozenset({'conversation_turn_v1'})
     def __init__(self, config: RuntimeConfig, *, source=".prosaic", executable="prosaic", custom_tools=None,
                  accounting=None, context_defaults=None):
         self.config = config
@@ -372,6 +373,17 @@ class ProsaicRuntime:
         except (ValueError, TypeError, AttributeError) as exc:
             raise TurnAdmissionError('invalidPolicy') from exc
         capture, budget = TurnCapture(owned['message'], scope, limits), InvocationBudget(policy)
+        # Freeze attribution and the destination before any host observation.
+        recorder = accounting if accounting is not None else self.accounting
+        enabled = recorder is not None or context is not None or self.context_defaults is not None
+        try:
+            resolved = resolve_context(context, getattr(recorder, 'defaults', None) or self.context_defaults) if enabled else None
+            if resolved is not None:
+                from .accounting import ResolvedContext
+                resolved = ResolvedContext.from_dict(resolved.to_dict())
+        except (ValueError, TypeError, AttributeError):
+            raise TurnAdmissionError('invalidPolicy') from None
+        frozen_accounting = (recorder, resolved, enabled)
         emitter = ObserverEmitter(observer, source='runtime', scope=scope)
         started, result = time.monotonic(), None
         with observation_context(emitter, self._custom_tools):
@@ -380,7 +392,8 @@ class ProsaicRuntime:
                 result = self._run_accounted(approved, cwd=owned['workspace'], policy=policy,
                     on_event=lambda event: capture.event(event, on_event), cancelled=cancelled, env=env, context=context, accounting=accounting,
                     operation_context=scope, tool_journal=tool_journal,
-                    _turn_prepared=owned, _turn_capture=capture, _budget=budget, _turn_snapshot=snapshot)
+                    _turn_prepared=owned, _turn_capture=capture, _budget=budget, _turn_snapshot=snapshot,
+                    _turn_accounting=frozen_accounting)
             except TurnAdmissionError:
                 raise
             except Exception:
@@ -483,13 +496,16 @@ class ProsaicRuntime:
             on_event=None, cancelled=None, env=None,
             acquisition: str | ProsaicArtifact | None = None, context=None, accounting=None,
             operation_context=None, tool_journal=None, _turn_prepared=None, _turn_capture=None, _budget=None,
-            _turn_snapshot=None) -> Result:
+            _turn_snapshot=None, _turn_accounting=None) -> Result:
         policy = policy or RunPolicy(timeout_s=self.config.limits.timeout_s,
                                      max_tool_rounds=self.config.limits.max_tool_rounds)
         budget = _budget if _budget is not None else InvocationBudget(policy)
-        recorder = accounting if accounting is not None else self.accounting
-        enabled = recorder is not None or context is not None or self.context_defaults is not None
-        resolved = resolve_context(context, getattr(recorder, 'defaults', None) or self.context_defaults) if enabled else None
+        if _turn_accounting is None:
+            recorder = accounting if accounting is not None else self.accounting
+            enabled = recorder is not None or context is not None or self.context_defaults is not None
+            resolved = resolve_context(context, getattr(recorder, 'defaults', None) or self.context_defaults) if enabled else None
+        else:
+            recorder, resolved, enabled = _turn_accounting
         if _turn_capture is not None and enabled:
             _turn_capture.bind_accounting(resolved, recorder, policy.max_provider_requests,
                                           policy.max_tool_calls if requested_tools(artifact.frontmatter.get('tools')) else 0)

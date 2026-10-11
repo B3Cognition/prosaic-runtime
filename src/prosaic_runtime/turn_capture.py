@@ -215,6 +215,10 @@ class TurnCapture:
         evidence = TurnEvidence.from_dict(document)
         metadata = {k: v for k, v in result.metadata.items() if k in {
             'provider', 'finish_reason', 'streamed', 'token_usage_details', 'invocation_budgets_v1'}}
+        if (type(metadata.get('finish_reason')) is not str or metadata['finish_reason'] not in {
+                'stop', 'tool_calls', 'length', 'content_filter', 'end_turn', 'tool_use',
+                'max_tokens', 'stop_sequence', 'refusal', 'pause_turn'}):
+            metadata.pop('finish_reason', None)
         metadata['invocation_budgets_v1'] = {'provider_requests': budget.provider_requests,
             'tool_calls': budget.tool_calls, 'reported_tokens': known.get('totalTokens', 0), 'usage_complete': complete}
         if code is not None:

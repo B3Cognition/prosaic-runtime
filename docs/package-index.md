@@ -107,7 +107,13 @@ ecosystem code and native service/legacy-upgrade gates before publication.
 Publish Core first, Runtime and its recorder second, Harness and its store third,
 and then adopt the downloaded SDK bytes in the lab.
 
-Tag the qualified source `v0.8.1` and explicitly dispatch `Publish SDK` on that tag
+The conversation candidate train is Runtime 0.9.0 and recorder 0.3.0. It preserves
+Core 0.4.1 and existing recorder data/schema, adds the installed
+`conversation_wheel_smoke.py` gate, and selects Runtime 0.9.x for the adapter.
+Use explicit qualified wheels until the index versions have been verified.
+See [conversation usage and limits](conversations.md).
+
+Tag the qualified source `v0.9.0` and explicitly dispatch `Publish SDK` on that tag
 with `candidate_run_id` naming its successful exact-source candidate, the same
 Core run/commit inputs, and `publish=true`. Promotion downloads original qualified
 bytes and reruns required checks; it never rebuilds the publication payload.

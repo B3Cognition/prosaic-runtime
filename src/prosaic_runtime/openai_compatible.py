@@ -671,6 +671,7 @@ class OpenAICompatibleBackend(ExecutionBackend):
                 stream_preview.append(content)
             return None
 
+        terminal_observed = False
         while True:
             check_cancelled()
             if time.monotonic() > deadline:
@@ -698,6 +699,7 @@ class OpenAICompatibleBackend(ExecutionBackend):
                     return maybe_result
                 from .conformance import _record_stream_terminal
                 _record_stream_terminal()
+                terminal_observed = True
                 break
             event_data.append(data)
             if _complete_json_event(event_data):
@@ -710,6 +712,12 @@ class OpenAICompatibleBackend(ExecutionBackend):
             if maybe_result is not None:
                 return maybe_result
         stream_preview.flush()
+
+        if self.strict_conversation_calls() and (not terminal_observed or finish_reason not in {
+                'stop', 'tool_calls', 'length', 'content_filter'}):
+            return CliRunResult(1, '', 'incomplete stream', metadata={
+                'provider': self.name, 'streamed': True, 'failure_reason': 'incomplete_response',
+                'token_usage_details': token_usage_details})
 
         return _OpenAICompletionTurn(
             text="".join(text_parts),
