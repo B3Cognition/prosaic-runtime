@@ -5,7 +5,7 @@ from typing import Mapping
 
 @dataclass(frozen=True)
 class Invocation:
-    cwd: str
+    cwd: str | None
     prompt: str
     env: Mapping[str, str]
     timeout_s: float

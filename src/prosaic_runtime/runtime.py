@@ -1,6 +1,6 @@
 """Public Prosaic-only invocation API."""
 from dataclasses import replace
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 import os
 import time
@@ -20,7 +20,7 @@ from .policy import RunPolicy, requested_tools, BUILTIN_TOOLS
 from .types import Invocation, Result
 from .tools import validate_custom_tools, custom_descriptors, ToolDeadlineExceeded, ToolExecutionError
 from .cli_tools import load_cli_tools, cli_tool_context
-from .tool_registry import BoundedToolRegistry
+from .tool_registry import BoundedToolRegistry, DisabledBuiltinRegistry
 from .accounting import AccountingError, resolve_context
 from .accounting_capture import Capture, InvalidEvidence, strict_json
 from .http_bounds import LimitExceeded, set_response_timeout, BoundedNativeStream
@@ -61,6 +61,7 @@ class _BoundedMixin:
         self._latest_usage_complete = None
         self._previous_usage_details = {}
         self._provider_attempts = 0
+        self.turn_mode = False
 
     def check_boundary(self):
         check_cancelled()
@@ -70,7 +71,8 @@ class _BoundedMixin:
             raise ToolDeadlineExceeded('invocation deadline exceeded')
 
     def make_registry(self, cwd, features, metadata):
-        return BoundedToolRegistry(super().make_registry(cwd, features, metadata),
+        builtin = DisabledBuiltinRegistry() if cwd is None else super().make_registry(cwd, features, metadata)
+        return BoundedToolRegistry(builtin,
                                    self.custom_tools, metadata.get('allowed_tools', ()), self.check_boundary,
                                    self.budget.before_tool if self.budget is not None else None,
                                    self.tool_execution_options)
@@ -236,7 +238,7 @@ class _BoundedMixin:
         native_failure = (isinstance(turn, Result) and self._config.provider == 'anthropic' and
             (attempted or _reported_usage(turn.metadata.get('token_usage_details')) is not None))
         strict_attempt_failure = (isinstance(turn, Result) and self.budget is not None and
-            self.budget.policy.max_reported_tokens is not None and
+            (self.turn_mode or self.budget.policy.max_reported_tokens is not None) and
             attempted)
         if not isinstance(turn, Result) or native_failure or strict_attempt_failure:
             details = turn.metadata.get('token_usage_details') if isinstance(turn, Result) else turn.token_usage_details
@@ -294,6 +296,63 @@ class ProsaicRuntime:
         from .conversation_preparation import prepare_turn
         return prepare_turn(self, artifact, message=message, history=history,
                             input_data=input_data, policy=policy, limits=limits, workspace=workspace)
+
+    def turn(self, artifact, *, message=None, history=(), input_data=None,
+             policy=None, limits=None, workspace=None, on_event=None, cancelled=None,
+             env=None, context=None, accounting=None, observer=None,
+             operation_context=None, tool_journal=None):
+        """Execute one bounded role-aware turn; streamed events are provisional."""
+        from .conversation import PreparedTurn, ConversationMessage, TurnLimits, TurnAdmissionError
+        from .conversation_preparation import policy_from_document
+        from .turn_capture import TurnCapture
+        if type(artifact) is PreparedTurn:
+            if message is not None or history or input_data is not None or policy is not None or limits is not None or workspace is not None:
+                raise TurnAdmissionError('invalidPolicy')
+            try:
+                owned = json.loads(artifact._encoded)
+                approved = ProsaicArtifact.from_inspection(owned['agent'])
+                prepared = self.prepare_turn(approved, message=owned['message'],
+                    history=tuple(ConversationMessage.from_dict(m) for m in owned['history']),
+                    input_data=owned['inputData'], policy=policy_from_document(owned['policy']),
+                    limits=TurnLimits(**owned['limits']), workspace=owned['workspace'])
+                if (artifact.encoding_version != prepared.encoding_version or
+                        artifact.context_identity != prepared.context_identity or
+                        artifact.input_bytes != prepared.input_bytes or artifact._encoded != prepared._encoded):
+                    raise TurnAdmissionError('bindingMismatch')
+            except (ValueError, TypeError, KeyError, AttributeError, UnicodeError) as exc:
+                raise TurnAdmissionError('bindingMismatch') from exc
+        else:
+            prepared = self.prepare_turn(artifact, message=message, history=history,
+                input_data=input_data, policy=policy, limits=limits, workspace=workspace)
+            owned = json.loads(prepared._encoded)
+            approved = ProsaicArtifact.from_inspection(owned['agent'])
+        policy = policy_from_document(owned['policy'])
+        limits = TurnLimits(**owned['limits'])
+        scope = InvocationScope(str(uuid4())) if operation_context is None else operation_context
+        # Static effect admission precedes callbacks/observation as well as I/O.
+        try:
+            admit_tool_effects(self._custom_tools, requested_tools(approved.frontmatter.get('tools')), scope, tool_journal)
+        except (ValueError, TypeError, AttributeError) as exc:
+            raise TurnAdmissionError('invalidPolicy') from exc
+        capture, budget = TurnCapture(owned['message'], scope, limits), InvocationBudget(policy)
+        emitter = ObserverEmitter(observer, source='runtime', scope=scope)
+        started, result = time.monotonic(), None
+        with observation_context(emitter, self._custom_tools):
+            try:
+                emitter.emit('invocation_started')
+                result = self._run_accounted(approved, cwd=owned['workspace'], policy=policy,
+                    on_event=on_event, cancelled=cancelled, env=env, context=context, accounting=accounting,
+                    operation_context=scope, tool_journal=tool_journal,
+                    _turn_prepared=owned, _turn_capture=capture, _budget=budget)
+            except Exception:
+                # Callback failures can happen after a provider/tool effect.
+                # They must still return bounded evidence to the session host.
+                result = Result(1, '', 'critical_hook_error', metadata={'failure_reason': 'critical_hook_error'})
+            finally:
+                emitter.emit('invocation_completed', outcome='completed' if result is not None and result.exit_code == 0 else 'execution_failure',
+                    duration_ms=(time.monotonic() - started) * 1000,
+                    exit_code=result.exit_code if result is not None else None)
+        return capture.finish(result, budget)
 
     @classmethod
     def from_config(cls, path=None, **kwargs):
@@ -383,10 +442,10 @@ class ProsaicRuntime:
             cwd: str | Path = '.', policy: RunPolicy | None = None,
             on_event=None, cancelled=None, env=None,
             acquisition: str | ProsaicArtifact | None = None, context=None, accounting=None,
-            operation_context=None, tool_journal=None) -> Result:
+            operation_context=None, tool_journal=None, _turn_prepared=None, _turn_capture=None, _budget=None) -> Result:
         policy = policy or RunPolicy(timeout_s=self.config.limits.timeout_s,
                                      max_tool_rounds=self.config.limits.max_tool_rounds)
-        budget = InvocationBudget(policy)
+        budget = _budget if _budget is not None else InvocationBudget(policy)
         recorder = accounting if accounting is not None else self.accounting
         enabled = recorder is not None or context is not None or self.context_defaults is not None
         resolved = resolve_context(context, getattr(recorder, 'defaults', None) or self.context_defaults) if enabled else None
@@ -395,7 +454,8 @@ class ProsaicRuntime:
             result = self._run(artifact, arguments, _recorder=recorder, _context=resolved,
                                _capture_ref=captures.append, _budget=budget, cwd=cwd, policy=policy, on_event=on_event,
                                cancelled=cancelled, env=env, acquisition=acquisition,
-                               _operation_context=operation_context, _tool_journal=tool_journal)
+                               _operation_context=operation_context, _tool_journal=tool_journal,
+                               _turn_prepared=_turn_prepared, _turn_capture=_turn_capture)
         except AccountingError:
             result = Result(1, '', 'accounting persistence failed; do not retry the provider automatically',
                             metadata={'failure_reason': 'accounting_failed'})
@@ -413,14 +473,16 @@ class ProsaicRuntime:
             cwd: str | Path = ".", policy: RunPolicy | None = None,
             on_event=None, cancelled=None, env=None,
             acquisition: str | ProsaicArtifact | None = None, _recorder=None, _context=None, _capture_ref=None,
-            _budget=None, _operation_context=None, _tool_journal=None) -> Result:
+            _budget=None, _operation_context=None, _tool_journal=None,
+            _turn_prepared=None, _turn_capture=None) -> Result:
         policy = policy or RunPolicy(timeout_s=self.config.limits.timeout_s,
                                      max_tool_rounds=self.config.limits.max_tool_rounds)
         started = time.monotonic()
         backend = None
         invocation_env = dict(os.environ if env is None else env)
-        with event_context(on_event, cancelled), cli_tool_context(
-            cwd, policy, invocation_env, started + policy.timeout_s, self.config.cli_sandbox):
+        cli_context = (nullcontext() if cwd is None else cli_tool_context(
+            cwd, policy, invocation_env, started + policy.timeout_s, self.config.cli_sandbox))
+        with event_context(on_event, cancelled), cli_context:
             try:
                 check_cancelled()
                 if isinstance(artifact, str):
@@ -503,9 +565,18 @@ class ProsaicRuntime:
                 backend = backend_type(endpoint, policy.max_input_bytes, self._custom_tools,
                                        started + policy.timeout_s, capture, _budget,
                                        _operation_context, _tool_journal, cancelled)
-                result = backend.run_prompt(Invocation(
-                    str(Path(cwd).resolve()), prompt, invocation_env, remaining,
-                    {"prompt_metadata": metadata}))
+                request = Invocation(str(Path(cwd).resolve()) if cwd is not None else None,
+                                     prompt, invocation_env, remaining, {"prompt_metadata": metadata})
+                if _turn_prepared is None:
+                    result = backend.run_prompt(request)
+                else:
+                    from .openai_compatible import _feature_enabled
+                    backend.turn_mode = True
+                    _turn_capture.backend = backend
+                    result = backend._run_prompt_with_tools(request, metadata,
+                        _feature_enabled(endpoint.features, 'streaming', default=True),
+                        initial_messages=_turn_prepared['messages'],
+                        execution_options={'full_history': True}, turn_capture=_turn_capture)
                 # The OpenAI text-only path returns Result directly and bypasses
                 # _post_chat_turn. Account its terminal usage once, after Capture
                 # has persisted the response context, preserving the returned text.

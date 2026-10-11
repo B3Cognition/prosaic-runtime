@@ -3,6 +3,16 @@ import json
 from .tools import execute_custom_tool
 
 
+class DisabledBuiltinRegistry:
+    """No root or filesystem mapping exists for a workspace-free turn."""
+    def openai_tools(self):
+        return []
+
+    def execute_message(self, tool_call):
+        return {'role': 'tool', 'tool_call_id': str(tool_call.get('id') or ''),
+                'content': json.dumps({'status': 'error', 'error': 'not_granted'})}
+
+
 class BoundedToolRegistry:
     def __init__(self, builtin_registry, custom_tools, allowed_tools, check_boundary, before_tool=None,
                  execution_options=None):

@@ -15,6 +15,7 @@ class ExecutionBackend:
         request: CliRunRequest,
         prompt_metadata: Mapping[str, object],
         streaming: bool,
+        *, initial_messages=None, execution_options=None, turn_capture=None,
     ) -> CliRunResult:
         from .openai_compatible import (
             _NO_PROGRESS_FINAL_GUIDANCE,
@@ -32,12 +33,16 @@ class ExecutionBackend:
         assert llm.base_url is not None
         assert llm.model is not None
         registry = self.make_registry(
-            Path(request.cwd),
+            Path(request.cwd) if request.cwd is not None else None,
             llm.features,
             prompt_metadata,
         )
-        transcript = self.open_transcript(request)
-        messages: list[dict[str, object]] = [
+        if initial_messages is not None:
+            from .openai_compatible_transcript import ProviderTranscript
+            transcript = ProviderTranscript(None)
+        else:
+            transcript = self.open_transcript(request)
+        messages: list[dict[str, object]] = initial_messages if initial_messages is not None else [
             {"role": "system", "content": self.tool_guidance()},
             {"role": "user", "content": request.prompt}
         ]
@@ -263,6 +268,8 @@ class ExecutionBackend:
                     f"rounds={tool_rounds}/{max_tool_rounds} "
                     f"calls_total={tool_call_count}"
                 )
+                if turn_capture is not None:
+                    turn_capture.assistant(turn)
                 messages.append(_assistant_tool_message(turn))
                 tool_signature = _tool_round_signature(turn.tool_calls)
                 if tool_signature == previous_tool_signature:
@@ -287,6 +294,8 @@ class ExecutionBackend:
                     emit("tool_started", name=tool_name, call_id=call_id, turn=turn_number,
                          **self.tool_event_metadata(tool_name))
                     tool_message = registry.execute_message(tool_call)
+                    if turn_capture is not None:
+                        turn_capture.tool(tool_call, tool_message)
                     tool_payload = json.loads(tool_message["content"])
                     from .conformance import _record_tool_result
                     _record_tool_result(tool_name, tool_payload)
@@ -415,6 +424,8 @@ class ExecutionBackend:
                     metadata,
                     str(incomplete),
                 )
+            if turn_capture is not None:
+                turn_capture.assistant(turn)
             if turn.text and not operator_previewed:
                 print(turn.text, flush=True)
             _progress(
