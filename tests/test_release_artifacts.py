@@ -506,3 +506,23 @@ def test_runtime_cannot_select_a_downstream_upstream(release_tool, tmp_path):
         release_tool.prepare_upstream(tmp_path, tmp_path / 'wheels', [
             ('B3Cognition/prosaic-runtime', '123', 'a' * 40,
              {'b3-prosaic-runtime': '0.8.1'})])
+
+
+def test_index_selection_leaves_unselected_distributions_unpublished(release_tool, built_release, monkeypatch):
+    output, receipt = built_release
+    mixed = dict(receipt, distributions=receipt['distributions'] +
+                 [{'name': 'b3-adapter-fixture', 'version': '1.0.0'}])
+    monkeypatch.setattr(release_tool, 'verify_receipt', lambda *args: mixed)
+    requested = []
+    def fetch(url):
+        requested.append(url)
+        return None
+    assert release_tool.check_index(output / 'artifacts', receipt['source_commit'],
+        distributions=['b3-release-fixture'], allow_missing=True, fetch=fetch) == 'publish_required'
+    assert requested == ['https://pypi.org/pypi/b3-release-fixture/1.0.0/json']
+    with pytest.raises(release_tool.ReleaseError, match='selection'):
+        release_tool.check_index(output / 'artifacts', receipt['source_commit'],
+                                 distributions=['unknown'], fetch=fetch)
+    with pytest.raises(release_tool.ReleaseError, match='selection'):
+        release_tool.check_index(output / 'artifacts', receipt['source_commit'],
+                                 distributions=[], fetch=fetch)

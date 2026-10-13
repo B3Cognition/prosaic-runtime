@@ -1,6 +1,15 @@
 # Changelog
 
-## Unreleased
+## 0.9.1 — 2026-10-13
+
+- Add versioned `RuntimeAdapter` for trusted host projections and normalization
+  around an unmodified Runtime. Execution callbacks can only reduce authority.
+- Share deadline, request/tool allowances and reported-token evidence across all
+  adapter attempts; preserve known partial and unknown usage and callback failures.
+- Ordinary execution, conversation APIs, accounting and PostgreSQL remain unchanged.
+- Publish only the SDK distribution; retain adapter compatibility qualification.
+
+## Unreleased historical candidates
 
 - Prepare Runtime 0.8.1 and the paired PostgreSQL recorder 0.2.1 patch candidates.
 - Recheck cancellation and absolute deadlines after observer/accounting preparation,

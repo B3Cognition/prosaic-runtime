@@ -443,10 +443,16 @@ def fetch_public(url):
         raise
 
 
-def check_index(directory, commit, *, allow_missing=False, fetch=fetch_public):
+def check_index(directory, commit, *, allow_missing=False, fetch=fetch_public, distributions=None):
     receipt = verify_receipt(directory, commit)
+    available = {item['name'] for item in receipt['distributions']}
+    selected = available if distributions is None else set(distributions)
+    if not selected or not selected.issubset(available):
+        raise ReleaseError('invalid index distribution selection')
     missing = False
     for distribution in receipt['distributions']:
+        if distribution['name'] not in selected:
+            continue
         name, version = distribution['name'], distribution['version']
         if not re.fullmatch('[A-Za-z0-9_.-]+', name) or not re.fullmatch('[A-Za-z0-9_.+-]+', version):
             raise ReleaseError('invalid index package identity')
@@ -561,6 +567,7 @@ def main():
             command.add_argument('--require', action='append', required=True)
         elif action == 'index-check':
             command.add_argument('--allow-missing', action='store_true')
+            command.add_argument('--distribution', action='append')
     args = parser.parse_args()
     if args.action == 'build':
         expected = dict(value.split('=', 1) for value in args.expect)
@@ -574,7 +581,8 @@ def main():
         command = args.command[1:] if args.command[:1] == ['--'] else args.command
         result = qualify(args.directory, args.commit, args.label, command, junit=args.junit)
     elif args.action == 'index-check':
-        result = check_index(args.directory, args.commit, allow_missing=args.allow_missing)
+        result = check_index(args.directory, args.commit, allow_missing=args.allow_missing,
+                             distributions=args.distribution)
     else:
         result = require_qualification(args.directory, args.commit, args.require)
     print(json.dumps(result, sort_keys=True))
