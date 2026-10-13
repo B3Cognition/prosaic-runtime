@@ -1,5 +1,5 @@
 """Opaque host correlation, independent of billing attribution."""
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, field
 from collections.abc import Callable
 import unicodedata
 
@@ -37,3 +37,25 @@ class ToolExecutionContext:
     deadline: float
     cancelled: Callable
     operation_key: str | None = None
+
+    accounting_context: object = field(default=None, repr=False)
+
+    def child_context(self, *, invocation_id, run_id=None, step_id=None):
+        """Derive nested attribution from the actual resolved parent, never tool arguments."""
+        from .accounting import ResolvedContext
+        if type(self.accounting_context) is not ResolvedContext:
+            raise ValueError('accounted parent context required')
+        return self.accounting_context.child(invocation_id=invocation_id,run_id=run_id,step_id=step_id)
+
+    def remaining_timeout(self, maximum):
+        """Narrow a child's timeout to this tool's original absolute deadline."""
+        import math
+        import time
+        from .events import Cancelled
+        from .tools import ToolDeadlineExceeded
+        if type(maximum) not in (int,float) or not math.isfinite(maximum) or maximum<=0:
+            raise ValueError('invalid timeout')
+        if self.cancelled(): raise Cancelled()
+        remaining=self.deadline-time.monotonic()
+        if remaining<=0: raise ToolDeadlineExceeded('tool deadline exceeded')
+        return min(maximum,remaining)

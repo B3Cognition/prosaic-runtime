@@ -29,6 +29,7 @@ from .tool_effects import admit_tool_effects, ToolEffectFailure
 from .telemetry import ObserverEmitter, observation_context, observe, execution_started
 from .budgets import InvocationBudget, InvocationBudgetExceeded
 from .turn_capture import TurnOutputExceeded
+from .execution_budget import active_budgets, check_budgets, reserve_dispatch, record_shared_usage
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -55,7 +56,8 @@ class _BoundedMixin:
         self.usage_complete = True
         self.turns = 0
         self.custom_tools = custom_tools
-        self.deadline = deadline
+        self.execution_budgets = active_budgets()
+        self.deadline = min([deadline, *(b.deadline for b in self.execution_budgets)])
         self.capture = capture
         self.budget = budget
         self.scope, self.tool_journal = scope, tool_journal
@@ -66,11 +68,13 @@ class _BoundedMixin:
         self._latest_usage_complete = None
         self._previous_usage_details = {}
         self._provider_attempts = 0
+        self.accounting_context = None
         self.turn_mode = False
         self.turn_capture = None
         self.known_usage_details = {}
 
     def check_boundary(self):
+        check_budgets(self.execution_budgets)
         check_cancelled()
         from .conformance import _check_suite_deadline
         _check_suite_deadline()
@@ -81,14 +85,23 @@ class _BoundedMixin:
         builtin = DisabledBuiltinRegistry() if cwd is None else super().make_registry(cwd, features, metadata)
         return BoundedToolRegistry(builtin,
                                    self.custom_tools, metadata.get('allowed_tools', ()), self.check_boundary,
-                                   self.budget.before_tool if self.budget is not None else None,
+                                   self.before_tool_dispatch,
                                    self.tool_execution_options, index_all_calls=self.turn_mode)
+
+    def before_tool_dispatch(self):
+        if self.budget is not None:
+            self.budget._check_reported_allowance()
+            cap=self.budget.policy.max_tool_calls
+            if cap is not None and self.budget.tool_calls>=cap:
+                raise InvocationBudgetExceeded('tool_call_limit')
+        reserve_dispatch(self.execution_budgets,tool=True)
+        if self.budget is not None: self.budget.before_tool()
 
     def tool_execution_options(self):
         index = self.tool_call_index
         self.tool_call_index += 1
         options = dict(scope=self.scope, deadline=self.deadline, cancelled=self.cancelled,
-                       call_index=index, tool_journal=self.tool_journal)
+                       call_index=index, tool_journal=self.tool_journal, accounting_context=self.accounting_context)
         if self.turn_capture is not None:
             options['on_completion'] = lambda outcome, status='completed', **refs: self.turn_capture.record_tool_completion(
                 index, outcome, status, **refs)
@@ -98,7 +111,8 @@ class _BoundedMixin:
         details = super().usage_details(parsed)
         # Compatibility parsers omit invalid quantities. A strict cap must see
         # those fields before omission could turn them into trusted evidence.
-        if self.turn_mode or (self.budget is not None and self.budget.policy.max_reported_tokens is not None):
+        if (self.turn_mode or any(b._token_cap is not None for b in self.execution_budgets)
+                or (self.budget is not None and self.budget.policy.max_reported_tokens is not None)):
             usage = parsed.get('usage') if isinstance(parsed, dict) else None
             if usage is not None:
                 self._latest_usage_complete = _reported_usage(details) is not None
@@ -125,7 +139,8 @@ class _BoundedMixin:
                 return value
             except (ValueError, TypeError, UnicodeError, RecursionError):
                 raise InvalidToolRequest() from None
-        if self.budget is not None and self.budget.policy.max_reported_tokens is not None:
+        if (any(b._token_cap is not None for b in self.execution_budgets)
+                or (self.budget is not None and self.budget.policy.max_reported_tokens is not None)):
             try:
                 return strict_json(raw)
             except InvalidEvidence:
@@ -144,8 +159,12 @@ class _BoundedMixin:
         else:
             self.reported_token_usage = (self.reported_token_usage or 0) + usage
             self.known_usage_details = _merge_token_usage_details(self.known_usage_details, details or {})
+        local_error=None
         if self.budget is not None:
-            self.budget.record_usage(usage)
+            try: self.budget.record_usage(usage)
+            except InvocationBudgetExceeded as exc: local_error=exc
+        record_shared_usage(self.execution_budgets,usage)
+        if local_error is not None: raise local_error
 
     def tool_call_summary(self, tool_call):
         function = tool_call.get('function')
@@ -168,6 +187,8 @@ class _BoundedMixin:
     def before_http_dispatch(self, timeout):
         self.check_boundary()
         timeout = min(timeout, self.deadline - time.monotonic())
+        if self.budget is not None: self.budget._check_provider()
+        reserve_dispatch(self.execution_budgets)
         if self.budget is not None:
             self.budget.before_provider()
         self._provider_attempts += 1
@@ -178,6 +199,7 @@ class _BoundedMixin:
         self.check_boundary()
         if self.budget is not None:
             self.budget._check_provider()
+        reserve_dispatch(self.execution_budgets,reserve=False)
         self._turn_usage_unknown = False
         self._latest_usage_complete = None
         self._previous_usage_details = {}
@@ -274,7 +296,7 @@ class _BoundedMixin:
         native_failure = (isinstance(turn, Result) and self._config.provider == 'anthropic' and
             (attempted or _reported_usage(turn.metadata.get('token_usage_details')) is not None))
         strict_attempt_failure = (isinstance(turn, Result) and self.budget is not None and
-            (self.turn_mode or self.budget.policy.max_reported_tokens is not None) and
+            (self.turn_mode or self.execution_budgets or self.budget.policy.max_reported_tokens is not None) and
             attempted)
         if not isinstance(turn, Result) or native_failure or strict_attempt_failure:
             details = turn.metadata.get('token_usage_details') if isinstance(turn, Result) else turn.token_usage_details
@@ -627,6 +649,7 @@ class ProsaicRuntime:
                 backend = backend_type(endpoint, policy.max_input_bytes, custom,
                                        started + policy.timeout_s, capture, _budget,
                                        _operation_context, _tool_journal, cancelled)
+                backend.accounting_context = _context
                 request = Invocation(str(Path(cwd).resolve()) if cwd is not None else None,
                                      prompt, invocation_env, remaining, {"prompt_metadata": metadata})
                 if _turn_prepared is None:
@@ -643,9 +666,10 @@ class ProsaicRuntime:
                 # The OpenAI text-only path returns Result directly and bypasses
                 # _post_chat_turn. Account its terminal usage once, after Capture
                 # has persisted the response context, preserving the returned text.
-                if _budget.enabled and not backend.turns and (
+                if (_budget.enabled or backend.execution_budgets) and not backend.turns and (
                         result.exit_code == 0 or 'token_usage_details' in result.metadata or
-                        (policy.max_reported_tokens is not None and _budget.provider_requests)):
+                        (policy.max_reported_tokens is not None and _budget.provider_requests) or
+                        (backend.execution_budgets and backend._provider_attempts)):
                     try:
                         backend.record_turn_usage(result.metadata.get('token_usage_details'))
                     except InvocationBudgetExceeded as exc:

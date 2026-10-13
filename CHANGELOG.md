@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.2 — 2026-10-13
+
+- Add a host-owned ExecutionBudget that shares deadlines, provider/tool dispatch
+  allowances and known/unknown reported-token evidence across nested calls/retries.
+- Preserve trusted parent accounting context in tool callbacks and expose bounded
+  child lineage and remaining-time helpers without placing attribution in prompts.
+- Qualify SDK and existing PostgreSQL recorder compatibility; publish only the SDK.
+
 ## 0.9.1 — 2026-10-13
 
 - Add versioned `RuntimeAdapter` for trusted host projections and normalization

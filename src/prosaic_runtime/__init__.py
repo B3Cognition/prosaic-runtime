@@ -1,5 +1,5 @@
 """Execute neutral Prosaic artifacts with explicitly granted authority."""
-__version__ = '0.9.1'
+__version__ = '0.9.2'
 
 from .artifacts import ProsaicArtifact
 from .config import EndpointConfig, RuntimeConfig, RunLimits, CliSandboxConfig
@@ -33,3 +33,6 @@ __all__ += ["ConversationMessage", "CompletedTurn", "TurnEvidence", "TurnResult"
 
 from .adapter import RuntimeAdapter
 __all__ += ["RuntimeAdapter"]
+
+from .execution_budget import ExecutionBudget
+__all__ += ["ExecutionBudget"]

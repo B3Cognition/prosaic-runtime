@@ -14,7 +14,7 @@ import pytest
 
 
 @pytest.mark.parametrize("project,name,version,package,dependency,licenses", [
-    (".", "b3-prosaic-runtime", "0.9.1", "prosaic_runtime", "b3-prosaic<0.5,>=0.4",
+    (".", "b3-prosaic-runtime", "0.9.2", "prosaic_runtime", "b3-prosaic<0.5,>=0.4",
      ("LICENSE", "LICENSE-MIT", "NOTICE.md")),
     ("adapters/postgres", "b3-prosaic-runtime-postgres", "0.3.0", "prosaic_runtime_postgres",
      "b3-prosaic-runtime<0.10,>=0.9", ("LICENSE", "LICENSE-MIT", "NOTICE.md")),

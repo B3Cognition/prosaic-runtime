@@ -180,7 +180,7 @@ def bounded_result(value, maximum):
 
 def execute_custom_tool(tool, raw_arguments, *, check_boundary, scope=None,
                         deadline=None, cancelled=lambda: False, call_index=0, tool_journal=None,
-                        on_completion=None):
+                        on_completion=None, accounting_context=None):
     check_boundary()
     try:
         arguments = parse_arguments(raw_arguments, tool.parameters, tool.max_argument_bytes)
@@ -196,7 +196,7 @@ def execute_custom_tool(tool, raw_arguments, *, check_boundary, scope=None,
         except (TypeError, ValueError, RecursionError, OverflowError):
             return {'status': 'error', 'error': 'invalid_arguments'}
         context = ToolExecutionContext(scope, tool.name, tool.version, call_index,
-            digest, deadline, cancelled)
+            digest, deadline, cancelled, accounting_context=accounting_context)
 
     def invoke(callback, ctx=context):
         owned = deepcopy(arguments)

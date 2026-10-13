@@ -631,3 +631,45 @@ For endpoints where the host deliberately chooses JSON tool requests, use the
 shared [`StructuredToolLoop`](docs/structured-tools.md). It reuses registered
 `CustomTool` contracts and bounded execution, with application-owned final-result
 admission. Harness can drive each turn without embedding product rules in Runtime.
+
+### Shared budgets for nested host execution (Runtime 0.9.2)
+
+Use `ExecutionBudget` around a complete host operation to share one absolute
+monotonic deadline, provider/tool dispatch caps and an optional reported-token cap
+across `run()`, `turn()`, RuntimeAdapter retries and synchronous nested callbacks:
+
+```python
+from prosaic_runtime import ExecutionBudget
+
+budget = ExecutionBudget(timeout_s=30, max_provider_requests=50,
+                         max_tool_calls=1, max_reported_tokens=40960,
+                         cancelled=request_cancelled)
+with budget.activate():
+    reply = conversation.send(...)
+```
+
+Reactivation never replenishes counters or the deadline. Nested budget scopes
+must satisfy every enclosing allowance. Provider/tool attempts are reserved
+atomically; explicit worker threads must activate the same budget object because
+context variables are not automatically inherited by threads. This cooperative
+host contract does not sandbox or preempt trusted callbacks. Callback networking
+must narrow its own timeout to the supplied deadline and check cancellation.
+
+`ToolExecutionContext.accounting_context` holds the actual frozen resolved parent
+attribution when accounting is enabled. `child_context(invocation_id=..., run_id=...,
+step_id=...)` derives nested lineage without taking identities from model arguments.
+`remaining_timeout(maximum)` narrows a callback timeout to the original deadline.
+Attribution is private host context and must not be copied into prompts/results.
+
+Known reported tokens remain available through `budget.reported_tokens`; unknown
+usage remains unknown through `budget.usage_complete`. A configured token cap
+stops subsequent dispatch on unknown usage. A response can itself exceed a
+reported-token cap; its paid evidence is retained and the operation fails rather
+than pretending the provider call was prevented. This is not a currency cap.
+
+ALWAYS persist host operation identity and conservative remaining reservations
+before dispatch when crash recovery matters. NEVER treat this process-local
+budget as a durable ledger or reset uncertain allowances after a restart.
+PostgreSQL accounting remains the authoritative provider-call evidence. Saved
+host outcomes require a fenced ToolJournal or equivalent durable application
+repository; interrupted effects must not be repeated automatically.

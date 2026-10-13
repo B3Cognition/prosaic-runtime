@@ -107,11 +107,20 @@ def test_journal_failure_retains_real_paid_observation_without_dispatch(server, 
 
 
 def test_harness_resume_does_not_duplicate_accounting(server,ledger,tmp_path,monkeypatch):
-    from test_harness import setup
-    from prosaic_harness import Harness
+    from prosaic_harness import Harness, WorkflowFactory, WorkflowCatalog, WorkflowBindings, WorkflowPolicy
     url,requests,responses=server
-    flow=setup(tmp_path,monkeypatch,pause=True)
-    config=replace(flow.config,profiles={'local':EndpointConfig(url,'alias',features={'streaming':False})})
+    config=RuntimeConfig({'local':EndpointConfig(url,'alias',features={'streaming':False})},
+        {'fast':'local'},'local',frozenset())
+    flow=WorkflowFactory(catalog=WorkflowCatalog(agents={'author':replace(artifact(),frontmatter={
+        'name':'author','description':'Synthetic metered author','model_tier':'fast'})},schemas={'result':{
+        'type':'object','properties':{'approved':{'type':'boolean'}},'required':['approved'],
+        'additionalProperties':False}}),bindings=WorkflowBindings(config=config),
+        policy=WorkflowPolicy(allowed_agents=frozenset({'author'}),allowed_schemas=frozenset({'result'}),
+            allowed_model_tiers=frozenset({'fast'}))).build({
+            'version':1,'name':'metered-resume','start':'author','steps':{
+                'author':{'kind':'agent','agent':'author','schema':'result','next':'approval'},
+                'approval':{'kind':'pause','question':'Approve?','choices':{'approve':'done'}},
+                'done':{'kind':'finish'}}})
     rt=ProsaicRuntime(config,accounting=ledger)
     responses.append(('application/json',json.dumps(response()).encode()))
     original=Harness(flow,tmp_path/'run',runtime=rt,context=ExecutionContext(tenant_id='customer'))
@@ -140,3 +149,36 @@ def test_uninitialized_store_blocks_provider(server,ledger):
     finally:
         with psycopg.connect(ledger._dsn,autocommit=True) as conn:
             conn.execute(sql.SQL('DROP DATABASE {} WITH (FORCE)').format(sql.Identifier(name)))
+
+
+def test_nested_conversation_and_planner_share_budget_and_durable_lineage(server,ledger):
+    from prosaic_runtime import ExecutionBudget
+    from test_runtime import completion
+    url,requests,responses=server
+    seen=[]
+    cfg=RuntimeConfig({'local':EndpointConfig(url,'actual',features={'streaming':False})},
+        {'fast':'local'},'local',frozenset({'compose_preview'}))
+    def compose(args,tool_context):
+        seen.append(tool_context.accounting_context)
+        result=ProsaicRuntime(cfg).run(artifact(),accounting=ledger,
+            context=tool_context.child_context(invocation_id='nested-planner',run_id='planner-run',step_id='compose'),
+            policy=RunPolicy(timeout_s=tool_context.remaining_timeout(10)))
+        assert result.exit_code==0
+        return {'preview':True}
+    tool=CustomTool('compose_preview','Synthetic bounded planner',
+        {'type':'object','additionalProperties':False},compose,'v1',with_context=True)
+    responses.extend([completion('',[{'id':'compose','type':'function','function':
+        {'name':'compose_preview','arguments':'{}'}}]),completion('preview'),completion('Prepared preview')])
+    budget=ExecutionBudget(timeout_s=10,max_provider_requests=3,max_tool_calls=1,max_reported_tokens=21)
+    with budget.activate():
+        turn=ProsaicRuntime(cfg,custom_tools={'compose_preview':tool}).turn(
+            replace(artifact(['compose_preview']),body='ALWAYS prepare a preview. NEVER apply it.'),message='Preview',
+            accounting=ledger,context=ExecutionContext(application_id='app',tenant_id='customer',billing_account_id='payer'),
+            policy=RunPolicy(allowed_tools=frozenset({'compose_preview'}),max_provider_requests=2,max_tool_calls=1))
+    assert turn.result.exit_code==0 and len(requests)==3 and budget.reported_tokens==21
+    rows=ledger.calls()
+    assert len(rows)==3 and ledger.report(tenant_id='other')['total_calls']==0
+    nested=next(row for row in rows if row['intent']['context']['run_id']=='planner-run')
+    assert nested['intent']['context']['parent_invocation_id']==seen[0].invocation_id
+    assert nested['intent']['context']['billing_account_id']=='payer'
+    assert all(row['observation']['usage']['total_tokens']==7 for row in rows)
