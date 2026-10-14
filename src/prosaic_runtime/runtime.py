@@ -30,6 +30,7 @@ from .telemetry import ObserverEmitter, observation_context, observe, execution_
 from .budgets import InvocationBudget, InvocationBudgetExceeded
 from .turn_capture import TurnOutputExceeded
 from .execution_budget import active_budgets, check_budgets, reserve_dispatch, record_shared_usage
+from .context_execution import ContextExecutionFailure
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -279,6 +280,9 @@ class _BoundedMixin:
 
     def encode_payload(self, payload):
         data = super().encode_payload(payload)
+        guard = getattr(self, 'context_guard', None)
+        if guard is not None:
+            guard.check_wire(payload, deadline=self.deadline, encoded_bytes=len(data))
         if self.turn_mode and len(data) > self.max_input_bytes:
             raise _TurnContextExceeded('contextLimit')
         return data
@@ -328,6 +332,7 @@ class ProsaicRuntime:
     capabilities = frozenset({'conformance_v1', 'invocation_budgets_v1', 'observer_v1', 'accounting_v1', 'read_receipts_v1', 'initial_tool_v1', 'initial_tool_enforcement_v1', 'acquisition_v1', 'custom_tools_v1', 'cli_tools_v1', 'cli_sandbox_v1'})
     capabilities |= frozenset({'tool_context_v1', 'tool_journal_v1'})
     capabilities |= frozenset({'conversation_turn_v1'})
+    capabilities |= frozenset({'context_assembly_v1'})
     def __init__(self, config: RuntimeConfig, *, source=".prosaic", executable="prosaic", custom_tools=None,
                  accounting=None, context_defaults=None):
         self.config = config
@@ -363,21 +368,38 @@ class ProsaicRuntime:
     def turn(self, artifact, *, message=None, history=(), input_data=None,
              policy=None, limits=None, workspace=None, on_event=None, cancelled=None,
              env=None, context=None, accounting=None, observer=None,
-             operation_context=None, tool_journal=None):
+             operation_context=None, tool_journal=None, context_policy=None,
+             token_counters=None, context_work=None, context_checkpoint=None, on_admitted=None):
         """Execute one bounded role-aware turn; streamed events are provisional."""
         from .conversation import PreparedTurn, ConversationMessage, TurnLimits, TurnAdmissionError
         from .conversation_preparation import policy_from_document, execution_snapshot
         from .turn_capture import TurnCapture
+        guard = None
         if type(artifact) is PreparedTurn:
-            if message is not None or history or input_data is not None or policy is not None or limits is not None or workspace is not None:
+            if message is not None or history or input_data is not None or policy is not None or limits is not None or workspace is not None or context_policy is not None:
                 raise TurnAdmissionError('invalidPolicy')
             try:
                 owned = json.loads(artifact._encoded)
                 approved = ProsaicArtifact.from_inspection(owned['agent'])
+                context_args = {}
+                if artifact.encoding_version == 'conversation-turn-v2':
+                    from .context_contracts import ContextPolicy
+                    if context_work is not None:
+                        original = artifact.context_work
+                        for field in ('candidate_checks', 'candidate_bytes', 'active_assembly_micros',
+                                      'reserved_active_micros', 'checkpoint_sequence'):
+                            if getattr(context_work, field) < getattr(original, field):
+                                raise TurnAdmissionError('bindingMismatch')
+                    context_args = dict(context_policy=ContextPolicy.from_dict(owned['contextPolicy']),
+                        token_counters=token_counters, context_selection=artifact.context_selection,
+                        context_report=artifact.context_report,
+                        context_work=context_work if context_work is not None else artifact.context_work)
+                elif token_counters is not None or context_work is not None:
+                    raise TurnAdmissionError('invalidPolicy')
                 prepared = self.prepare_turn(approved, message=owned['message'],
                     history=tuple(ConversationMessage.from_dict(m) for m in owned['history']),
                     input_data=owned['inputData'], policy=policy_from_document(owned['policy']),
-                    limits=TurnLimits(**owned['limits']), workspace=owned['workspace'])
+                    limits=TurnLimits(**owned['limits']), workspace=owned['workspace'], **context_args)
                 if (artifact.encoding_version != prepared.encoding_version or
                         artifact.context_identity != prepared.context_identity or
                         artifact.input_bytes != prepared.input_bytes or artifact._encoded != prepared._encoded):
@@ -386,7 +408,10 @@ class ProsaicRuntime:
                 raise TurnAdmissionError('bindingMismatch') from exc
         else:
             prepared = self.prepare_turn(artifact, message=message, history=history,
-                input_data=input_data, policy=policy, limits=limits, workspace=workspace)
+                input_data=input_data, policy=policy, limits=limits, workspace=workspace,
+                context_policy=context_policy, token_counters=token_counters)
+            if context_work is not None:
+                raise TurnAdmissionError('invalidPolicy')
             owned = json.loads(prepared._encoded)
             approved = ProsaicArtifact.from_inspection(owned['agent'])
         policy = policy_from_document(owned['policy'])
@@ -410,6 +435,31 @@ class ProsaicRuntime:
         except (ValueError, TypeError, AttributeError):
             raise TurnAdmissionError('invalidPolicy') from None
         frozen_accounting = (recorder, resolved, enabled)
+        if prepared.encoding_version == 'conversation-turn-v2':
+            from .context_contracts import ContextPolicy
+            from .context_counters import admit_counter
+            from .context_execution import ContextExecutionGuard
+            from .conversation_preparation import initial_payload, turn_endpoint
+            context_policy = ContextPolicy.from_dict(owned['contextPolicy'])
+            _, endpoint, _ = turn_endpoint(self, approved, policy)
+            registration = admit_counter(context_policy, token_counters, endpoint)
+            guard = ContextExecutionGuard(context_policy, registration, prepared.context_report,
+                prepared.context_work, input_byte_cap=policy.max_input_bytes,
+                checkpoint=context_checkpoint, deadline=time.monotonic() + policy.timeout_s)
+            try:
+                guard.readmit(lambda: initial_payload(self, approved, policy, owned['selectedHistory'],
+                    owned['message'], owned['inputData'], context_policy=context_policy)[-1])
+            except ToolDeadlineExceeded:
+                terminal = capture.finish(Result(1, '', 'timeout', timed_out=True,
+                    metadata={'failure_reason': 'invocation_timeout'}), budget)
+                return replace(terminal, context_report=guard.report, context_work=guard.work)
+            owned['_contextGuard'] = guard
+        if guard is not None and cancelled is not None and cancelled():
+            terminal = capture.finish(Result(1, '', 'cancelled',
+                metadata={'failure_reason': 'cancelled'}), budget)
+            return replace(terminal, context_report=guard.report, context_work=guard.work)
+        if on_admitted is not None:
+            on_admitted()
         emitter = ObserverEmitter(observer, source='runtime', scope=scope)
         started, result = time.monotonic(), None
         with observation_context(emitter, self._custom_tools):
@@ -430,7 +480,8 @@ class ProsaicRuntime:
                 emitter.emit('invocation_completed', outcome='completed' if result is not None and result.exit_code == 0 else 'execution_failure',
                     duration_ms=(time.monotonic() - started) * 1000,
                     exit_code=result.exit_code if result is not None else None)
-        return capture.finish(result, budget)
+        completed = capture.finish(result, budget)
+        return replace(completed, context_report=guard.report, context_work=guard.work) if guard is not None else completed
 
     @classmethod
     def from_config(cls, path=None, **kwargs):
@@ -661,6 +712,7 @@ class ProsaicRuntime:
                 else:
                     from .openai_compatible import _feature_enabled
                     backend.turn_mode = True
+                    backend.context_guard = _turn_prepared.get('_contextGuard')
                     backend.turn_capture = _turn_capture
                     _turn_capture.backend = backend
                     result = backend._run_prompt_with_tools(request, metadata,
@@ -725,6 +777,10 @@ class ProsaicRuntime:
                 return Result(1, '', 'invocation deadline exceeded', timed_out=True,
                               token_usage=backend.reported_token_usage if backend and backend.usage_complete else None,
                               metadata={'failure_reason': 'invocation_timeout', 'usage_scope': 'reported_completed_turns'})
+            except ContextExecutionFailure as exc:
+                return Result(1, '', exc.code,
+                    token_usage=backend.reported_token_usage if backend and backend.usage_complete else None,
+                    metadata={'failure_reason': exc.code})
             except _TurnContextExceeded:
                 return Result(1, '', 'contextLimit',
                     token_usage=backend.reported_token_usage if backend and backend.usage_complete else None,

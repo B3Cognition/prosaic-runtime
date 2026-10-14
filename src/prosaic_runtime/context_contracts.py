@@ -141,6 +141,12 @@ class _ContextRecord(_OwnedRecord):
     nodes = 512
     keys = frozenset()
 
+    def __setattr__(self, name, value):
+        raise AttributeError('immutable context record')
+
+    def __delattr__(self, name):
+        raise AttributeError('immutable context record')
+
     @classmethod
     def from_dict(cls, document):
         try:

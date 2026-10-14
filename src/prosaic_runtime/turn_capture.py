@@ -19,6 +19,7 @@ def failure_code(result):
     reason = result.metadata.get('failure_reason') or result.metadata.get('provider_error_code')
     return {'cancelled': 'cancelled', 'invocation_timeout': 'timeout',
         'invalidToolRequest': 'invalidToolRequest', 'contextLimit': 'contextLimit',
+        'bindingMismatch': 'bindingMismatch',
         'budget_exceeded': 'budgetExceeded', 'provider_request_limit': 'budgetExceeded',
         'tool_call_limit': 'budgetExceeded', 'token_limit': 'budgetExceeded', 'usage_unknown': 'budgetExceeded',
         'accounting_failed': 'accountingFailure', 'critical_hook_error': 'observationFailure',

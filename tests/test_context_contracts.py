@@ -121,6 +121,10 @@ def test_reports_own_ranges_and_enforce_closed_fields():
         'omittedRange': {'startTurn': 1, 'endTurnExclusive': 2},
         'candidateChecks': 2, 'candidateBytes': 400}
     report = report_type.from_dict(document)
+    with pytest.raises(AttributeError):
+        report.input_tokens = 999
+    with pytest.raises(AttributeError):
+        report.extra = 'mutable'
     document['retainedRange']['startTurn'] = 99
     assert report.to_dict()['retainedRange']['startTurn'] == 2
     with pytest.raises(api.TurnAdmissionError):

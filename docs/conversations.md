@@ -1,5 +1,47 @@
 # Stateless conversation turns (0.9.0 candidate)
 
+## Optional token-aware context admission
+
+`context_assembly_v1` adds optional `ContextPolicy` and host-supplied
+`TokenCounterRegistry` arguments to preparation and execution. Existing calls
+keep their version-1 encoding and identity. Opted-in preparation uses
+`conversation-turn-v2` and exposes an owned `context_report`, `context_selection`
+and `context_work`. Supply the same counter registry when executing a prepared
+turn. Durable hosts retain the frozen selection/report and remaining work state.
+
+Choose `fullHistory` to reject overflow, or explicitly choose `omitOldestTurns`
+to omit oldest complete turns only from this request. Source history stays
+unchanged. Instructions, current user/inputData, tool schemas and current-turn
+tool exchanges remain mandatory. Tool continuations that cannot fit terminate
+with bounded failure evidence; completed or uncertain effects are preserved and
+never automatically retried. Counters operate on copies of final native payloads.
+
+Counters must match the provider, model, pinned tokenizer/template digests and
+framing revision, and certify exact or conservative-upper-bound counts. Runtime
+ships no universal tokenizer or qualified production counter. Synthetic fixture
+counts demonstrate admission behavior only. Provider-reported usage is execution
+accounting evidence; Lago receives billing events separately.
+
+Policies also bound candidate checks, cumulative encoded candidate bytes and
+active assembly time. Provider waiting is excluded. Time checks are cooperative:
+trusted counters must be bounded local code without network I/O or inference.
+`context_checkpoint` durably records resource reservations before callbacks;
+`on_admitted` lets the host mark dispatch only after successful readmission and
+all static checks, before accounting intent and provider effects.
+
+```python
+from prosaic_runtime import ContextPolicy
+
+# token_counters is a host-qualified immutable TokenCounterRegistry.
+context_policy = ContextPolicy(
+    mode='omitOldestTurns', context_window_tokens=32768,
+    reserved_output_tokens=2048, safety_margin_tokens=256,
+    counter_identity='host-pinned-counter-v1')
+prepared = runtime.prepare_turn(agent, message='Next question', history=history,
+    policy=policy, context_policy=context_policy, token_counters=token_counters)
+result = runtime.turn(prepared, token_counters=token_counters)
+```
+
 `conversation_turn_v1` adds `prepare_turn()` and `turn()` to `ProsaicRuntime`.
 Runtime owns one bounded model/tool execution. Your host supplies inspected,
 approved prose, admitted user input and the complete portable history. Durable

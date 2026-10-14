@@ -307,6 +307,8 @@ class TurnResult:
     result: Result
     completed_turn: CompletedTurn | None
     evidence: TurnEvidence
+    context_report: object = None
+    context_work: object = None
 
 
 @dataclass(frozen=True, init=False)

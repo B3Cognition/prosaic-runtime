@@ -29,16 +29,15 @@ class ContextWorkBudget:
 
     def _check(self):
         p, s = self.policy, self._state
+        if self.deadline is not None and self.clock() / 1e9 >= self.deadline:
+            from .tools import ToolDeadlineExceeded
+            raise ToolDeadlineExceeded('invocation deadline exceeded')
         if s['candidateChecks'] > p.max_candidate_checks:
             raise TurnAdmissionError('contextLimit', 'maxCandidateChecks')
         if s['candidateBytes'] > p.max_assembly_bytes:
             raise TurnAdmissionError('contextLimit', 'maxAssemblyBytes')
         if s['activeAssemblyMicros'] + s['reservedActiveMicros'] >= p.assembly_timeout_ms * 1000:
             raise TurnAdmissionError('contextLimit', 'assemblyTimeoutMs')
-        if self.deadline is not None and self.clock() / 1e9 >= self.deadline:
-            # Execution owns timeout classification rather than context overflow.
-            from .budgets import LimitExceeded
-            raise LimitExceeded('timeout')
 
     def construct(self, callback):
         self._check()
@@ -48,13 +47,20 @@ class ContextWorkBudget:
             self._save()  # unknown acknowledgement never permits entering host code
         started = self.clock()
         try:
-            return callback()
-        finally:
-            elapsed = max(0, self.clock() - started)
-            self._state['activeAssemblyMicros'] += (elapsed + 999) // 1000
-            self._state['reservedActiveMicros'] = 0
-            self._save()
-            self._check()
+            result = callback()
+        except Exception:
+            self._finish_active(started)
+            raise
+        # BaseException/process death deliberately retains the outstanding slice.
+        self._finish_active(started)
+        return result
+
+    def _finish_active(self, started):
+        elapsed = max(0, self.clock() - started)
+        self._state['activeAssemblyMicros'] += (elapsed + 999) // 1000
+        self._state['reservedActiveMicros'] = 0
+        self._save()
+        self._check()
 
     def check_candidate(self, encoded_bytes, callback=None):
         self._check()
