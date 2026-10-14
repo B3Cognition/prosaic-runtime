@@ -40,8 +40,9 @@ An explicit policy declares:
 
 Expose a trusted host-supplied `TokenCounter` interface. It receives an owned
 copy of the final provider request and returns a bounded nonnegative input count.
-Its descriptor binds provider, model, encoding/framing revision and implementation
-version. It declares exact counting or a documented conservative upper bound;
+Its descriptor binds provider, model, encoding/framing revision, supported context
+capacity and implementation version. Policy capacity cannot exceed that declared
+model capacity. It declares exact counting or a documented conservative upper bound;
 an unsupported or merely heuristic counter cannot certify strict token admission.
 The host must retain the counter implementation matching each durable binding.
 
@@ -116,8 +117,10 @@ alongside the allocated attempt. Preserve the full source-history digest as
 well as the selected projection identity; a shortened input must not replace the
 source identity used for replay/correlation.
 
-Introduce a negotiated conversation storage/encoding version for opted-in
-attempts requiring these new fields. Do not add mandatory fields to existing
+Opted-in sessions use negotiated session/receipt record version 2 and Runtime
+encoding `conversation-turn-v2`, with version-1 assembly reports. Require an
+advertised `context_assembly_v1` capability across Runtime, Harness and the selected
+store before session creation. Do not add mandatory fields to existing
 sealed version-1 session/receipt records. File/PostgreSQL backends must explicitly
 support the new version before opting in; schema changes use normal migrations
 with separate owner/runtime roles. Existing version-1 data remains readable.
