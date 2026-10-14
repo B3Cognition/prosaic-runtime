@@ -189,6 +189,24 @@ def test_slow_readmission_keeps_timeout_result_without_dispatch(turn_fixture):
         assert fx.requests == []
 
 
+def test_cancel_before_context_dispatch_keeps_frozen_accounting_owner(turn_fixture):
+    from prosaic_runtime.accounting import MemoryRecorder
+    class Recorder(MemoryRecorder):
+        def prepare(self, intent):
+            raise AssertionError('cancelled preflight must not allocate accounting intent')
+    policy, counters = fixture_context()
+    with turn_fixture('openai-compatible') as fx:
+        result = fx.runtime.turn(fx.agent, message='x', policy=fx.policy,
+            context_policy=policy, token_counters=counters, cancelled=lambda: True,
+            accounting=Recorder(provider_id='openai-compatible'), context=api.ExecutionContext(
+                application_id='app', tenant_id='owner', billing_account_id='payer'))
+        evidence = result.evidence.to_dict()
+        assert evidence['failureCode'] == 'cancelled'
+        assert evidence['providerAttempts'] == 0 and fx.requests == []
+        assert evidence['accounting']['context']['tenant_id'] == 'owner'
+        assert evidence['accounting']['provider_call_ids'] == []
+
+
 @pytest.mark.parametrize('failure', ['overflow', 'unknown', 'journal'])
 def test_journal_status_and_attribution_survive_context_guard(turn_fixture, tmp_path, failure):
     from support.tool_journal import SqliteJournal

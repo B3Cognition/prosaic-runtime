@@ -436,6 +436,10 @@ class ProsaicRuntime:
             raise TurnAdmissionError('invalidPolicy') from None
         frozen_accounting = (recorder, resolved, enabled)
         if prepared.encoding_version == 'conversation-turn-v2':
+            if enabled:
+                # Freeze evidence attribution/headroom before readmission or the
+                # host marker. This creates no accounting intent or model effect.
+                capture.bind_accounting(resolved, recorder, policy.max_provider_requests, policy.max_tool_calls)
             from .context_contracts import ContextPolicy
             from .context_counters import admit_counter
             from .context_execution import ContextExecutionGuard
