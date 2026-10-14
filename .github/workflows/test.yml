@@ -118,7 +118,7 @@ jobs:
           python -m build adapters/postgres
       - name: Install release wheels
         run: |
-          python -m pip install dist/b3_prosaic_runtime-0.9.2-py3-none-any.whl
+          python -m pip install dist/b3_prosaic_runtime-0.9.4-py3-none-any.whl
           python -m pip install adapters/postgres/dist/b3_prosaic_runtime_postgres-0.3.0-py3-none-any.whl
       - name: Required real-database accounting tests
         env:
