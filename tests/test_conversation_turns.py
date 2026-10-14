@@ -13,6 +13,25 @@ def execute(fx, **kwargs):
     return rt.turn(fx.agent, policy=fx.policy, **kwargs)
 
 
+@pytest.mark.parametrize('streaming', [False, True])
+def test_provider_timeout_turn_has_a_persistable_exit_status(turn_fixture, monkeypatch, streaming):
+    class Opener:
+        def open(self, *args, **kwargs):
+            raise TimeoutError('synthetic provider timeout')
+
+    # Replace only network I/O; execute the real provider and turn reducers.
+    monkeypatch.setattr('urllib.request.build_opener', lambda *args: Opener())
+    with turn_fixture('openai-compatible') as fx:
+        fx.streaming = streaming
+        result = execute(fx, message='Hello')
+        assert result.result.exit_code == 124
+        assert result.result.timed_out is True
+        assert result.result.stdout == ''
+        assert result.completed_turn is None
+        assert result.evidence.to_dict()['failureCode'] == 'timeout'
+        assert result.evidence.to_dict()['providerAttempts'] == 1
+
+
 @pytest.mark.parametrize('provider', ['openai-compatible', 'anthropic'])
 def test_failed_corrections_are_unprivileged_in_next_actual_payload(turn_fixture, provider):
     with turn_fixture(provider) as fx:

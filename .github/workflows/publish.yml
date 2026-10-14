@@ -352,7 +352,7 @@ jobs:
       - name: Prepare only distribution files for upload
         run: |
           mkdir upload
-          cp release/artifacts/b3_prosaic_runtime-0.9.2-py3-none-any.whl release/artifacts/b3_prosaic_runtime-0.9.2.tar.gz upload/
+          cp release/artifacts/b3_prosaic_runtime-0.9.3-py3-none-any.whl release/artifacts/b3_prosaic_runtime-0.9.3.tar.gz upload/
       - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           packages-dir: upload/

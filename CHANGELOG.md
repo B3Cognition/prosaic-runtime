@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.3 — 2026-10-14
+
+- Normalize negative provider timeout exit statuses to 124 in conversation turn
+  results so Harness can persist failed timeout receipts without `store_corrupt`.
+- Preserve existing run/CLI timeout statuses and the conversation storage format.
+- Cover streaming and nonstreaming provider timeouts through the public turn API.
+
 ## 0.9.2 — 2026-10-13
 
 - Add a host-owned ExecutionBudget that shares deadlines, provider/tool dispatch

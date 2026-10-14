@@ -231,7 +231,10 @@ class TurnCapture:
                 max_depth=self.limits.max_json_depth, max_nodes=self.limits.max_json_nodes))
         except (ValueError, TypeError, UnicodeError):
             metadata = {'failure_reason': code} if code else {}
-        sanitized = Result(result.exit_code if code != 'outputLimit' else 1,
+        # Durable conversation receipts use unsigned exit statuses. The legacy
+        # OpenAI-compatible transport reports socket/deadline timeouts as -1.
+        exit_code = 124 if result.exit_code < 0 and result.timed_out else result.exit_code
+        sanitized = Result(exit_code if code != 'outputLimit' else 1,
             result.stdout if code is None else '', code or '', token_usage=known.get('totalTokens') if complete else None,
             timed_out=result.timed_out, metadata=metadata)
         return TurnResult(sanitized, completed, evidence)
