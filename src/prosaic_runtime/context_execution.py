@@ -42,6 +42,13 @@ class ContextExecutionGuard:
             raise TurnAdmissionError('bindingMismatch')
         self._first_wire_digest = context_digest(native)
 
+    def construct_native(self, callback):
+        """Charge local construction/encoding, excluding provider/storage waits."""
+        try:
+            return self.budget.construct(callback)
+        except TurnAdmissionError as exc:
+            raise ContextExecutionFailure('contextLimit' if exc.code == 'contextLimit' else 'bindingMismatch') from None
+
     def check_wire(self, native, *, deadline, encoded_bytes):
         try:
             self.budget.deadline = min(self.budget.deadline, deadline) if self.budget.deadline is not None else deadline

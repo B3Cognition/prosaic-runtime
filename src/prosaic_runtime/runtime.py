@@ -279,13 +279,19 @@ class _BoundedMixin:
             raise LimitExceeded("conversation exceeds max_input_bytes")
 
     def encode_payload(self, payload):
-        data = super().encode_payload(payload)
         guard = getattr(self, 'context_guard', None)
+        encoder = super().encode_payload
+        data = guard.construct_native(lambda: encoder(payload)) if guard is not None else encoder(payload)
         if guard is not None:
             guard.check_wire(payload, deadline=self.deadline, encoded_bytes=len(data))
         if self.turn_mode and len(data) > self.max_input_bytes:
             raise _TurnContextExceeded('contextLimit')
         return data
+
+    def native_payload(self, payload):
+        converter = super().native_payload
+        guard = getattr(self, 'context_guard', None)
+        return guard.construct_native(lambda: converter(payload)) if guard is not None else converter(payload)
 
     def _post_chat_turn(self, payload, request, deadline, streaming):
         check_cancelled()

@@ -177,8 +177,11 @@ class AnthropicBackend(ExecutionBackend):
         payload.pop('stream_options', None)
         return payload
 
+    def native_payload(self, payload):
+        return encode_messages(payload)
+
     def _post_chat_turn(self, payload, request, deadline, streaming):
-        native = encode_messages(payload)
+        native = self.native_payload(payload)
         self.validate_payload(native)
         data = self.encode_payload(native)
         token, error = _api_key(self._config.api_key_env, self._config.api_key_file, request.env)

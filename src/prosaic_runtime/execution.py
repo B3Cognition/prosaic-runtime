@@ -76,10 +76,25 @@ class ExecutionBackend:
         while True:
             turn_number = tool_rounds + 1
             turn_started = time.monotonic()
-            if execution_options is not None and execution_options.get('compact_tool_results') is False:
-                payload_messages, compaction = list(messages), ToolResultCompactionStats()
-            else:
-                payload_messages, compaction = compact_tool_result_messages(messages, llm.features)
+            initial_tool = _metadata_str(prompt_metadata, 'initial_tool')
+            acquiring = turn_number == 1 and 'final_prompt' in prompt_metadata
+            def construct_payload():
+                if execution_options is not None and execution_options.get('compact_tool_results') is False:
+                    payload_messages, compaction = list(messages), ToolResultCompactionStats()
+                else:
+                    payload_messages, compaction = compact_tool_result_messages(messages, llm.features)
+                payload = self._chat_payload(payload_messages, prompt_metadata,
+                    streaming=streaming, tools=[] if tools_disabled else registry.openai_tools())
+                if acquiring:
+                    payload.pop('response_format', None)
+                    payload['tools'] = [tool for tool in payload.get('tools', [])
+                                        if tool['function']['name'] in prompt_metadata['acquisition_tools']]
+                if turn_number == 1 and initial_tool and payload.get('tools'):
+                    payload['tool_choice'] = {'type': 'function', 'function': {'name': initial_tool}}
+                return payload, compaction
+            guard = getattr(self, 'context_guard', None)
+            payload, compaction = (guard.construct_native(construct_payload) if guard is not None
+                                   else construct_payload())
             if compaction.compacted:
                 tool_result_compactions += compaction.compacted
                 tool_result_compaction_saved_chars += compaction.saved_chars
@@ -96,20 +111,6 @@ class ExecutionBackend:
                     compacted=compaction.compacted,
                     saved_chars=compaction.saved_chars,
                 )
-            payload = self._chat_payload(
-                payload_messages,
-                prompt_metadata,
-                streaming=streaming,
-                tools=[] if tools_disabled else registry.openai_tools(),
-            )
-            initial_tool = _metadata_str(prompt_metadata, 'initial_tool')
-            acquiring = turn_number == 1 and 'final_prompt' in prompt_metadata
-            if acquiring:
-                payload.pop('response_format', None)
-                payload['tools'] = [tool for tool in payload.get('tools', [])
-                                    if tool['function']['name'] in prompt_metadata['acquisition_tools']]
-            if turn_number == 1 and initial_tool and payload.get('tools'):
-                payload['tool_choice'] = {'type': 'function', 'function': {'name': initial_tool}}
             _progress(
                 "turn "
                 f"{turn_number}: request "

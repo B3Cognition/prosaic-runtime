@@ -8,6 +8,68 @@ from support.context_counter import fixture_context
 from support.conversation_server import turn_fixture
 
 
+def test_native_serialization_is_charged_before_wire_admission():
+    from prosaic_runtime.context_assembly import assemble_context
+    from prosaic_runtime.context_execution import ContextExecutionGuard, ContextExecutionFailure
+    from prosaic_runtime.runtime import _BoundedMixin
+    native = {'model': 'fixture-model', 'messages': [{'role': 'user', 'content': 'Hello'}], 'max_tokens': 128}
+    policy, counters = fixture_context(timeout_ms=10, count=lambda request: 10)
+    registration = counters.resolve(policy.counter_identity)
+    _, report, _, work = assemble_context([], lambda history: native, policy, registration, api.TurnLimits())
+    guard = ContextExecutionGuard(policy, registration, report, work, input_byte_cap=196608)
+    now = [0]
+    guard.budget.clock = lambda: now[0]
+    class SlowEncoder:
+        def encode_payload(self, payload):
+            now[0] += 20_000_000
+            return json.dumps(payload).encode()
+    class Backend(_BoundedMixin, SlowEncoder): pass
+    backend = object.__new__(Backend)
+    backend.context_guard, backend.deadline = guard, 100
+    backend.turn_mode, backend.max_input_bytes = True, 196608
+    with pytest.raises(ContextExecutionFailure) as caught:
+        backend.encode_payload(native)
+    assert caught.value.code == 'contextLimit'
+    assert guard.work.active_assembly_micros >= 20_000
+
+
+@pytest.mark.parametrize('provider,stage', [
+    ('openai-compatible', '_chat_payload'), ('anthropic', '_chat_payload'),
+    ('openai-compatible', 'encode_payload'), ('anthropic', 'encode_payload'),
+    ('anthropic', 'native_payload')])
+def test_slow_continuation_construction_stops_before_dispatch_after_effect(turn_fixture, monkeypatch, provider, stage):
+    from prosaic_runtime.context_execution import ContextExecutionGuard
+    from prosaic_runtime.runtime import _BoundedBackend, _BoundedAnthropicBackend
+    now = [time.monotonic_ns()]
+    original_init = ContextExecutionGuard.__init__
+    def initialize(self, *args, **kwargs):
+        original_init(self, *args, **kwargs)
+        self.budget.clock = lambda: now[0]
+    monkeypatch.setattr(ContextExecutionGuard, '__init__', initialize)
+    backend = _BoundedAnthropicBackend if provider == 'anthropic' else _BoundedBackend
+    original = getattr(backend, stage)
+    def slow(self, *args, **kwargs):
+        value = original(self, *args, **kwargs)
+        if 'slow-construction-marker' in json.dumps(args): now[0] += 20_000_000
+        return value
+    # Override the base method so serialization/native conversion remain inside
+    # the production mixin's checkpointed construction boundary.
+    base = backend.__mro__[2]
+    original = getattr(base, stage)
+    monkeypatch.setattr(base, stage, slow)
+    policy, counters = fixture_context(provider, timeout_ms=10, count=lambda request: 10)
+    effects = []
+    with turn_fixture(provider) as fx:
+        fx.add_tool('lookup', lambda args: effects.append('done') or {'value': 'slow-construction-marker'})
+        fx.queue_calls([{'id': 'call_0', 'name': 'lookup', 'arguments': '{}'}])
+        result = fx.runtime.turn(fx.agent, message='lookup', policy=fx.policy,
+            context_policy=policy, token_counters=counters)
+        assert result.result.metadata['failure_reason'] == 'contextLimit'
+        assert effects == ['done'] and len(fx.requests) == 1
+        assert result.result.token_usage == 5
+        assert result.context_work.active_assembly_micros >= 20_000
+
+
 @pytest.mark.parametrize('provider', ['openai-compatible', 'anthropic'])
 @pytest.mark.parametrize('streaming', [False, True])
 def test_counted_request_matches_each_actual_native_wire(turn_fixture, provider, streaming):
