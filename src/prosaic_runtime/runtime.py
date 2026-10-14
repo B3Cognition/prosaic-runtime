@@ -350,11 +350,15 @@ class ProsaicRuntime:
         return frozenset(self._cli_tools)
 
     def prepare_turn(self, artifact, *, message, history=(), input_data=None,
-                     policy=None, limits=None, workspace=None):
+                     policy=None, limits=None, workspace=None, context_policy=None,
+                     token_counters=None, context_selection=None, context_report=None, context_work=None):
         """Purely admit and own one role-aware conversational input."""
         from .conversation_preparation import prepare_turn
         return prepare_turn(self, artifact, message=message, history=history,
-                            input_data=input_data, policy=policy, limits=limits, workspace=workspace)
+                            input_data=input_data, policy=policy, limits=limits, workspace=workspace,
+                            context_policy=context_policy, token_counters=token_counters,
+                            context_selection=context_selection, context_report=context_report,
+                            context_work=context_work)
 
     def turn(self, artifact, *, message=None, history=(), input_data=None,
              policy=None, limits=None, workspace=None, on_event=None, cancelled=None,

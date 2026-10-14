@@ -103,8 +103,13 @@ def tool_schemas(runtime, names):
     return builtin + custom
 
 
-def initial_payload(runtime, artifact, policy, history, message, input_data):
+def initial_payload(runtime, artifact, policy, history, message, input_data, *, context_policy=None):
     profile, endpoint, metadata = turn_endpoint(runtime, artifact, policy)
+    if context_policy is not None:
+        if any(name in endpoint.features for name in ('max_completion_tokens', 'max_output_tokens')):
+            raise TurnAdmissionError('unsupportedCapability')
+        endpoint = replace(endpoint, max_tokens=min(endpoint.max_tokens, context_policy.reserved_output_tokens)
+            if endpoint.max_tokens is not None else context_policy.reserved_output_tokens)
     backend = AnthropicBackend(endpoint) if endpoint.provider == 'anthropic' else OpenAICompatibleBackend(endpoint)
     messages = initial_projection(artifact, history, message, input_data, endpoint)
     streaming = _feature_enabled(endpoint.features, 'streaming', default=True)
@@ -117,7 +122,8 @@ def initial_payload(runtime, artifact, policy, history, message, input_data):
 
 
 def prepare_turn(runtime, artifact, *, message, history=(), input_data=None, policy=None,
-                 limits=None, workspace=None):
+                 limits=None, workspace=None, context_policy=None, token_counters=None,
+                 context_selection=None, context_report=None, context_work=None):
     limits = limits if limits is not None else TurnLimits()
     if type(limits) is not TurnLimits:
         raise TurnAdmissionError('invalidPolicy')
@@ -181,8 +187,31 @@ def prepare_turn(runtime, artifact, *, message, history=(), input_data=None, pol
     except (TypeError, ValueError, UnicodeError) as exc:
         raise TurnAdmissionError('inputLimit', 'inputData') from exc
     try:
+        selected_history = owned_history
+        report, selection, work = None, None, None
+        if context_policy is None:
+            if any(value is not None for value in (token_counters, context_selection, context_report, context_work)):
+                raise TurnAdmissionError('invalidPolicy')
+        else:
+            from .context_counters import admit_counter
+            from .context_assembly import assemble_context, restore_selection
+            _, endpoint, _ = turn_endpoint(runtime, owned_agent, policy)
+            registration = admit_counter(context_policy, token_counters, endpoint)
+            def candidate(history):
+                return initial_payload(runtime, owned_agent, policy, history, message, data,
+                                       context_policy=context_policy)[-1]
+            if context_selection is not None:
+                selected_history, report, selection, work = restore_selection(owned_history,
+                    context_policy, registration, context_selection, context_report, context_work)
+            else:
+                if context_report is not None or context_work is not None:
+                    raise TurnAdmissionError('invalidPolicy')
+                selected_history, report, selection, work = assemble_context(owned_history,
+                    candidate, context_policy, registration,
+                    replace(limits, max_input_bytes=policy.max_input_bytes))
         profile, endpoint, metadata, messages, native = initial_payload(
-            runtime, owned_agent, policy, owned_history, message, data)
+            runtime, owned_agent, policy, selected_history, message, data,
+            context_policy=context_policy)
         # This is the exact byte encoding used by both existing transports.
         input_bytes = len(json.dumps(native, allow_nan=False).encode('utf-8'))
         if input_bytes > policy.max_input_bytes:
@@ -199,13 +228,22 @@ def prepare_turn(runtime, artifact, *, message, history=(), input_data=None, pol
                     'cliSandbox': {'mode': runtime.config.cli_sandbox.mode,
                                    'runtimeRoots': list(runtime.config.cli_sandbox.runtime_roots)},
                     'messages': messages}
+        if context_policy is not None:
+            if input_bytes != report.encoded_input_bytes:
+                raise TurnAdmissionError('bindingMismatch')
+            material.update({'selectedHistory': selected_history,
+                'contextPolicy': context_policy.to_dict(),
+                'counterDescriptor': registration.descriptor.to_dict(),
+                'contextSelection': selection.to_dict(), 'contextReport': report.to_dict()})
         encoded = encode_owned(material, max_bytes=limits.max_history_bytes + limits.max_input_bytes * 2,
             max_depth=limits.max_json_depth, max_nodes=limits.max_json_nodes)
         identity_material = {k: v for k, v in material.items() if k != 'workspace'}
         identity = hashlib.sha256(encode_owned(identity_material,
             max_bytes=limits.max_history_bytes + limits.max_input_bytes * 2,
             max_depth=limits.max_json_depth, max_nodes=limits.max_json_nodes)).hexdigest()
-        return PreparedTurn._create(encoded, identity, input_bytes)
+        return PreparedTurn._create(encoded, identity, input_bytes,
+            encoding_version='conversation-turn-v2' if context_policy is not None else 'conversation-turn-v1',
+            context_work=work)
     except TurnAdmissionError:
         raise
     except (ValueError, TypeError, KeyError, AttributeError, UnicodeError) as exc:
