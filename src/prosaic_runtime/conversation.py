@@ -307,6 +307,8 @@ class TurnResult:
     result: Result
     completed_turn: CompletedTurn | None
     evidence: TurnEvidence
+    context_report: object = None
+    context_work: object = None
 
 
 @dataclass(frozen=True, init=False)
@@ -316,12 +318,31 @@ class PreparedTurn:
     context_identity: str
     encoding_version: str
     input_bytes: int
+    _context_work: object = None
 
     @classmethod
-    def _create(cls, encoded, identity, input_bytes):
+    def _create(cls, encoded, identity, input_bytes, *, encoding_version='conversation-turn-v1', context_work=None):
         instance = object.__new__(cls)
         object.__setattr__(instance, '_encoded', encoded)
         object.__setattr__(instance, 'context_identity', identity)
-        object.__setattr__(instance, 'encoding_version', 'conversation-turn-v1')
+        object.__setattr__(instance, 'encoding_version', encoding_version)
         object.__setattr__(instance, 'input_bytes', input_bytes)
+        object.__setattr__(instance, '_context_work', context_work)
         return instance
+
+    @property
+    def context_report(self):
+        from .context_contracts import ContextAssemblyReport
+        document = json.loads(self._encoded)
+        return ContextAssemblyReport.from_dict(document['contextReport']) if 'contextReport' in document else None
+
+    @property
+    def context_selection(self):
+        from .context_contracts import ContextSelection
+        document = json.loads(self._encoded)
+        return ContextSelection.from_dict(document['contextSelection']) if 'contextSelection' in document else None
+
+    @property
+    def context_work(self):
+        from .context_contracts import ContextWorkState
+        return ContextWorkState.from_dict(self._context_work.to_dict()) if self._context_work is not None else None

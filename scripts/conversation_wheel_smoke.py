@@ -22,7 +22,7 @@ def ownership():
     import prosaic_runtime as api
     import prosaic_runtime_postgres as recorder
     for module, distribution, version in ((prosaic, 'b3-prosaic', '0.4.1'),
-            (api, 'b3-prosaic-runtime', '0.9.3'),
+            (api, 'b3-prosaic-runtime', '0.9.4'),
             (recorder, 'b3-prosaic-runtime-postgres', '0.3.0')):
         owner = metadata.distribution(distribution)
         assert module.__version__ == owner.version == version
@@ -39,6 +39,7 @@ def ownership():
             continue
         raise AssertionError('legacy distribution overlaps public imports')
     assert 'conversation_turn_v1' in api.ProsaicRuntime.capabilities
+    assert 'context_assembly_v1' in api.ProsaicRuntime.capabilities
     return api
 
 
@@ -56,7 +57,7 @@ def worker():
             self.connection.settimeout(2)
         def do_POST(self):
             length = int(self.headers['Content-Length'])
-            assert 0 < length <= 196608 and len(requests) < 2
+            assert 0 < length <= 196608 and len(requests) < 3
             requests.append(json.loads(self.rfile.read(length)))
             text = ('Prague' if len(requests) == 1 else 'Prague again')
             body = json.dumps({'choices': [{'message': {'role': 'assistant', 'content': text},
@@ -93,9 +94,23 @@ def worker():
         history = requests[1]['messages']
         assert [m['role'] for m in history] == ['system', 'user', 'assistant', 'user']
         assert history[2]['content'] == 'Prague'
+        class FixtureCounter:
+            def count_tokens(self, request):
+                return 250 if 'Which city?' in json.dumps(request) else 10
+        descriptor = api.TokenCounterDescriptor('synthetic-v1', 'openai-compatible',
+            'synthetic', 'openai-chat-v1', 200, '1', '0'*64, '1'*64,
+            'exact', 'Exact units for this synthetic test grammar only.')
+        counters = api.TokenCounterRegistry({'synthetic-v1':
+            api.TokenCounterRegistration(descriptor, FixtureCounter())})
+        context_policy = api.ContextPolicy('omitOldestTurns', 200, 20, 0, 'synthetic-v1')
+        fitted = runtime.turn(agent, message='Now?', history=first.completed_turn.messages,
+            policy=policy, context_policy=context_policy, token_counters=counters)
+        assert fitted.result.exit_code == 0 and len(requests) == 3
+        assert fitted.context_report.omitted_turn_count == 1
+        assert 'Which city?' not in json.dumps(requests[2])
         ownership()
         print(json.dumps({'version': 1, 'runtimeVersion': api.__version__,
-            'checks': ['installedOwnership', 'purePreparation', 'twoTurnHistory', 'noWorkspace'],
+            'checks': ['installedOwnership', 'purePreparation', 'twoTurnHistory', 'noWorkspace', 'syntheticContextAssembly'],
             'providerRequests': len(requests), 'liveProvider': False}))
     finally:
         server.shutdown()
