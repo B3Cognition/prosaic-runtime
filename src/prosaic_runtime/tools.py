@@ -169,7 +169,7 @@ def parse_arguments(raw, schema, maximum):
 def bounded_result(value, maximum):
     try:
         envelope = failure_outcome(value)
-        depth(envelope)
+        depth(envelope['result'] if envelope['status']=='ok' else envelope)
         text = json.dumps(envelope, allow_nan=False)
         if len(text.encode('utf-8')) > maximum:
             return {'status': 'error', 'error': 'result_limit'}
