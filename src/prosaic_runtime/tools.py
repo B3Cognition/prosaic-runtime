@@ -11,7 +11,7 @@ from jsonschema.exceptions import ValidationError, SchemaError
 from .events import Cancelled
 from .policy import BUILTIN_TOOLS
 from .operation_context import ToolExecutionContext, bounded_reference
-from .tool_effects import ToolEffectFailure, canonical_json, snapshot_outcome, validate_claim
+from .tool_effects import ToolEffectFailure, canonical_json, snapshot_outcome, validate_claim, failure_outcome
 
 
 class ToolDeadlineExceeded(TimeoutError):
@@ -168,8 +168,8 @@ def parse_arguments(raw, schema, maximum):
 
 def bounded_result(value, maximum):
     try:
-        depth(value)
-        envelope = {'status': 'ok', 'result': value}
+        envelope = failure_outcome(value)
+        depth(envelope)
         text = json.dumps(envelope, allow_nan=False)
         if len(text.encode('utf-8')) > maximum:
             return {'status': 'error', 'error': 'result_limit'}
@@ -250,7 +250,7 @@ def execute_custom_tool(tool, raw_arguments, *, check_boundary, scope=None,
         check_boundary()
         try:
             value = invoke(tool.handler, context)
-            outcome = snapshot_outcome({'status': 'ok', 'result': value}, tool.max_result_bytes)
+            outcome = snapshot_outcome(failure_outcome(value), tool.max_result_bytes)
         except Exception:
             # Dispatch errors and unusable results cannot establish completion.
             if on_completion is not None:

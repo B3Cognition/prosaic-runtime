@@ -9,6 +9,28 @@ from .operation_context import InvocationScope, bounded_reference
 
 
 @dataclass(frozen=True)
+class ToolFailure:
+    """A trusted callback's proven completed failure, never an unknown effect.
+
+    Return only after establishing that the operation failed deterministically.
+    Generic exceptions and lost acknowledgements retain uncertain-effect fencing.
+    Codes are safe public machine identifiers, never raw exception text.
+    """
+    code: str
+
+    def __post_init__(self):
+        if type(self.code) is not str or re.fullmatch(r'[a-z][a-z0-9_]{0,63}', self.code) is None:
+            raise ValueError('invalid controlled tool failure code')
+
+
+def failure_outcome(value):
+    if type(value) is ToolFailure:
+        ToolFailure.__post_init__(value)
+        return {'status': 'error', 'error': value.code}
+    return {'status': 'ok', 'result': value}
+
+
+@dataclass(frozen=True)
 class ToolClaim:
     state: str
     signature: str
@@ -79,7 +101,11 @@ def canonical_json(value):
 
 def snapshot_outcome(outcome, maximum):
     from .tools import depth
-    if type(outcome) is not dict or set(outcome) != {'status', 'result'} or outcome['status'] != 'ok':
+    if type(outcome) is not dict:
+        raise ValueError('invalid committed outcome')
+    if set(outcome)=={'status','error'} and outcome['status']=='error':
+        ToolFailure(outcome['error'])
+    elif set(outcome)!={'status','result'} or outcome['status']!='ok':
         raise ValueError('invalid committed outcome')
     depth(outcome)
     serialized = canonical_json(outcome)

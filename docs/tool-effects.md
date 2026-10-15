@@ -72,7 +72,7 @@ matching lowercase 64-hex signature and one of these closed states:
 | State | Permitted fields | Runtime action |
 | --- | --- | --- |
 | `new` | Bounded nonempty `claim_token`; no outcome | Dispatch the effect once. |
-| `replay` | No token; finite bounded `{'status': 'ok', 'result': ...}` outcome | Copy and return the recorded outcome. |
+| `replay` | No token; finite bounded `{'status': 'ok', 'result': ...}` or `{'status': 'error', 'error': code}` outcome | Copy and return the recorded outcome. |
 | `uncertain` | No token or outcome | Stop pending explicit host resolution. |
 
 The journal must atomically claim the namespace/key address and commit using a
@@ -112,3 +112,11 @@ or domain idempotency/fencing.
 The SQLite journal under `tests/support/` is test support only. Production business
 journals belong to host applications; usage recorders and Harness checkpoints are
 separate stores and responsibilities.
+
+A callback may return the public `ToolFailure("read_unavailable")` only for a
+proven completed failure. Its bounded machine code is journaled before cancellation
+or deadline checks; completion evidence is `completed` or `replayed`, never an
+assertion that the requested business operation succeeded. NEVER return this type
+for an unknown effect. ALWAYS leave generic exceptions and lost acknowledgements
+on the uncertain-effect path. Ordinary returned dictionaries remain successful
+JSON data and are not interpreted as this explicit failure contract.

@@ -44,6 +44,8 @@ class Capture:
             self.recorder.prepare(intent)
         except Exception as exc:
             raise AccountingError('intent persistence failed') from exc
+        request.add_header("X-Correlation-ID", call_id)
+        request.add_header("X-Client-Request-Id", call_id)
         self.call_ids.append(call_id)
         observer = AnthropicObservation if self.provider == 'anthropic' else Observation
         observation = observer(self.recorder, call_id, on_observation=self.on_observation)

@@ -23,6 +23,7 @@ from .cli_tools import load_cli_tools, cli_tool_context
 from .tool_registry import BoundedToolRegistry, DisabledBuiltinRegistry, InvalidToolRequest
 from .accounting import AccountingError, resolve_context
 from .accounting_capture import Capture, InvalidEvidence, strict_json
+from .lifecycle import ExecutionLifecycle, tracked
 from .http_bounds import LimitExceeded, set_response_timeout, BoundedNativeStream
 from .operation_context import InvocationScope
 from .tool_effects import admit_tool_effects, ToolEffectFailure
@@ -209,6 +210,10 @@ class _BoundedMixin:
         observe('provider_request_started')
         outcome = 'execution_failure'
         status = None
+        if self.capture is None:
+            call_id = uuid4().hex
+            request.add_header("X-Correlation-ID", call_id)
+            request.add_header("X-Client-Request-Id", call_id)
         opener = urllib.request.build_opener(_NoRedirect())
         try:
             # Observers and persisted intent preparation can stop execution.
@@ -338,9 +343,12 @@ class ProsaicRuntime:
     capabilities = frozenset({'conformance_v1', 'invocation_budgets_v1', 'observer_v1', 'accounting_v1', 'read_receipts_v1', 'initial_tool_v1', 'initial_tool_enforcement_v1', 'acquisition_v1', 'custom_tools_v1', 'cli_tools_v1', 'cli_sandbox_v1'})
     capabilities |= frozenset({'tool_context_v1', 'tool_journal_v1'})
     capabilities |= frozenset({'conversation_turn_v1'})
-    capabilities |= frozenset({'context_assembly_v1'})
+    capabilities |= frozenset({'context_assembly_v1', 'http_correlation_v1', 'execution_lifecycle_v1'})
     def __init__(self, config: RuntimeConfig, *, source=".prosaic", executable="prosaic", custom_tools=None,
-                 accounting=None, context_defaults=None):
+                 accounting=None, context_defaults=None, lifecycle=None):
+        self.lifecycle = lifecycle if lifecycle is not None else ExecutionLifecycle()
+        if not isinstance(self.lifecycle, ExecutionLifecycle):
+            raise TypeError("lifecycle must be an ExecutionLifecycle")
         self.config = config
         self.source = Path(source)
         self.executable = executable
@@ -371,6 +379,7 @@ class ProsaicRuntime:
                             context_selection=context_selection, context_report=context_report,
                             context_work=context_work)
 
+    @tracked
     def turn(self, artifact, *, message=None, history=(), input_data=None,
              policy=None, limits=None, workspace=None, on_event=None, cancelled=None,
              env=None, context=None, accounting=None, observer=None,
@@ -540,6 +549,7 @@ class ProsaicRuntime:
         return self._preflight_names(names, str(Path(cwd).resolve()), policy,
                                      dict(os.environ if env is None else env), deadline)
 
+    @tracked
     def run(self, artifact: str | ProsaicArtifact, arguments: str = "", *,
             cwd: str | Path = '.', policy: RunPolicy | None = None,
             on_event=None, cancelled=None, env=None,

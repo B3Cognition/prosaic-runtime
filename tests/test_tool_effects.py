@@ -257,7 +257,7 @@ def test_invalid_claim_never_dispatches(shape):
                 'invalid_token': ToolClaim('new', signature, 'a\n'),
                 'new_outcome': ToolClaim('new', signature, 'token', {'status': 'ok', 'result': {}}),
                 'replay_token': ToolClaim('replay', signature, 'token', {'status': 'ok', 'result': {}}),
-                'replay_error': ToolClaim('replay', signature, outcome={'status': 'error', 'error': 'bad'}),
+                'replay_error': ToolClaim('replay', signature, outcome={'status': 'error', 'error': 'private error text'}),
                 'replay_extra': ToolClaim('replay', signature, outcome={'status': 'ok', 'result': {}, 'extra': 1}),
                 'replay_nan': ToolClaim('replay', signature, outcome={'status': 'ok', 'result': float('nan')}),
                 'replay_oversize': ToolClaim('replay', signature, outcome={'status': 'ok', 'result': 'x' * 100}),

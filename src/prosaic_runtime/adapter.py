@@ -11,6 +11,7 @@ import re
 import time
 
 from .runtime import ProsaicRuntime
+from .lifecycle import tracked
 from .policy import RunPolicy
 from .types import Result
 from .budgets import InvocationBudgetExceeded
@@ -163,6 +164,10 @@ class RuntimeAdapter:
         return self.runtime.config
 
     @property
+    def lifecycle(self):
+        return self.runtime.lifecycle
+
+    @property
     def capabilities(self):
         return self.runtime.capabilities | frozenset({'runtime_adapter_v1'})
 
@@ -174,6 +179,7 @@ class RuntimeAdapter:
     def cli_tool_names(self):
         return self.runtime.cli_tool_names
 
+    @tracked
     def run(self, artifact, arguments='', *, policy=None, on_event=None, cancelled=None, **options):
         self.validate_binding()
         policy = policy or RunPolicy()

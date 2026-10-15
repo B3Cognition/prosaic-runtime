@@ -673,3 +673,5 @@ budget as a durable ledger or reset uncertain allowances after a restart.
 PostgreSQL accounting remains the authoritative provider-call evidence. Saved
 host outcomes require a fenced ToolJournal or equivalent durable application
 repository; interrupted effects must not be repeated automatically.
+
+See [execution correlation and graceful drain](docs/execution-lifecycle.md) for the host shutdown contract.
