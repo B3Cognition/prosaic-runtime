@@ -23,7 +23,8 @@ API_VERSION = '2023-06-01'
 
 def validate_anthropic_controls(features, prompt_metadata):
     """Validate known Messages controls without constructing a model request."""
-    unsupported = {'json_mode', 'reasoning_effort', 'effort', 'thinking', 'stream_options', 'web_tools'}
+    unsupported = {'json_mode', 'reasoning_effort', 'effort', 'thinking', 'stream_options', 'web_tools',
+                   'omlx_tool_call_envelope'}
     for name in unsupported:
         value = features.get(name)
         if value not in (None, False, 'off', 'false', 'disabled'):

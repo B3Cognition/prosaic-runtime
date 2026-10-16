@@ -8,7 +8,7 @@ Candidates are not public index releases until the release qualification gate pa
 
 ### Opt-in final-answer phase
 
-The local `0.9.3+finalize.2` candidate adds an operator-controlled endpoint
+The local `0.9.3+finalize.3` candidate adds an operator-controlled endpoint
 feature for bounded lookup workflows:
 
 ```yaml
@@ -29,6 +29,18 @@ The value must be an integer from one through the invocation's effective
 `max_tool_rounds`. Omit it to retain existing multi-round and no-progress
 behavior. Agent prose and model output cannot set this host configuration.
 This candidate is for pinned-wheel qualification, not a published release.
+
+For an oMLX endpoint serving Qwen JSON tool envelopes, the host can also set
+`omlx_tool_call_envelope: true`. This requires an explicit
+`finalize_after_tool_rounds` and requests oMLX's `structured_outputs.regex`
+constraint while tools are offered. It forces a tool envelope rather than an
+ordinary answer during that phase; the final request removes this constraint.
+`json_mode` applies to the final answer and is suppressed during the tool phase.
+Native Anthropic rejects this vendor-specific setting before dispatch. Other
+servers may reject or ignore it; this is not a portable OpenAI protocol option.
+The constraint covers the envelope, not argument correctness or task quality.
+Runtime still validates native tool names, arguments, permissions and budgets.
+Assistant text is never converted to a tool call by this setting.
 
 The optional [stateless conversation API](docs/conversations.md) uses complete,
 bounded portable history through `prepare_turn()` and `turn()`. It requires no
