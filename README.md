@@ -6,6 +6,30 @@ and the `prosaic-runtime` CLI remain unchanged. The separately installed recorde
 is `b3-prosaic-runtime-postgres` **0.3.0**, selecting Runtime 0.9.x.
 Candidates are not public index releases until the release qualification gate passes.
 
+### Opt-in final-answer phase
+
+The local `0.9.3+finalize.2` candidate adds an operator-controlled endpoint
+feature for bounded lookup workflows:
+
+```yaml
+features:
+  finalize_after_tool_rounds: 1
+```
+
+After that many tool rounds, the next OpenAI-compatible or native Anthropic
+request contains no tool declarations and receives trusted final-answer
+guidance. A provider that still requests a tool fails with
+`tool_finalization_not_honored` before another handler runs. Existing provider,
+tool, token and time budgets still apply; allow capacity for the final request.
+Cancellation or exhausted budgets can stop before that request. Missing usage
+remains unknown. This setting does not assert that the evidence is sufficient
+or that the final answer is correct.
+
+The value must be an integer from one through the invocation's effective
+`max_tool_rounds`. Omit it to retain existing multi-round and no-progress
+behavior. Agent prose and model output cannot set this host configuration.
+This candidate is for pinned-wheel qualification, not a published release.
+
 The optional [stateless conversation API](docs/conversations.md) uses complete,
 bounded portable history through `prepare_turn()` and `turn()`. It requires no
 workspace for ordinary callbacks or tool-free turns. Durable sessions and human

@@ -57,6 +57,7 @@ class ExecutionBackend:
         identical_tool_rounds = 0
         tools_disabled = False
         tool_no_progress_forced = False
+        finalization_forced = False
         max_tool_rounds = _feature_int(
             llm.features,
             "max_tool_rounds",
@@ -71,6 +72,11 @@ class ExecutionBackend:
             minimum=2,
             maximum=10,
         )
+        finalize_after = llm.features.get('finalize_after_tool_rounds')
+        if 'finalize_after_tool_rounds' in llm.features and (
+            type(finalize_after) is not int or not 1 <= finalize_after <= max_tool_rounds
+        ):
+            raise ValueError('finalize_after_tool_rounds must be an integer between 1 and max_tool_rounds')
         run_started = time.monotonic()
 
         while True:
@@ -191,6 +197,21 @@ class ExecutionBackend:
                         },
                     )
             if turn.tool_calls:
+                if finalization_forced:
+                    return CliRunResult(
+                        exit_code=1, stdout='',
+                        stderr='model requested tools during final-answer phase',
+                        token_usage=token_usage,
+                        metadata={
+                            'provider': self.name,
+                            'provider_error_code': 'tool_finalization_not_honored',
+                            'failure_reason': 'tool_finalization_not_honored',
+                            'tool_call_count': tool_call_count,
+                            'tool_rounds': tool_rounds,
+                            'token_usage_details': token_usage_details,
+                            **_transcript_metadata(transcript),
+                        },
+                    )
                 if initial_messages is not None:
                     if turn.finish_reason not in {'tool_calls', 'tool_use'}:
                         return CliRunResult(1, '', 'incomplete tool batch', token_usage=token_usage,
@@ -338,7 +359,13 @@ class ExecutionBackend:
                 if acquiring:
                     messages.append({'role': 'user', 'content': prompt_metadata['final_prompt']})
                     emit('acquisition_completed', tool=initial_tool, turn=turn_number)
-                if identical_tool_rounds >= max_identical_tool_rounds:
+                if finalize_after is not None and tool_rounds >= finalize_after:
+                    tools_disabled = True
+                    finalization_forced = True
+                    messages.append({'role': 'system', 'content':
+                        'The tool phase has ended. Return the requested final answer using '
+                        'the information available. Do not request any more tools.'})
+                elif identical_tool_rounds >= max_identical_tool_rounds:
                     tools_disabled = True
                     tool_no_progress_forced = True
                     initial_guidance = messages[0].get("content")
