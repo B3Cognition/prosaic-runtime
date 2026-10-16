@@ -8,7 +8,7 @@ Candidates are not public index releases until the release qualification gate pa
 
 ### Opt-in final-answer phase
 
-The local `0.9.3+finalize.3` candidate adds an operator-controlled endpoint
+The local `0.9.3+finalize.4` candidate adds an operator-controlled endpoint
 feature for bounded lookup workflows:
 
 ```yaml

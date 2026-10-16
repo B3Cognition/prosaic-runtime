@@ -229,6 +229,7 @@ class OpenAICompatibleBackend(ExecutionBackend):
 
     def run_prompt(self, request: CliRunRequest) -> CliRunResult:
         llm = self._config
+        _omlx_tool_envelope(llm.features)
         assert llm.base_url is not None
         assert llm.model is not None
         prompt_metadata = _prompt_metadata(request)
@@ -409,12 +410,7 @@ class OpenAICompatibleBackend(ExecutionBackend):
         if tools:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
-        envelope = llm.features.get('omlx_tool_call_envelope', False)
-        if type(envelope) is not bool or (envelope and (
-            type(llm.features.get('finalize_after_tool_rounds')) is not int
-            or llm.features['finalize_after_tool_rounds'] < 1
-        )):
-            raise ValueError('omlx_tool_call_envelope requires a boolean and explicit finalize_after_tool_rounds')
+        envelope = _omlx_tool_envelope(llm.features)
         if envelope and tools:
             # oMLX constrains generation; only native tool_calls may execute.
             # An answer JSON grammar cannot also constrain the tool envelope.
@@ -1523,6 +1519,16 @@ def _api_key(
     if not token:
         return "", f"OpenAI-compatible API key file is empty: {path}"
     return token, ""
+
+
+def _omlx_tool_envelope(features):
+    envelope = features.get('omlx_tool_call_envelope', False)
+    if type(envelope) is not bool or (envelope and (
+        type(features.get('finalize_after_tool_rounds')) is not int
+        or features['finalize_after_tool_rounds'] < 1
+    )):
+        raise ValueError('omlx_tool_call_envelope requires a boolean and explicit finalize_after_tool_rounds')
+    return envelope
 
 
 def _feature_enabled(

@@ -23,17 +23,19 @@ def test_envelope_constraint_only_applies_to_native_tool_phase(server, tmp_path,
     assert result.token_usage == 14
 
 
+@pytest.mark.parametrize('tools', [False, True])
 @pytest.mark.parametrize('features', [
     {'omlx_tool_call_envelope': 'true', 'finalize_after_tool_rounds': 1},
     {'omlx_tool_call_envelope': 1, 'finalize_after_tool_rounds': 1},
     {'omlx_tool_call_envelope': None, 'finalize_after_tool_rounds': 1},
     {'omlx_tool_call_envelope': True},
 ])
-def test_invalid_envelope_controls_fail_before_http(server, features):
+def test_invalid_envelope_controls_fail_before_http(server, features, tools):
     url, requests, responses = server
     responses.append(completion('must not run'))
     with pytest.raises(ValueError, match='omlx_tool_call_envelope'):
-        runtime(EndpointConfig(url, 'fixture', features=features)).run(artifact('read'), policy=policy())
+        runtime(EndpointConfig(url, 'fixture', features=features)).run(
+            artifact('read' if tools else ''), policy=policy() if tools else None)
     assert requests == []
 
 
