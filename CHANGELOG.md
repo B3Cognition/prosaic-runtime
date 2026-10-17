@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.6 — 2026-10-17
+
+- Add opt-in host-controlled final-answer phases after a bounded number of tool rounds.
+- Add optional oMLX native tool-call envelope constraints, removed for final answers.
+- Validate envelope configuration before dispatch and reject further tool calls after finalization.
+- Retain native grant, budget and argument checks; defaults remain unchanged.
+
 ## 0.9.3 — 2026-10-14
 
 - Normalize negative provider timeout exit statuses to 124 in conversation turn

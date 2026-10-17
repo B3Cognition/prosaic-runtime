@@ -6,6 +6,42 @@ and the `prosaic-runtime` CLI remain unchanged. The separately installed recorde
 is `b3-prosaic-runtime-postgres` **0.3.0**, selecting Runtime 0.9.x.
 Candidates are not public index releases until the release qualification gate passes.
 
+### Opt-in final-answer phase
+
+The local `0.9.3+finalize.4` candidate adds an operator-controlled endpoint
+feature for bounded lookup workflows:
+
+```yaml
+features:
+  finalize_after_tool_rounds: 1
+```
+
+After that many tool rounds, the next OpenAI-compatible or native Anthropic
+request contains no tool declarations and receives trusted final-answer
+guidance. A provider that still requests a tool fails with
+`tool_finalization_not_honored` before another handler runs. Existing provider,
+tool, token and time budgets still apply; allow capacity for the final request.
+Cancellation or exhausted budgets can stop before that request. Missing usage
+remains unknown. This setting does not assert that the evidence is sufficient
+or that the final answer is correct.
+
+The value must be an integer from one through the invocation's effective
+`max_tool_rounds`. Omit it to retain existing multi-round and no-progress
+behavior. Agent prose and model output cannot set this host configuration.
+This candidate is for pinned-wheel qualification, not a published release.
+
+For an oMLX endpoint serving Qwen JSON tool envelopes, the host can also set
+`omlx_tool_call_envelope: true`. This requires an explicit
+`finalize_after_tool_rounds` and requests oMLX's `structured_outputs.regex`
+constraint while tools are offered. It forces a tool envelope rather than an
+ordinary answer during that phase; the final request removes this constraint.
+`json_mode` applies to the final answer and is suppressed during the tool phase.
+Native Anthropic rejects this vendor-specific setting before dispatch. Other
+servers may reject or ignore it; this is not a portable OpenAI protocol option.
+The constraint covers the envelope, not argument correctness or task quality.
+Runtime still validates native tool names, arguments, permissions and budgets.
+Assistant text is never converted to a tool call by this setting.
+
 The optional [stateless conversation API](docs/conversations.md) uses complete,
 bounded portable history through `prepare_turn()` and `turn()`. It requires no
 workspace for ordinary callbacks or tool-free turns. Durable sessions and human

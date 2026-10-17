@@ -22,7 +22,7 @@ def ownership():
     import prosaic_runtime as api
     import prosaic_runtime_postgres as recorder
     for module, distribution, version in ((prosaic, 'b3-prosaic', '0.4.1'),
-            (api, 'b3-prosaic-runtime', '0.9.5'),
+            (api, 'b3-prosaic-runtime', '0.9.6'),
             (recorder, 'b3-prosaic-runtime-postgres', '0.3.0')):
         owner = metadata.distribution(distribution)
         assert module.__version__ == owner.version == version
