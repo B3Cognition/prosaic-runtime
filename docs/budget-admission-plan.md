@@ -52,3 +52,13 @@ to orchestrate through its public APIs; host budget activation spans its retries
 - Ruling: strict admission is opt-in for general Runtime consumers and required
   for new live Lab benchmarks. Existing stop-threshold behavior remains valid
   for older callers; missing trusted counters cannot silently become estimates.
+- Runtime regressions: initial 10 tests failed for missing token_counter API;
+  admission/continuation/transport/concurrency cases passed after implementation.
+  Extended Anthropic, streaming and adapter tests passed (16 total).
+- Review: one fresh reviewer found below-sample request breaches lost by Lab and
+  complete captured usage lost on recorder failure. Both reproduced before fixes.
+  Capture/budget regression set: 48 passed after the fix. No live calls.
+- Qualification environment: initial source suite used an environment without
+  setuptools; build gates failed. A new isolated test environment fixes this.
+  A concurrent-suite CLI output-limit failure passed all 31 CLI tests on rerun;
+  final full suite is still required after the reviewed source is committed.

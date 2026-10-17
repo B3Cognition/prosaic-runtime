@@ -68,6 +68,10 @@ class ExecutionBudget:
         """Owned public counter provenance, or None for legacy stop thresholds."""
         return self._token_counter.descriptor.to_dict() if self._token_counter is not None else None
 
+    @property
+    def reservation_exceeded(self):
+        with self._lock: return self._reservation_breached
+
     def _check_tokens(self, *, dispatch=False):
         if self._token_cap is not None:
             if not self._usage_complete: raise InvocationBudgetExceeded('usage_unknown')

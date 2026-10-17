@@ -76,6 +76,7 @@ class _BoundedMixin:
         self.known_usage_details = {}
         self._dispatch_reservation = None
         self._request_token_reservations = {}
+        self._captured_usage = None
 
     def check_boundary(self):
         check_budgets(self.execution_budgets)
@@ -220,6 +221,7 @@ class _BoundedMixin:
         self._turn_usage_unknown = False
         self._latest_usage_complete = None
         self._previous_usage_details = {}
+        self._captured_usage = None
         started = time.monotonic()
         self._stream_timed_out = False
         observe('provider_request_started')
@@ -631,7 +633,8 @@ class ProsaicRuntime:
                                _turn_prepared=_turn_prepared, _turn_capture=_turn_capture, _turn_snapshot=_turn_snapshot)
         except AccountingError:
             result = Result(1, '', 'accounting persistence failed; do not retry the provider automatically',
-                            metadata={'failure_reason': 'accounting_failed'})
+                            token_usage=budget.reported_tokens if budget.usage_complete and budget.provider_requests else None,
+                            metadata={'failure_reason': 'accounting_failed','reported_token_usage':budget.reported_tokens})
         if enabled:
             # Capture lineage is supplied by the result when a request began;
             # failures before capture still expose the resolved attribution.
@@ -641,6 +644,8 @@ class ProsaicRuntime:
         strict=[b for b in active_budgets() if b.token_admission is not None]
         if strict:
             result.metadata['token_admission_v1']=[b.token_admission for b in strict]
+            if any(b.reservation_exceeded for b in active_budgets()):
+                result.metadata['token_admission_violation']='token_reservation_exceeded'
             if not budget.usage_complete:
                 result.token_usage=None
                 result.metadata['token_usage_status']='unknown'
@@ -738,8 +743,14 @@ class ProsaicRuntime:
                 execution_started()
                 emit("started", artifact_id=artifact.id, artifact_sha256=artifact.digest, profile=profile,
                      model=endpoint.model, tools=sorted(tools))
+                def captured(call_id, observation):
+                    # Keep normalized evidence before a recorder/callback can
+                    # fail. This is independent of durable persistence success.
+                    backend._captured_usage=dict(observation['usage'])
+                    if _turn_capture is not None:
+                        _turn_capture.record_provider_observation(call_id,observation)
                 capture = Capture(_recorder, _context, artifact, profile, endpoint.provider,
-                    on_observation=_turn_capture.record_provider_observation if _turn_capture is not None else None) if _recorder is not None else None
+                    on_observation=captured) if _recorder is not None else None
                 if capture is not None:
                     _capture_ref(capture)
                 backend_type = _BoundedAnthropicBackend if endpoint.provider == 'anthropic' else _BoundedBackend
@@ -839,9 +850,16 @@ class ProsaicRuntime:
                               'token_usage_details': backend.reported_usage_details if backend else {}})
             finally:
                 if backend is not None and backend._dispatch_reservation is not None and not backend._dispatch_reservation.settled:
-                    # A dispatched request without a complete parsed usage report
-                    # cannot release its reservation, including transport failures.
-                    try: record_shared_usage(backend.execution_budgets,None,reservation=backend._dispatch_reservation)
-                    except InvocationBudgetExceeded: pass
-                    backend.usage_complete=False
-                    if backend.budget is not None: backend.budget.usage_complete=False
+                    usage=backend._captured_usage
+                    if usage is not None and usage.get('status')=='reported':
+                        details={dst:usage[src] for src,dst in (('input_tokens','prompt_tokens'),
+                            ('output_tokens','completion_tokens'),('total_tokens','total_tokens')) if usage.get(src) is not None}
+                        try:backend.record_turn_usage(details)
+                        except InvocationBudgetExceeded:pass
+                    else:
+                        # An unresolved transport or incomplete observation cannot
+                        # release its reservation or become zero paid usage.
+                        try: record_shared_usage(backend.execution_budgets,None,reservation=backend._dispatch_reservation)
+                        except InvocationBudgetExceeded: pass
+                        backend.usage_complete=False
+                        if backend.budget is not None: backend.budget.usage_complete=False

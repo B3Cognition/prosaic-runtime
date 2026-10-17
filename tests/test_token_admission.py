@@ -196,3 +196,17 @@ def test_adapter_retries_share_token_admission_remainder(server):
     with b.activate():result=adapter.run(artifact())
     assert result.exit_code!=0 and result.metadata['failure_reason']=='token_limit'
     assert len(requests)==1 and b.reported_tokens==7 and b.provider_requests==1
+
+
+def test_recorder_failure_cannot_erase_complete_known_overrun(server):
+    from prosaic_runtime.accounting import MemoryRecorder,AccountingError
+    class Broken(MemoryRecorder):
+        def observe(self,*args):raise AccountingError('fixture persistence failure')
+    url, requests, responses=server;responses.append(completion('yes'))
+    b=ExecutionBudget(timeout_s=10,max_provider_requests=2,max_tool_calls=0,max_reported_tokens=100,
+        token_counter=registration(1))
+    with b.activate():
+        result=runtime(EndpointConfig(url,'test',max_tokens=5,features={'streaming':False}),accounting=Broken()).run(artifact())
+    assert result.metadata['failure_reason']=='accounting_failed' and len(requests)==1
+    assert result.token_usage==b.reported_tokens==7 and b.reserved_tokens==0 and b.usage_complete
+    assert result.metadata['token_admission_violation']=='token_reservation_exceeded'
