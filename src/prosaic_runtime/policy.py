@@ -19,8 +19,11 @@ class RunPolicy:
     max_provider_requests: int | None = None
     max_tool_calls: int | None = None
     max_reported_tokens: int | None = None
+    bounded_tool_recovery: bool = False
 
     def __post_init__(self):
+        if type(self.bounded_tool_recovery) is not bool:
+            raise ValueError('bounded_tool_recovery must be boolean')
         import math
         if not math.isfinite(self.timeout_s) or self.timeout_s <= 0:
             raise ValueError("timeout_s must be finite and positive")

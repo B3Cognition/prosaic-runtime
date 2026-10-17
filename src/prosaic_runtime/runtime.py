@@ -91,7 +91,8 @@ class _BoundedMixin:
         return BoundedToolRegistry(builtin,
                                    self.custom_tools, metadata.get('allowed_tools', ()), self.check_boundary,
                                    self.before_tool_dispatch,
-                                   self.tool_execution_options, index_all_calls=self.turn_mode)
+                                   self.tool_execution_options, index_all_calls=self.turn_mode,
+                                   bounded_recovery=self.budget is not None and self.budget.policy.bounded_tool_recovery)
 
     def before_tool_dispatch(self):
         if self.budget is not None:
@@ -362,6 +363,7 @@ class ProsaicRuntime:
     capabilities |= frozenset({'conversation_turn_v1'})
     capabilities |= frozenset({'context_assembly_v1', 'http_correlation_v1', 'execution_lifecycle_v1'})
     capabilities |= frozenset({'token_admission_v1'})
+    capabilities |= frozenset({'tool_outcomes_v1', 'bounded_tool_recovery_v1'})
     def __init__(self, config: RuntimeConfig, *, source=".prosaic", executable="prosaic", custom_tools=None,
                  accounting=None, context_defaults=None, lifecycle=None):
         self.lifecycle = lifecycle if lifecycle is not None else ExecutionLifecycle()

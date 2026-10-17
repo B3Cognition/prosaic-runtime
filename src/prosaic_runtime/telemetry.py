@@ -23,7 +23,7 @@ _OUTCOMES = {
 _REASONS = frozenset({'tool_effect_uncertain', 'tool_journal_failed', 'tool_identity_conflict',
                       'unknown', 'cancelled', 'invocation_timeout', 'inspection_timeout', 'budget_exceeded',
                       'provider_request_limit', 'tool_call_limit', 'token_limit', 'usage_unknown',
-                      'accounting_failed', 'incomplete_response', 'admission_failure',
+                      'accounting_failed', 'incomplete_response', 'admission_failure', 'tool_recovery_blocked',
                       'critical_hook_error', 'execution_failure'})
 _COUNTS = frozenset({'calls', 'turn', 'token_usage', 'tool_call_count', 'provider_request_count'})
 _DIGESTS = frozenset({'sha256', 'artifact_sha256', 'arguments_sha256'})
@@ -69,7 +69,13 @@ class ObserverEmitter:
         record = {'version': 1, 'sequence': self.sequence, 'source': self.source,
                   'event': event, **self._scope}
         for key, value in fields.items():
-            if key == 'outcome' and type(value) is str and value in _OUTCOMES[self.source]:
+            if key == 'tool_outcome' and self.source == 'runtime' and event == 'tool_completed':
+                from .tool_outcomes import ToolOutcome
+                try:
+                    record[key] = ToolOutcome.from_dict(value).to_dict()
+                except (ValueError, TypeError):
+                    pass
+            elif key == 'outcome' and type(value) is str and value in _OUTCOMES[self.source]:
                 record[key] = value
             elif key == 'reason' and type(value) is str and value in _REASONS:
                 record[key] = value

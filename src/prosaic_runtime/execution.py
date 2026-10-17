@@ -323,7 +323,22 @@ class ExecutionBackend:
                     call_started = time.monotonic()
                     emit("tool_started", name=tool_name, call_id=call_id, turn=turn_number,
                          **self.tool_event_metadata(tool_name))
-                    tool_message = registry.execute_message(tool_call)
+                    from .tool_effects import ToolEffectFailure
+                    from .tool_outcomes import ToolOutcome
+                    try:
+                        tool_message = registry.execute_message(tool_call)
+                    except ToolEffectFailure:
+                        outcome = getattr(registry, 'last_outcome', ToolOutcome('unclassified')).to_dict()
+                        from .events import Cancelled
+                        try:
+                            emit('tool_completed', name=tool_name, call_id=call_id, turn=turn_number,
+                                 status='error', duration_ms=round((time.monotonic()-call_started)*1000, 3),
+                                 read_receipts=[], tool_outcome=outcome, **self.tool_event_metadata(tool_name))
+                        except Cancelled:
+                            # Terminal journal uncertainty takes precedence over a
+                            # later cancellation boundary; neither permits replay.
+                            pass
+                        raise
                     if turn_capture is not None:
                         turn_capture.tool(tool_call, tool_message)
                     tool_payload = json.loads(tool_message["content"])
@@ -336,7 +351,9 @@ class ExecutionBackend:
                                           ("path", "sha256", "offset", "lines_read", "line_count")}]
                     emit("tool_completed", name=tool_name, call_id=call_id, turn=turn_number,
                          status=status, duration_ms=round((time.monotonic() - call_started) * 1000, 3),
-                         read_receipts=read_receipts, **self.tool_event_metadata(tool_name))
+                         read_receipts=read_receipts,
+                         tool_outcome=getattr(registry, 'last_outcome', ToolOutcome('ok' if status=='ok' else 'unclassified')).to_dict(),
+                         **self.tool_event_metadata(tool_name))
                     tool_result = _tool_result_status(tool_message)
                     _progress(
                         f"tool {tool_name} result: "
