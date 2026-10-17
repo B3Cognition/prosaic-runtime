@@ -30,7 +30,7 @@ from .tool_effects import admit_tool_effects, ToolEffectFailure
 from .telemetry import ObserverEmitter, observation_context, observe, execution_started
 from .budgets import InvocationBudget, InvocationBudgetExceeded
 from .turn_capture import TurnOutputExceeded
-from .execution_budget import active_budgets, check_budgets, reserve_dispatch, record_shared_usage
+from .execution_budget import active_budgets, check_budgets, reserve_dispatch, record_shared_usage, token_reservations
 from .context_execution import ContextExecutionFailure
 
 
@@ -74,6 +74,8 @@ class _BoundedMixin:
         self.turn_mode = False
         self.turn_capture = None
         self.known_usage_details = {}
+        self._dispatch_reservation = None
+        self._request_token_reservations = {}
 
     def check_boundary(self):
         check_budgets(self.execution_budgets)
@@ -165,7 +167,7 @@ class _BoundedMixin:
         if self.budget is not None:
             try: self.budget.record_usage(usage)
             except InvocationBudgetExceeded as exc: local_error=exc
-        record_shared_usage(self.execution_budgets,usage)
+        record_shared_usage(self.execution_budgets,usage,reservation=self._dispatch_reservation)
         if local_error is not None: raise local_error
 
     def tool_call_summary(self, tool_call):
@@ -186,11 +188,19 @@ class _BoundedMixin:
     def strict_conversation_calls(self):
         return self.turn_mode
 
+    def check_token_admission(self):
+        amounts=self._request_token_reservations
+        if amounts and self.budget is not None and self.budget.policy.max_reported_tokens is not None:
+            if self.budget.reported_tokens+max(amounts.values())>self.budget.policy.max_reported_tokens:
+                raise InvocationBudgetExceeded('token_limit')
+
     def before_http_dispatch(self, timeout):
         self.check_boundary()
         timeout = min(timeout, self.deadline - time.monotonic())
         if self.budget is not None: self.budget._check_provider()
-        reserve_dispatch(self.execution_budgets)
+        amounts=self._request_token_reservations
+        self.check_token_admission()
+        self._dispatch_reservation=reserve_dispatch(self.execution_budgets,token_reservations=amounts)
         if self.budget is not None:
             self.budget.before_provider()
         self._provider_attempts += 1
@@ -199,9 +209,14 @@ class _BoundedMixin:
     @contextmanager
     def open_http(self, request, *, timeout):
         self.check_boundary()
+        if any(b._token_counter is not None for b in self.execution_budgets):
+            try: native=strict_json(request.data)
+            except Exception: raise InvocationBudgetExceeded('token_admission') from None
+            self._request_token_reservations=token_reservations(self.execution_budgets,native,self._config)
         if self.budget is not None:
             self.budget._check_provider()
-        reserve_dispatch(self.execution_budgets,reserve=False)
+        self.check_token_admission()
+        reserve_dispatch(self.execution_budgets,reserve=False,token_reservations=self._request_token_reservations)
         self._turn_usage_unknown = False
         self._latest_usage_complete = None
         self._previous_usage_details = {}
@@ -344,6 +359,7 @@ class ProsaicRuntime:
     capabilities |= frozenset({'tool_context_v1', 'tool_journal_v1'})
     capabilities |= frozenset({'conversation_turn_v1'})
     capabilities |= frozenset({'context_assembly_v1', 'http_correlation_v1', 'execution_lifecycle_v1'})
+    capabilities |= frozenset({'token_admission_v1'})
     def __init__(self, config: RuntimeConfig, *, source=".prosaic", executable="prosaic", custom_tools=None,
                  accounting=None, context_defaults=None, lifecycle=None):
         self.lifecycle = lifecycle if lifecycle is not None else ExecutionLifecycle()
@@ -622,7 +638,13 @@ class ProsaicRuntime:
             result.metadata.setdefault('accounting_v1', {'context': resolved.to_dict(),
                 'namespace': getattr(recorder, 'namespace', None), 'environment': getattr(recorder, 'environment', None),
                 'provider_call_ids': list(captures[0].call_ids) if captures else []})
-        if budget.enabled:
+        strict=[b for b in active_budgets() if b.token_admission is not None]
+        if strict:
+            result.metadata['token_admission_v1']=[b.token_admission for b in strict]
+            if not budget.usage_complete:
+                result.token_usage=None
+                result.metadata['token_usage_status']='unknown'
+        if budget.enabled or strict:
             result.metadata['invocation_budgets_v1'] = budget.metadata()
         return result
 
@@ -815,3 +837,11 @@ class ProsaicRuntime:
                               'token_usage_status': 'reported' if backend and backend.usage_complete and backend.reported_token_usage is not None else 'unknown',
                               'reported_token_usage': backend.reported_token_usage if backend else None,
                               'token_usage_details': backend.reported_usage_details if backend else {}})
+            finally:
+                if backend is not None and backend._dispatch_reservation is not None and not backend._dispatch_reservation.settled:
+                    # A dispatched request without a complete parsed usage report
+                    # cannot release its reservation, including transport failures.
+                    try: record_shared_usage(backend.execution_budgets,None,reservation=backend._dispatch_reservation)
+                    except InvocationBudgetExceeded: pass
+                    backend.usage_complete=False
+                    if backend.budget is not None: backend.budget.usage_complete=False

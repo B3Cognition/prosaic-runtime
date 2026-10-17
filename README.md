@@ -703,6 +703,31 @@ stops subsequent dispatch on unknown usage. A response can itself exceed a
 reported-token cap; its paid evidence is retained and the operation fails rather
 than pretending the provider call was prevented. This is not a currency cap.
 
+For pre-dispatch token admission, pass `token_counter=registration` to
+`ExecutionBudget` together with `max_reported_tokens`. The registration uses the
+public `TokenCounterRegistration` / `TokenCounterDescriptor` contract: its exact
+or conservative input count must cover the final native request, including
+messages, tools and framing, for the declared provider/model and tokenizer assets.
+The host supplies and qualifies this implementation; Runtime supplies no generic
+tokenizer approximation. Missing/mismatched registration or an absent positive
+native `max_tokens` output bound fails with `token_admission` before dispatch.
+
+Each HTTP request reserves counted input plus maximum output atomically against
+all enclosing scopes and the invocation's remaining token cap. This includes tool
+continuations, adapter retries and explicitly activated worker scopes. Complete
+reported usage releases the unused part; `reserved_tokens` exposes in-flight and
+unresolved reservations separately from `reported_tokens`. Unknown outcomes keep
+their reservation and stop subsequent dispatch. Reports exceeding a reservation
+remain fully charged, fail with `token_reservation_exceeded`, and stop further
+dispatch even if the aggregate cap has room. This protects allowance under the
+host counter's guarantee and provider output-bound conformance; provider-reported
+usage is neither verified billing nor proof of tokenizer correctness.
+
+`token_admission_v1` is advertised as a capability and result metadata carries
+the admitted counter descriptors. The host must freeze counter identity with its
+durable authorization; process-local budget activation cannot survive a crash.
+Existing calls without `token_counter` retain the post-response stop threshold.
+
 ALWAYS persist host operation identity and conservative remaining reservations
 before dispatch when crash recovery matters. NEVER treat this process-local
 budget as a durable ledger or reset uncertain allowances after a restart.

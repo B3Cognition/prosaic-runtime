@@ -2,7 +2,8 @@
 
 
 class InvocationBudgetExceeded(Exception):
-    REASONS = frozenset({'provider_request_limit', 'tool_call_limit', 'token_limit', 'usage_unknown'})
+    REASONS = frozenset({'provider_request_limit', 'tool_call_limit', 'token_limit', 'usage_unknown',
+                         'token_admission', 'token_reservation_exceeded'})
 
     def __init__(self, reason):
         if reason not in self.REASONS:
