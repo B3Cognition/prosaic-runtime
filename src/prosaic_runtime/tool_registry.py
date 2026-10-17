@@ -3,6 +3,8 @@ import json
 from .tools import execute_custom_tool, parse_arguments
 from .operation_context import bounded_reference
 from jsonschema.exceptions import ValidationError
+from .tool_outcomes import ToolOutcome
+from .tool_effects import ToolEffectFailure
 
 
 class InvalidToolRequest(ValueError):
@@ -23,7 +25,7 @@ class DisabledBuiltinRegistry:
 
 class BoundedToolRegistry:
     def __init__(self, builtin_registry, custom_tools, allowed_tools, check_boundary, before_tool=None,
-                 execution_options=None, *, index_all_calls=False):
+                 execution_options=None, *, index_all_calls=False, bounded_recovery=False):
         self.builtin = builtin_registry
         self.custom = custom_tools
         self.allowed = frozenset(allowed_tools)
@@ -31,6 +33,17 @@ class BoundedToolRegistry:
         self.before_tool = before_tool
         self.execution_options = execution_options
         self.index_all_calls = index_all_calls
+        self.bounded_recovery = bounded_recovery
+        self.last_outcome = ToolOutcome('unclassified')
+
+    def _outcome(self, outcome):
+        self.last_outcome = ToolOutcome.from_dict(outcome.to_dict())
+
+    def _finish(self, message):
+        evidence = self.last_outcome.to_dict()
+        if self.bounded_recovery and evidence['recovery'] in {'stop', 'reconcile'}:
+            raise ToolEffectFailure('tool_effect_uncertain' if evidence['effect']=='unknown' else 'tool_recovery_blocked')
+        return message
 
     def openai_tools(self):
         return self.builtin.openai_tools() + [
@@ -66,6 +79,7 @@ class BoundedToolRegistry:
         return tuple(admitted)
 
     def execute_message(self, tool_call):
+        self.last_outcome = ToolOutcome('unclassified')
         self.check_boundary()
         if self.before_tool is not None:
             self.before_tool()
@@ -75,13 +89,16 @@ class BoundedToolRegistry:
                    (self.index_all_calls or name in self.custom) else {})
         if isinstance(name, str) and name not in self.custom:
             message = self.builtin.execute_message(tool_call)
+            self.last_outcome = ToolOutcome('not_granted' if name not in self.allowed else
+                'ok' if json.loads(message['content']).get('status') == 'ok' else 'unclassified')
             if self.index_all_calls and callable(options.get('on_completion')):
                 options['on_completion'](json.loads(message['content']))
-            return message
+            return self._finish(message)
         payload = {'status': 'error', 'error': 'not_granted'}
+        self.last_outcome = ToolOutcome('not_granted')
         if isinstance(name, str) and name in self.allowed and tool_call.get('type') == 'function':
             payload = execute_custom_tool(self.custom[name], function.get('arguments'),
                 check_boundary=self.check_boundary,
-                **options)
-        return {'role': 'tool', 'tool_call_id': str(tool_call.get('id') or ''),
-                'content': json.dumps(payload, allow_nan=False)}
+                on_outcome=self._outcome, **options)
+        return self._finish({'role': 'tool', 'tool_call_id': str(tool_call.get('id') or ''),
+                'content': json.dumps(payload, allow_nan=False)})

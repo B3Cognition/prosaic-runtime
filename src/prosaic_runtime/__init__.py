@@ -1,5 +1,5 @@
 """Execute neutral Prosaic artifacts with explicitly granted authority."""
-__version__ = '0.9.6'
+__version__ = '0.9.7'
 
 from .artifacts import ProsaicArtifact
 from .config import EndpointConfig, RuntimeConfig, RunLimits, CliSandboxConfig
@@ -49,3 +49,5 @@ from .lifecycle import ExecutionLifecycle, Draining
 __all__ += ["ExecutionLifecycle", "Draining"]
 
 __all__ += ["ToolFailure"]
+from .tool_outcomes import ToolOutcome
+__all__ += ["ToolOutcome"]

@@ -50,7 +50,7 @@ class ToolJournal(Protocol):
 
 class ToolEffectFailure(RuntimeError):
     """Critical fixed failure; must never enter model correction or automatic retry."""
-    REASONS = frozenset({'tool_effect_uncertain', 'tool_journal_failed', 'tool_identity_conflict'})
+    REASONS = frozenset({'tool_effect_uncertain', 'tool_journal_failed', 'tool_identity_conflict', 'tool_recovery_blocked'})
 
     def __init__(self, reason):
         if type(reason) is not str or reason not in self.REASONS:

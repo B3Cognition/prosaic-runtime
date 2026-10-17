@@ -24,7 +24,8 @@ def failure_code(result):
         'tool_call_limit': 'budgetExceeded', 'token_limit': 'budgetExceeded', 'usage_unknown': 'budgetExceeded',
         'accounting_failed': 'accountingFailure', 'critical_hook_error': 'observationFailure',
         'tool_effect_uncertain': 'toolEffectUncertain', 'tool_journal_failed': 'toolJournalFailure',
-        'tool_identity_conflict': 'toolEffectUncertain', 'incomplete_generation': 'incompleteGeneration',
+        'tool_identity_conflict': 'toolEffectUncertain', 'tool_recovery_blocked': 'toolFailure',
+        'incomplete_generation': 'incompleteGeneration',
         'incomplete_response': 'incompleteGeneration', 'outputLimit': 'outputLimit'}.get(
             reason, 'timeout' if result.timed_out else 'providerFailure')
 
@@ -83,6 +84,9 @@ class TurnCapture:
             owned['call_id'] = self.call_ids.get(event.get('call_id'))
             if kind == 'tool_completed':
                 owned['status'] = event.get('status')
+                if 'tool_outcome' in event:
+                    from .tool_outcomes import ToolOutcome
+                    owned['tool_outcome'] = ToolOutcome.from_dict(event['tool_outcome']).to_dict()
         elif kind == 'completed':
             owned.update({k: event[k] for k in ('exit_code', 'token_usage') if k in event})
         try:

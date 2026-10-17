@@ -15,6 +15,7 @@ from jsonschema import ValidationError
 from .events import Cancelled
 from .operation_context import InvocationScope
 from .tool_effects import admit_tool_effects, ToolEffectFailure
+from .tool_outcomes import ToolOutcome
 from .telemetry import ObserverEmitter
 from .tools import (ToolDeadlineExceeded, depth, execute_custom_tool, parse_arguments, reject_constant,
                     unique_pairs, validate_custom_tools)
@@ -113,20 +114,29 @@ class StructuredToolLoop:
         self.emitter.emit('tool_started', name=request.name)
         index = self.call_index
         self.call_index += 1
+        terminal = ToolOutcome('unclassified')
+        def capture(value):
+            nonlocal terminal
+            terminal = ToolOutcome.from_dict(value.to_dict())
+        def completed(status):
+            self.emitter.emit('tool_completed', name=request.name, status=status,
+                              tool_outcome=terminal.to_dict())
         try:
             outcome = execute_custom_tool(tool, raw, check_boundary=self.check_boundary,
                 scope=self.operation_context, deadline=self.deadline, cancelled=self.cancelled,
-                call_index=index, tool_journal=self.tool_journal)
+                call_index=index, tool_journal=self.tool_journal, on_outcome=capture)
         except ToolEffectFailure as exc:
+            completed('error')
             raise StructuredToolError(exc.reason) from None
         except ToolDeadlineExceeded:
             raise StructuredToolError('execution-timeout') from None
         except Cancelled:
             raise StructuredToolError('execution-cancelled') from None
         if outcome['status'] != 'ok':
+            completed('error')
             raise StructuredToolError('tool-' + outcome['error'])
         self.on_event({'type': 'tool_complete', 'name': request.name})
-        self.emitter.emit('tool_completed', name=request.name, status='ok')
+        completed('ok')
         return {'name': request.name, 'arguments': args}, outcome['result']
 
     def turns(self, *, admit, tool_outcome=lambda name, data: None, feedback=None):
