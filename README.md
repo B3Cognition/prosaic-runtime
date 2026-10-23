@@ -1,5 +1,16 @@
 # Prosaic Runtime
 
+The unreleased [unified pool extension](docs/unified-pools.md) selects Claude Code,
+Codex CLI and local/API profiles with independent native/API permissions, explicit
+deadlines and attempt/request/tool budgets. Switching is allowed only before
+work starts; partial text or tool work requires recovery. Start with the
+[complete CLI example](examples/README.md#unified-claude-codex-and-local-pool-unreleased-candidate).
+
+The opt-in [native execution extension](docs/native-execution.md) runs canonical
+agents through Claude Code or Codex CLI using named profiles and shared
+capacity-aware pools. Native permissions and sessions remain vendor-owned;
+existing direct API execution and Harness contracts stay unchanged.
+
 The **0.9.0** candidate is distributed as `b3-prosaic-runtime` and requires
 `b3-prosaic>=0.4,<0.5` from the package index. Python imports (`prosaic_runtime`)
 and the `prosaic-runtime` CLI remain unchanged. The separately installed recorder

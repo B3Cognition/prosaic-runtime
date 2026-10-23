@@ -1,5 +1,36 @@
 # Run Prosaic prose with and without tools
 
+## Unified Claude, Codex and local pool (unreleased candidate)
+
+The [unified configuration](unified.yml) references the checked-in
+[native profiles](native-runtime.yml) and [local API profile](unified-local.yml).
+Set their accessible model names, install/login to the vendor CLIs, and supply
+local authentication via `LOCAL_LLM_API_KEY`. No credential or login is created by
+loading these examples. Run from the repository root with the candidate installed:
+
+```sh
+prosaic-runtime subagents/pool-reviewer.md \
+  --source "$PWD/examples/.prosaic" --cwd "$PWD/examples" \
+  --config examples/unified.yml --pool coding \
+  --timeout 300 --max-attempts 3 --max-native-attempts 2 \
+  --native-permissions read-only --native-timeout 60 \
+  --enable-api --api-timeout 180 --max-api-requests 4 \
+  --max-api-tool-calls 2 --max-tool-rounds 3 \
+  --allow-tool read_file --read-root "$PWD/examples/evidence" --events
+```
+
+Both policies are explicit: native read-only is vendor-owned workspace authority;
+API `read_file` is limited to the granted root. API counters do not bound native
+inner requests. For API-only execution, omit the native permission/timeout flags
+and use `--max-native-attempts 0`. For native-only execution, omit `--enable-api`
+and all API budgets/grants. Loading a pool does not authorize execution.
+
+Selection prefers Claude, then Codex, then local. Only proven pre-work capacity
+rejection permits another attempt. Partial text/tool work stops for recovery;
+all-cooled returns a retry time without waiting or replay. JSONL result metadata
+can contain private backend data; filter it before sharing. See
+[the policy and CLI reference](../docs/unified-pools.md).
+
 ## Sandboxed CLI tools (Runtime 0.5.2)
 
 Use this path for **required OS isolation of a custom CLI** with Runtime 0.5.2+.

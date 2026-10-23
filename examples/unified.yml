@@ -1,0 +1,13 @@
+# Existing configs stay separate. Paths are relative to this file.
+# Native and API aliases must be distinct. This is an unreleased candidate feature.
+kind: unified
+native_config: native-runtime.yml
+api_config: unified-local.yml
+api_quota_keys:
+  local: local-service
+pools:
+  coding:
+    profiles: [claude-main, codex-main, local]
+    cooldown_s: 300
+default_pool: coding
+capacity_file: ../runs/unified-capacity.json

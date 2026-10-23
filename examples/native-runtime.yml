@@ -1,0 +1,26 @@
+# Native agent extension. Install/login to the vendor CLIs separately.
+# Requires Claude Code >=2.1.248; replace the Codex model with one you can use.
+kind: native
+profiles:
+  claude-main:
+    backend: claude-code
+    model: sonnet
+    quota_key: claude-personal
+    permission_mode: workspace-write
+  codex-main:
+    backend: codex-cli
+    model: your-accessible-codex-model
+    quota_key: codex-personal
+    permission_mode: workspace-write
+    effort: low
+pools:
+  coding:
+    profiles: [claude-main, codex-main]
+    strategy: prefer-first-available
+    cooldown_s: 300
+default_pool: coding
+routes:
+  fast: coding
+  balanced: coding
+  strong: coding
+capacity_file: ../runs/native-capacity.json
