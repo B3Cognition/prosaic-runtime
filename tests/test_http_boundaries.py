@@ -110,7 +110,9 @@ def drip_server(request):
                 {'message': {'content': 'done'}, 'finish_reason': 'stop'}],
                 'usage': {'prompt_tokens': 2, 'completion_tokens': 3, 'total_tokens': 5}})
             if status != 200:
-                value = json.dumps({'error': 'fixture error ' * 25})
+                # Keep the error body incomplete well beyond the test's
+                # scheduling allowance; an unbounded read must still fail.
+                value = json.dumps({'error': 'fixture error ' * 250})
             streaming = status == 200 and request.get('stream', False)
             body = ('data: ' + value + '\n\ndata: [DONE]\n\n' if streaming else value).encode()
             self.send_response(status)
@@ -218,17 +220,20 @@ def test_openai_buffered_sse_fallback_keeps_legacy_admission(server):
 @pytest.mark.parametrize('accounted', [False, True])
 @pytest.mark.parametrize('cap', [None, 20])
 def test_openai_drip_http_error_returns_timeout_result(drip_server, tools, accounted, cap):
-    url, requests, _ = drip_server
+    url, requests, sent = drip_server
     recorder, events = MemoryRecorder() if accounted else None, []
     runner = runtime(EndpointConfig(url, 'small', features={'streaming': False}), accounting=recorder)
     started = time.monotonic()
     result = runner.run(artifact('read' if tools else ''), observer=events.append,
-        policy=RunPolicy(timeout_s=0.1, max_provider_requests=1, max_reported_tokens=cap,
+        # Include accounting/dispatch startup on loaded CI hosts. The error
+        # body takes over ten seconds, so the read must still stop early.
+        policy=RunPolicy(timeout_s=1, max_provider_requests=1, max_reported_tokens=cap,
             allowed_tools=frozenset({'read_file'}) if tools else frozenset()))
-    assert time.monotonic() - started < 0.35
+    assert time.monotonic() - started < 1.5
     assert result.exit_code != 0 and result.timed_out
     assert result.metadata['provider_error_code'] == 'timeout'
     assert result.token_usage is None
+    assert sent.is_set()  # This case must exercise a partial HTTP error body.
     assert len(requests) == 1
     budget = result.metadata['invocation_budgets_v1']
     assert budget['provider_requests'] == 1 and budget['tool_calls'] == 0

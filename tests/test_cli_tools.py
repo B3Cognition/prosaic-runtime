@@ -3,14 +3,53 @@ from dataclasses import replace
 import json
 import os
 from pathlib import Path
+import signal
+import subprocess
 import sys
 import time
+from types import SimpleNamespace
 
 import pytest
 import yaml
 from prosaic_runtime import EndpointConfig, ProsaicRuntime, RunPolicy, RuntimeConfig
 from test_runtime import server, artifact, completion
 from test_acquisition import reply
+
+
+@pytest.mark.skipif(os.name != 'posix', reason='POSIX process groups')
+@pytest.mark.parametrize('group_state', ['absent', 'present', 'denied', 'child_running'])
+def test_cleanup_permission_race_requires_reaped_child_and_absent_group(monkeypatch, group_state):
+    from prosaic_runtime.cli_tools import _kill
+
+    calls = []
+    denial = PermissionError('kill denied')
+
+    def killpg(pid, sig):
+        calls.append(('signal', pid, sig))
+        if sig == signal.SIGKILL:
+            raise denial
+        if group_state == 'absent':
+            raise ProcessLookupError()
+        if group_state == 'denied':
+            raise PermissionError('probe denied')
+
+    def wait(timeout):
+        calls.append(('wait', timeout))
+        assert 0 < timeout <= 0.05
+        if group_state == 'child_running':
+            raise subprocess.TimeoutExpired('child', timeout)
+        return 0
+
+    monkeypatch.setattr(os, 'killpg', killpg)
+    process = SimpleNamespace(pid=123, wait=wait)
+    if group_state == 'absent':
+        _kill(process)
+    else:
+        with pytest.raises(PermissionError) as caught:
+            _kill(process)
+        assert caught.value is denial
+    assert calls[:2] == [('signal', 123, signal.SIGKILL), ('wait', 0.05)]
+    assert calls[2:] == ([] if group_state == 'child_running' else [('signal', 123, 0)])
 
 
 def manifest(tmp_path, code='print(json.dumps({"argv": sys.argv[1:]}))', **changes):
