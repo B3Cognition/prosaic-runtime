@@ -22,3 +22,5 @@ include scripts/release_artifacts.py
 include docs/package-index.md
 include docs/conversations.md
 include scripts/conversation_wheel_smoke.py
+include docs/native-execution.md
+include scripts/native_wheel_smoke.py

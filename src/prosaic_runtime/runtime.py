@@ -70,6 +70,7 @@ class _BoundedMixin:
         self._latest_usage_complete = None
         self._previous_usage_details = {}
         self._provider_attempts = 0
+        self._prework_capacity_failure = None
         self.accounting_context = None
         self.turn_mode = False
         self.turn_capture = None
@@ -210,6 +211,7 @@ class _BoundedMixin:
 
     @contextmanager
     def open_http(self, request, *, timeout):
+        self._prework_capacity_failure = None
         self.check_boundary()
         if any(b._token_counter is not None for b in self.execution_budgets):
             try: native=strict_json(request.data)
@@ -232,6 +234,7 @@ class _BoundedMixin:
             call_id = uuid4().hex
             request.add_header("X-Correlation-ID", call_id)
             request.add_header("X-Client-Request-Id", call_id)
+        accepted = False
         opener = urllib.request.build_opener(_NoRedirect())
         try:
             # Observers and persisted intent preparation can stop execution.
@@ -240,6 +243,7 @@ class _BoundedMixin:
             response = (self.capture.open(opener, request, timeout,
                             before_dispatch=self.before_http_dispatch) if self.capture is not None
                         else opener.open(request, timeout=self.before_http_dispatch(timeout)))
+            accepted = True
             with response:
                 status = response.status
                 yield response
@@ -255,6 +259,14 @@ class _BoundedMixin:
             raise
         except urllib.error.HTTPError as exc:
             status = exc.code
+            if (not accepted and self.capture is None and exc.code == 429 and self._provider_attempts == 1
+                    and self.budget is not None and self.budget.tool_calls == 0):
+                self._prework_capacity_failure = 'rate_limit'
+            raise
+        except urllib.error.URLError as exc:
+            if (not accepted and self.capture is None and isinstance(exc.reason, ConnectionRefusedError) and self._provider_attempts == 1
+                    and self.budget is not None and self.budget.tool_calls == 0):
+                self._prework_capacity_failure = 'unavailable'
             raise
         finally:
             observe('provider_request_completed', outcome=outcome, http_status=status,
@@ -807,6 +819,10 @@ class ProsaicRuntime:
                         'environment': _recorder.environment, 'provider_call_ids': list(capture.call_ids)}
                 if acquisition is not None:
                     result.metadata.update(acquisition_id=acquisition.id, acquisition_sha256=acquisition.digest)
+                if (result.exit_code != 0 and not result.timed_out
+                        and not result.metadata.get('failure_reason') and backend._prework_capacity_failure):
+                    result.metadata['prework_failure_v1'] = {
+                        'safe_to_fallback': True, 'reason': backend._prework_capacity_failure}
                 emit("completed", exit_code=result.exit_code, token_usage=result.token_usage)
                 return result
             except TurnOutputExceeded:

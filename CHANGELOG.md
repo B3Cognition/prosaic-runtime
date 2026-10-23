@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+- Expose unified pools through the CLI with independent native permissions/API
+  grants and explicit total/backend deadlines and attempt/request/tool budgets.
+- Add coherent, credential-free native/local configuration and agent examples.
+
+- Add opt-in UnifiedRuntime pools across native Claude/Codex and API/local
+  profiles, with separate explicit policies/budgets, capability filtering,
+  shared quota cooldowns and transport-proven pre-work switching only.
+
+- Add opt-in NativeRuntime with Claude Code/Codex CLI profiles, explicit native
+  permissions, bounded JSONL subprocess execution and process-group cleanup.
+- Add priority profile pools, account-shared capacity cooldowns and atomic
+  optional file persistence; restrict automatic fallback to failures before work.
+- Preserve partial/unknown usage and expose recovery-required interruptions.
+- Add native CLI configuration and profile/pool selection without changing API
+  endpoint configuration, conversations, tool grants or Harness capabilities.
+
 ## 0.9.6 — 2026-10-17
 
 - Add opt-in host-controlled final-answer phases after a bounded number of tool rounds.
