@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Preserve bounded CLI output errors when Darwin denies a signal during child
+  exit; suppress the cleanup denial only after bounded reaping and proof that
+  the whole process group is absent.
+
 - Prevent native fallback after partial text, reasoning, redacted thinking or
   streamed model activity, even if a later quota error reports zero turns.
 

@@ -77,6 +77,23 @@ def _kill(process):
             process.kill()
     except ProcessLookupError:
         pass
+    except PermissionError as denied:
+        if os.name != 'posix':
+            raise
+        # Darwin can briefly deny signals while a child is exiting. Reap it
+        # within a fixed cleanup allowance, then independently prove its whole
+        # group is gone; an exited leader alone does not prove descendant cleanup.
+        try:
+            process.wait(timeout=0.05)
+        except subprocess.TimeoutExpired:
+            raise denied from None
+        try:
+            os.killpg(process.pid, 0)
+        except ProcessLookupError:
+            return
+        except PermissionError:
+            pass
+        raise
 
 
 def _process(argv, *, cwd, env, timeout_s, maximum, deadline, policy, sandbox):
