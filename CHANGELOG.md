@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Prevent native fallback after partial text, reasoning, redacted thinking or
+  streamed model activity, even if a later quota error reports zero turns.
+
 - Expose unified pools through the CLI with independent native permissions/API
   grants and explicit total/backend deadlines and attempt/request/tool budgets.
 - Add coherent, credential-free native/local configuration and agent examples.

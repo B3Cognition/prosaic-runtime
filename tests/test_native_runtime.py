@@ -78,6 +78,20 @@ def test_no_replay_after_effects_or_auth_failure(tmp_path, effects, reason):
         assert result.metadata['failure_reason'] == 'usage_limit'
 
 
+@pytest.mark.parametrize('item_type', ['agent_message', 'reasoning'])
+def test_partial_model_work_never_dispatches_another_native_profile(tmp_path, item_type):
+    from prosaic_runtime import NativePolicy
+    runtime = setup_runtime(tmp_path)
+    binary(tmp_path, 'primary', [
+        {'type': 'item.completed', 'item': {'type': item_type, 'text': 'partial'}},
+        {'type': 'turn.failed', 'error': {'code': 'usage_limit_reached'}},
+    ], exit_code=1)
+    result = runtime.run(artifact(), cwd=tmp_path, policy=NativePolicy())
+    assert not (tmp_path / 'fallback.calls').exists()
+    assert result.exit_code != 0 and result.metadata['recovery_required'] is True
+    assert [a['profile'] for a in result.metadata['native_execution_v1']['attempts']] == ['primary']
+
+
 def test_native_policy_is_explicit_and_not_an_api_policy(tmp_path):
     from prosaic_runtime import RunPolicy, NativePolicy
     runtime = setup_runtime(tmp_path)

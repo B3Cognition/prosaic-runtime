@@ -64,6 +64,32 @@ def test_claude_limit_before_work_is_safe_to_fallback(executable):
     assert result.metadata['retry_at'] == 2000000000
 
 
+@pytest.mark.parametrize('backend,partial', [
+    ('codex-cli', {'type': 'item.completed', 'item': {'type': 'agent_message', 'text': 'partial'}}),
+    ('codex-cli', {'type': 'item.completed', 'item': {'type': 'reasoning', 'text': 'partial'}}),
+    ('claude-code', {'type': 'assistant', 'message': {'content': [{'type': 'text', 'text': 'partial'}]}}),
+    ('claude-code', {'type': 'assistant', 'message': {'content': [{'type': 'thinking', 'thinking': 'partial'}]}}),
+    ('claude-code', {'type': 'assistant', 'message': {'content': [{'type': 'redacted_thinking', 'data': 'opaque'}]}}),
+    ('claude-code', {'type': 'stream_event', 'event': {'type': 'content_block_start',
+        'content_block': {'type': 'redacted_thinking', 'data': 'opaque'}}}),
+    ('claude-code', {'type': 'stream_event', 'event': {'type': 'content_block_start',
+        'content_block': {'type': 'future_tool'}}}),
+    ('claude-code', {'type': 'stream_event', 'event': {'type': 'content_block_delta',
+        'delta': {'type': 'input_json_delta', 'partial_json': '{}'}}}),
+    ('claude-code', {'type': 'stream_event', 'event': {'type': 'message_start'}}),
+])
+def test_model_work_before_quota_error_cannot_authorize_replay(executable, backend, partial):
+    terminal = ([{'type': 'turn.failed', 'error': {'code': 'usage_limit_reached'}}]
+        if backend == 'codex-cli' else [
+            {'type': 'rate_limit_event', 'rate_limit_info': {'status': 'rejected'}},
+            {'type': 'result', 'is_error': True, 'num_turns': 0}])
+    result = execute(executable, [partial, *terminal], backend=backend, exit_code=1)
+    assert result.exit_code != 0
+    assert result.metadata['work_started'] is True
+    assert result.metadata['safe_to_fallback'] is False
+    assert result.metadata['effects_uncertain'] is True
+
+
 def test_limit_after_tool_use_requires_recovery(executable):
     result = execute(executable, [
         {'type': 'assistant', 'message': {'content': [{'type': 'tool_use', 'name': 'Edit'}]}},

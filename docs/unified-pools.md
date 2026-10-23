@@ -91,9 +91,10 @@ There are no implicit probes or server startup. `CapacityStore` can be supplied
 by the host, or stored in the configured atomic, locked local file.
 
 Automatic switching needs positive `prework_failure_v1` evidence from the concrete
-execution engine. Native exhaustion is safe only before any observed model text,
-reasoning or tool work. This proof is stricter than the standalone native pool's
-effect-free retry rule. For API endpoints, only a first-request HTTP 429 rejection or
+execution engine. Both unified and standalone native pools stop after observed
+model text, reasoning (including redacted thinking), tool work, or a started
+model stream, even when a later error reports zero completed turns.
+For API endpoints, only a first-request HTTP 429 rejection or
 a TCP connection refusal before acceptance can prove this, with zero earlier
 tool dispatches. A required first model tool has not run merely because it was
 declared; an already dispatched tool prevents fallback. Progress/observer events

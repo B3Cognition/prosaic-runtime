@@ -129,12 +129,15 @@ class NativeEvents:
                     elif block.get('type') == 'thinking' and isinstance(block.get('thinking'), str):
                         self.work_started |= bool(block['thinking'])
                     elif block.get('type') == 'redacted_thinking' and isinstance(block.get('data'), str):
-                        pass
+                        self.work_started = True
                     else:
                         self.invalid = True
         elif kind == 'system' and event.get('subtype') == 'init':
             self.session_id = event.get('session_id')
         elif kind == 'stream_event':
+            # A model stream has begun. Even opaque/future nested activity is
+            # insufficient proof that another assignment would be before work.
+            self.work_started = True
             inner = event.get('event', {})
             if not isinstance(inner, dict):
                 self.invalid = True
@@ -238,7 +241,7 @@ def execute_native(profile, prompt, *, cwd, policy, deadline, env, on_event=None
         reason = 'provider_failure'
     safe = (not outcome.launched and reason == 'unavailable') or (
         outcome.failure is None and not events.invalid and events.terminal
-        and not events.success and events.zero_turns and not events.effects
+        and not events.success and events.zero_turns and not events.effects and not events.work_started
         and reason in {'usage_limit', 'rate_limit', 'unavailable'})
     metadata = {'backend': profile.backend, 'model': profile.model,
         'work_started': events.work_started,

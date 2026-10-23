@@ -58,6 +58,23 @@ def test_three_backend_prework_failover_keeps_unknown_usage_and_distinct_counts(
     assert (tmp_path / 'claude.calls').read_text().count('Answer') == 1
 
 
+@pytest.mark.parametrize('streamed', [False, True])
+def test_redacted_thinking_blocks_unified_fallback(rejection_server, tmp_path, streamed):
+    url, requests, _ = rejection_server
+    r = runtime(tmp_path, url)
+    block = {'type': 'redacted_thinking', 'data': 'opaque'}
+    partial = ({'type': 'stream_event', 'event': {'type': 'content_block_start', 'content_block': block}}
+        if streamed else {'type': 'assistant', 'message': {'content': [block]}})
+    binary(tmp_path, 'claude', [partial,
+        {'type': 'rate_limit_event', 'rate_limit_info': {'status': 'rejected'}},
+        {'type': 'result', 'is_error': True, 'num_turns': 0}], exit_code=1)
+    result = r.run(artifact(), cwd=tmp_path, policy=policy())
+    assert not (tmp_path / 'codex.calls').exists()
+    assert requests == []
+    assert result.exit_code != 0 and result.metadata['recovery_required'] is True
+    assert len(result.metadata['unified_execution_v1']['attempts']) == 1
+
+
 def test_api_first_429_falls_back_to_real_native_transport(rejection_server, tmp_path):
     url, _, responses = rejection_server
     responses.append((429, b'capacity', 0))

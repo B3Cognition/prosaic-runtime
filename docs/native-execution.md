@@ -132,7 +132,8 @@ cooldown applies. A later shorter cooldown cannot erase an existing longer one.
 Successful tasks do not clear another worker's exhaustion observation.
 
 Automatic fallback requires a recognized terminal capacity failure and no
-observed tool/command/file/hook activity. Malformed or incomplete streams,
+observed model text, reasoning (including redacted thinking), started model
+stream, or tool/command/file/hook activity. Malformed or incomplete streams,
 authentication errors, timeouts, cancellation and unknown failures do not cause
 replay. Claude's completed failure must also report zero agent turns. This is
 deliberately conservative: a limit interruption after work returns
