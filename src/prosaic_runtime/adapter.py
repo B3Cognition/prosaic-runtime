@@ -15,6 +15,7 @@ from .lifecycle import tracked
 from .policy import RunPolicy
 from .types import Result
 from .budgets import InvocationBudgetExceeded
+from .response_schema import own_response_schema, schema_bytes, schema_digest
 
 
 class AdapterBoundary(Exception):
@@ -66,7 +67,7 @@ class _Attempts:
             remaining = min(remaining, timeout_s)
         return replace(policy, timeout_s=remaining, **values)
 
-    def add(self, result, arguments):
+    def add(self, result, arguments, response_schema=None):
         if type(result) is not Result:
             raise ValueError('adapter delegate must return Result')
         owned = deepcopy(result)
@@ -96,6 +97,8 @@ class _Attempts:
         self.records.append({'index': len(self.records) + 1, 'exit_code': owned.exit_code,
             'timed_out': owned.timed_out, 'token_usage': usage, 'known_tokens': known, 'provider_requests': requests,
             'tool_calls': tools, 'arguments_sha256': hashlib.sha256(arguments.encode()).hexdigest()})
+        if response_schema is not None:
+            self.records[-1]['response_schema_sha256'] = schema_digest(response_schema)
 
     def finish(self, result, descriptor):
         if type(result) is not Result:
@@ -182,18 +185,28 @@ class RuntimeAdapter:
     @tracked
     def run(self, artifact, arguments='', *, policy=None, on_event=None, cancelled=None, **options):
         self.validate_binding()
+        options = dict(options)
+        outer_schema = own_response_schema(options.get('response_schema'))
+        if outer_schema is not None:
+            options['response_schema'] = deepcopy(outer_schema)
         policy = policy or RunPolicy()
         cancelled = cancelled or (lambda: False)
         ledger = _Attempts(policy, self.max_attempts, time.monotonic() + policy.timeout_s, cancelled)
         descriptor = self.descriptor
-        def execute(projected, **reductions):
+        def execute(projected, *, response_schema=None, **reductions):
             self.validate_binding()
             effective = ledger.remaining(**reductions)
             if type(projected) is not str:
                 raise ValueError('adapter arguments must be text')
+            schema = own_response_schema(response_schema) if response_schema is not None else outer_schema
+            if outer_schema is not None and schema_bytes(schema) != schema_bytes(outer_schema):
+                raise ValueError('adapter cannot replace an outer response_schema')
+            execution_options = dict(options)
+            if schema is not None:
+                execution_options['response_schema'] = schema
             result = self.runtime.run(artifact, projected, policy=effective, on_event=on_event,
-                                      cancelled=cancelled, **options)
-            ledger.add(result, projected)
+                                      cancelled=cancelled, **execution_options)
+            ledger.add(result, projected, response_schema=schema)
             return result
         try:
             result = self.invoke(artifact, arguments, execute=execute, policy=policy,

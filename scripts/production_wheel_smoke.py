@@ -49,7 +49,7 @@ def installed_origins():
     owners = {}
     origins = {}
     for package, name, version in ((prosaic, "b3-prosaic", "0.4.1"),
-            (runtime, "b3-prosaic-runtime", "0.9.8"),
+            (runtime, "b3-prosaic-runtime", "0.9.8+jsonschema.2"),
             (postgres, "b3-prosaic-runtime-postgres", "0.3.0")):
         owner = metadata.distribution(name)
         assert owner.version == package.__version__ == version

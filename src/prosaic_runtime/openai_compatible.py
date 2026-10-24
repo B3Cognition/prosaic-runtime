@@ -247,6 +247,8 @@ class OpenAICompatibleBackend(ExecutionBackend):
             payload["max_tokens"] = max_tokens
         if _feature_enabled(llm.features, "json_mode", default=False):
             payload["response_format"] = {"type": "json_object"}
+        if 'response_format' in prompt_metadata:
+            payload['response_format'] = prompt_metadata['response_format']
         reasoning_effort = (
             _metadata_reasoning_effort(prompt_metadata, "reasoning_effort")
             or _metadata_reasoning_effort(prompt_metadata, "effort")
