@@ -4,8 +4,8 @@ After the qualified first publication, install in a fresh Python 3.11+ environme
 
 ```sh
 python -m venv .venv
-.venv/bin/python -m pip install 'b3-prosaic-runtime>=0.8.1,<0.9'
-.venv/bin/python -m pip install 'b3-prosaic-runtime-postgres>=0.2.1,<0.3'
+.venv/bin/python -m pip install 'b3-prosaic-runtime==0.9.8'
+.venv/bin/python -m pip install 'b3-prosaic-runtime-postgres==0.3.0'
 .venv/bin/prosaic-runtime --help
 ```
 

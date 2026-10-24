@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.9.8 — 2026-10-24
 
 - Preserve bounded CLI output errors when Darwin denies a signal during child
   exit; suppress the cleanup denial only after bounded reaping and proof that
