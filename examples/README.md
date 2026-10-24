@@ -1,12 +1,12 @@
 # Run Prosaic prose with and without tools
 
-## Unified Claude, Codex and local pool (unreleased candidate)
+## Unified Claude, Codex and local pool (Runtime 0.9.8)
 
 The [unified configuration](unified.yml) references the checked-in
 [native profiles](native-runtime.yml) and [local API profile](unified-local.yml).
 Set their accessible model names, install/login to the vendor CLIs, and supply
 local authentication via `LOCAL_LLM_API_KEY`. No credential or login is created by
-loading these examples. Run from the repository root with the candidate installed:
+loading these examples. Run from the repository root with Runtime 0.9.8 installed:
 
 ```sh
 prosaic-runtime subagents/pool-reviewer.md \
