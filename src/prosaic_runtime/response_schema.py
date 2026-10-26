@@ -36,14 +36,24 @@ def schema_bytes(schema):
                       ensure_ascii=False, allow_nan=False).encode('utf-8')
 
 
-def own_response_schema(schema):
+def schema_wire_bytes(schema):
+    """Order-sensitive finite JSON identity, separate from canonical equality."""
+    return json.dumps(schema, separators=(',', ':'),
+                      ensure_ascii=False, allow_nan=False).encode('utf-8')
+
+
+def own_response_schema(schema, *, order='canonical'):
+    if type(order) is not str or order not in {'canonical', 'declared'}:
+        raise ValueError('response_schema_order must be canonical or declared')
     if schema is None:
+        if order != 'canonical':
+            raise ValueError('response_schema_order requires response_schema')
         return None
     try:
         if type(schema) is not dict or schema.get('type') != 'object':
             raise ValueError('response_schema must be an object JSON Schema')
         _check(schema)
-        data = schema_bytes(schema)
+        data = schema_bytes(schema) if order == 'canonical' else schema_wire_bytes(schema)
         if len(data) > MAX_SCHEMA_BYTES:
             raise ValueError('response_schema exceeds byte limit')
         owned = json.loads(data)
@@ -55,6 +65,10 @@ def own_response_schema(schema):
 
 def schema_digest(schema):
     return hashlib.sha256(schema_bytes(schema)).hexdigest()
+
+
+def schema_order_metadata(schema):
+    return {'mode': 'declared', 'wire_schema_sha256': hashlib.sha256(schema_wire_bytes(schema)).hexdigest()}
 
 
 def schema_format(schema):

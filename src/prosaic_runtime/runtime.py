@@ -32,7 +32,7 @@ from .budgets import InvocationBudget, InvocationBudgetExceeded
 from .turn_capture import TurnOutputExceeded
 from .execution_budget import active_budgets, check_budgets, reserve_dispatch, record_shared_usage, token_reservations
 from .context_execution import ContextExecutionFailure
-from .response_schema import own_response_schema, schema_digest, schema_format
+from .response_schema import own_response_schema, schema_digest, schema_format, schema_order_metadata
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -377,7 +377,7 @@ class ProsaicRuntime:
     capabilities |= frozenset({'context_assembly_v1', 'http_correlation_v1', 'execution_lifecycle_v1'})
     capabilities |= frozenset({'token_admission_v1'})
     capabilities |= frozenset({'tool_outcomes_v1', 'bounded_tool_recovery_v1'})
-    capabilities |= frozenset({'json_schema_v1'})
+    capabilities |= frozenset({'json_schema_v1', 'json_schema_order_v1'})
     def __init__(self, config: RuntimeConfig, *, source=".prosaic", executable="prosaic", custom_tools=None,
                  accounting=None, context_defaults=None, lifecycle=None):
         self.lifecycle = lifecycle if lifecycle is not None else ExecutionLifecycle()
@@ -589,8 +589,8 @@ class ProsaicRuntime:
             on_event=None, cancelled=None, env=None,
             acquisition: str | ProsaicArtifact | None = None, context=None, accounting=None,
             observer=None, operation_context: InvocationScope | None = None, tool_journal=None,
-            response_schema: dict | None = None) -> Result:
-        response_schema = own_response_schema(response_schema)
+            response_schema: dict | None = None, response_schema_order: str = 'canonical') -> Result:
+        response_schema = own_response_schema(response_schema, order=response_schema_order)
         if response_schema is not None and acquisition is not None:
             raise ValueError('response_schema does not support acquisition')
         scope = InvocationScope(str(uuid4())) if operation_context is None else operation_context
@@ -604,7 +604,7 @@ class ProsaicRuntime:
                 result = self._run_accounted(artifact, arguments, cwd=cwd, policy=policy,
                     on_event=on_event, cancelled=cancelled, env=env, acquisition=acquisition,
                     context=context, accounting=accounting, operation_context=scope, tool_journal=tool_journal,
-                    response_schema=response_schema)
+                    response_schema=response_schema, response_schema_order=response_schema_order)
                 if result.metadata.get('failure_reason') == 'cancelled':
                     outcome = 'cancelled'
                 elif result.timed_out:
@@ -632,7 +632,7 @@ class ProsaicRuntime:
             on_event=None, cancelled=None, env=None,
             acquisition: str | ProsaicArtifact | None = None, context=None, accounting=None,
             operation_context=None, tool_journal=None, _turn_prepared=None, _turn_capture=None, _budget=None,
-            _turn_snapshot=None, _turn_accounting=None, response_schema=None) -> Result:
+            _turn_snapshot=None, _turn_accounting=None, response_schema=None, response_schema_order='canonical') -> Result:
         policy = policy or RunPolicy(timeout_s=self.config.limits.timeout_s,
                                      max_tool_rounds=self.config.limits.max_tool_rounds)
         budget = _budget if _budget is not None else InvocationBudget(policy)
@@ -652,7 +652,7 @@ class ProsaicRuntime:
                                cancelled=cancelled, env=env, acquisition=acquisition,
                                _operation_context=operation_context, _tool_journal=tool_journal,
                                _turn_prepared=_turn_prepared, _turn_capture=_turn_capture, _turn_snapshot=_turn_snapshot,
-                               response_schema=response_schema)
+                               response_schema=response_schema, response_schema_order=response_schema_order)
         except AccountingError:
             result = Result(1, '', 'accounting persistence failed; do not retry the provider automatically',
                             token_usage=budget.reported_tokens if budget.usage_complete and budget.provider_requests else None,
@@ -680,7 +680,8 @@ class ProsaicRuntime:
             on_event=None, cancelled=None, env=None,
             acquisition: str | ProsaicArtifact | None = None, _recorder=None, _context=None, _capture_ref=None,
             _budget=None, _operation_context=None, _tool_journal=None,
-            _turn_prepared=None, _turn_capture=None, _turn_snapshot=None, response_schema=None) -> Result:
+            _turn_prepared=None, _turn_capture=None, _turn_snapshot=None, response_schema=None,
+            response_schema_order='canonical') -> Result:
         config, custom, cli = _turn_snapshot if _turn_snapshot is not None else (self.config, self._custom_tools, self._cli_tools)
         policy = policy or RunPolicy(timeout_s=self.config.limits.timeout_s,
                                      max_tool_rounds=self.config.limits.max_tool_rounds)
@@ -828,6 +829,8 @@ class ProsaicRuntime:
                                        cost_status="unavailable")
                 if response_schema is not None:
                     result.metadata['response_schema_v1'] = {'schema_sha256': schema_digest(response_schema), 'strict': True}
+                    if response_schema_order == 'declared':
+                        result.metadata['response_schema_order_v1'] = schema_order_metadata(response_schema)
                 if capture is not None:
                     result.metadata['accounting_v1'] = {'context': _context.to_dict(), 'namespace': _recorder.namespace,
                         'environment': _recorder.environment, 'provider_call_ids': list(capture.call_ids)}

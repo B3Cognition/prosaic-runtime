@@ -15,7 +15,7 @@ from .lifecycle import tracked
 from .policy import RunPolicy
 from .types import Result
 from .budgets import InvocationBudgetExceeded
-from .response_schema import own_response_schema, schema_bytes, schema_digest
+from .response_schema import own_response_schema, schema_bytes, schema_digest, schema_wire_bytes, schema_order_metadata
 
 
 class AdapterBoundary(Exception):
@@ -67,7 +67,7 @@ class _Attempts:
             remaining = min(remaining, timeout_s)
         return replace(policy, timeout_s=remaining, **values)
 
-    def add(self, result, arguments, response_schema=None):
+    def add(self, result, arguments, response_schema=None, response_schema_order='canonical'):
         if type(result) is not Result:
             raise ValueError('adapter delegate must return Result')
         owned = deepcopy(result)
@@ -99,6 +99,8 @@ class _Attempts:
             'tool_calls': tools, 'arguments_sha256': hashlib.sha256(arguments.encode()).hexdigest()})
         if response_schema is not None:
             self.records[-1]['response_schema_sha256'] = schema_digest(response_schema)
+            if response_schema_order == 'declared':
+                self.records[-1]['response_schema_order_v1'] = schema_order_metadata(response_schema)
 
     def finish(self, result, descriptor):
         if type(result) is not Result:
@@ -186,27 +188,33 @@ class RuntimeAdapter:
     def run(self, artifact, arguments='', *, policy=None, on_event=None, cancelled=None, **options):
         self.validate_binding()
         options = dict(options)
-        outer_schema = own_response_schema(options.get('response_schema'))
+        outer_order = options.get('response_schema_order', 'canonical')
+        outer_schema = own_response_schema(options.get('response_schema'), order=outer_order)
         if outer_schema is not None:
             options['response_schema'] = deepcopy(outer_schema)
         policy = policy or RunPolicy()
         cancelled = cancelled or (lambda: False)
         ledger = _Attempts(policy, self.max_attempts, time.monotonic() + policy.timeout_s, cancelled)
         descriptor = self.descriptor
-        def execute(projected, *, response_schema=None, **reductions):
+        def execute(projected, *, response_schema=None, response_schema_order=None, **reductions):
             self.validate_binding()
             effective = ledger.remaining(**reductions)
             if type(projected) is not str:
                 raise ValueError('adapter arguments must be text')
-            schema = own_response_schema(response_schema) if response_schema is not None else outer_schema
-            if outer_schema is not None and schema_bytes(schema) != schema_bytes(outer_schema):
-                raise ValueError('adapter cannot replace an outer response_schema')
+            order = outer_order if response_schema_order is None else response_schema_order
+            schema = own_response_schema(response_schema if response_schema is not None else outer_schema, order=order)
+            if outer_schema is not None:
+                identity = schema_wire_bytes if outer_order == 'declared' else schema_bytes
+                if order != outer_order or identity(schema) != identity(outer_schema):
+                    raise ValueError('adapter cannot replace an outer response_schema or order')
             execution_options = dict(options)
             if schema is not None:
                 execution_options['response_schema'] = schema
+                if order != 'canonical':
+                    execution_options['response_schema_order'] = order
             result = self.runtime.run(artifact, projected, policy=effective, on_event=on_event,
                                       cancelled=cancelled, **execution_options)
-            ledger.add(result, projected, response_schema=schema)
+            ledger.add(result, projected, response_schema=schema, response_schema_order=order)
             return result
         try:
             result = self.invoke(artifact, arguments, execute=execute, policy=policy,

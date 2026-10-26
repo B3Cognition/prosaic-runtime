@@ -1,6 +1,6 @@
 # Opt-in schema-constrained generation
 
-The local `0.9.8+jsonschema.2` candidate adds `json_schema_v1` to Runtime's
+The local `0.9.8+jsonschema.3` candidate includes `json_schema_v1` in Runtime's
 capabilities. This is unpublished and does not change released SDK pins.
 
 ```python
@@ -39,3 +39,20 @@ provider evidence when qualifying an endpoint. Runtime preserves raw text and
 usage; consumers must still parse strictly and validate the schema, citations,
 permissions and domain semantics. It performs no fence stripping, JSON repair,
 acceptance override or extra model call.
+
+## Declared property order
+
+`response_schema_order='declared'` explicitly preserves the host's nested JSON
+object insertion order during schema ownership and transport. The default
+`'canonical'` retains sorted keys and existing behavior. This can affect the
+generation sequence on grammar-constrained servers; it changes neither JSON
+Schema semantics nor consumer validation. It requires a schema and the new
+`json_schema_order_v1` capability. Invalid modes fail before dispatch.
+
+Adapters inherit an outer mode and cannot replace its schema or declared order.
+`response_schema_v1` keeps its canonical digest. Declared-order calls additionally
+record `response_schema_order_v1` (`mode`, `wire_schema_sha256`) on the result and
+each adapter attempt. The wire digest hashes compact finite UTF-8 JSON without
+sorting keys. Consumers must freeze this order-sensitive identity and a versioned
+adapter/profile in saved workflows; canonical schema hashing alone cannot detect
+an ordering change. All schema/input limits and raw output handling still apply.
