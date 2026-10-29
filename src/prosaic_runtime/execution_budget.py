@@ -102,13 +102,17 @@ def token_reservations(budgets, native_request, endpoint):
     """Count the owned final native input using host-qualified registrations.
 
     No heuristic fallback: the host guarantees the counter and the provider must
-    honor max_tokens. Reported usage remains evidence, not an invoice guarantee.
+    honor the selected completion cap. Reported usage is not an invoice guarantee.
     """
     strict=[b for b in budgets if b._token_counter is not None]
     if not strict: return {}
     from .context_counters import count_owned
     try:
-        output=native_request.get('max_tokens')
+        from .config import completion_token_parameter
+        parameter = completion_token_parameter(endpoint)
+        if set(native_request) & {'max_tokens', 'max_completion_tokens', 'max_output_tokens'} != {parameter}:
+            raise ValueError('ambiguous output bound')
+        output=native_request.get(parameter)
         if type(output) is not int or output<=0: raise ValueError('missing output bound')
         estimates=[]
         for budget in strict:

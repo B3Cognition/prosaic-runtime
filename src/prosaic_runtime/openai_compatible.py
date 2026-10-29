@@ -38,7 +38,7 @@ from prosaic_runtime.openai_compatible_transcript import (
 )
 from prosaic_runtime.execution import ExecutionBackend
 from prosaic_runtime.provider_types import ProviderTurn
-from prosaic_runtime.config import EndpointConfig
+from prosaic_runtime.config import EndpointConfig, completion_token_parameter
 from prosaic_runtime.events import print, emit, check_cancelled
 
 
@@ -168,11 +168,12 @@ class OpenAICompatibleBackend(ExecutionBackend):
             payload: dict[str, object] = {
                 "model": model,
                 "messages": [{"role": "user", "content": prompt}],
-                "temperature": llm.temperature,
                 "stream": False,
             }
-            if llm.max_tokens is not None:
-                payload["max_tokens"] = llm.max_tokens
+            payload.update(_generation_parameters(llm, {}))
+            effort = _reasoning_effort(llm.features)
+            if effort:
+                payload["reasoning_effort"] = effort
             token, token_error = _api_key(
                 llm.api_key_env, llm.api_key_file, request.env
             )
@@ -240,11 +241,8 @@ class OpenAICompatibleBackend(ExecutionBackend):
         payload: dict[str, object] = {
             "model": request_model,
             "messages": [{"role": "user", "content": request.prompt}],
-            "temperature": _metadata_float(prompt_metadata, "temperature", llm.temperature),
         }
-        max_tokens = _metadata_int(prompt_metadata, "max_tokens", llm.max_tokens)
-        if max_tokens is not None:
-            payload["max_tokens"] = max_tokens
+        payload.update(_generation_parameters(llm, prompt_metadata))
         if _feature_enabled(llm.features, "json_mode", default=False):
             payload["response_format"] = {"type": "json_object"}
         reasoning_effort = (
@@ -393,11 +391,8 @@ class OpenAICompatibleBackend(ExecutionBackend):
         payload: dict[str, object] = {
             "model": _metadata_str(prompt_metadata, "model") or llm.model or "",
             "messages": messages,
-            "temperature": _metadata_float(prompt_metadata, "temperature", llm.temperature),
         }
-        max_tokens = _metadata_int(prompt_metadata, "max_tokens", llm.max_tokens)
-        if max_tokens is not None:
-            payload["max_tokens"] = max_tokens
+        payload.update(_generation_parameters(llm, prompt_metadata))
         if _feature_enabled(llm.features, "json_mode", default=False):
             payload["response_format"] = {"type": "json_object"}
         reasoning_effort = (
@@ -1629,9 +1624,22 @@ def _metadata_int(
     return default
 
 
+
+def _generation_parameters(endpoint, metadata):
+    # Dialect comes only from trusted endpoint configuration, never prompt metadata.
+    parameters = {}
+    temperature = _metadata_float(metadata, 'temperature', endpoint.temperature)
+    if temperature is not None:
+        parameters['temperature'] = temperature
+    limit = _metadata_int(metadata, 'max_tokens', endpoint.max_tokens)
+    if limit is not None:
+        parameters[completion_token_parameter(endpoint)] = limit
+    return parameters
+
+
 def _metadata_reasoning_effort(metadata: Mapping[str, object], key: str) -> str:
     normalized = _metadata_str(metadata, key).lower()
-    if normalized in {"low", "medium", "high"}:
+    if normalized in {"none", "low", "medium", "high", "xhigh", "max"}:
         return normalized
     return ""
 
@@ -1651,7 +1659,7 @@ def _reasoning_effort(features: dict[str, object]) -> str:
     if not isinstance(value, str):
         return ""
     normalized = value.strip().lower()
-    if normalized in {"low", "medium", "high"}:
+    if normalized in {"none", "low", "medium", "high", "xhigh", "max"}:
         return normalized
     return ""
 

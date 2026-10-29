@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.9 — 2026-10-29
+
+- Add policy-admitted model-free `run_tool()` with schema checks, shared tool budgets,
+  cancellation and effect/accounting evidence; no provider request is created.
+
+- Add validated OpenAI-compatible `completion_token_parameter` endpoint capability.
+  Keep semantic output caps and context/strict-budget reservation under either wire name.
+- Support `none`, `xhigh` and `max` API reasoning settings and omit unset temperature,
+  including constrained prompt requests. Legacy profiles keep their default wire name.
+
 ## 0.9.8 — 2026-10-24
 
 - Preserve bounded CLI output errors when Darwin denies a signal during child

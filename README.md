@@ -283,6 +283,41 @@ credentials. If the endpoint rejects usage streaming, set `stream_options: false
 if it does not stream, set `streaming: false`. If it rejects `reasoning_effort`,
 remove `effort: low` from `.prosaic/subagents/summarizer.md`.
 
+For an OpenAI-compatible Chat Completions endpoint that requires the newer
+completion-token parameter, select the wire name explicitly in the operator profile:
+
+```yaml
+profiles:
+  sol:
+    base_url: https://api.openai.com/v1
+    model: gpt-6-sol
+    api_key_env: OPENAI_API_KEY
+    temperature: 0.2
+    max_tokens: 2048
+    features:
+      completion_token_parameter: max_completion_tokens
+      reasoning_effort: none
+      streaming: true
+      stream_options: true
+```
+
+`max_tokens` remains Runtime's semantic generation cap; the endpoint feature changes
+only its wire name. The default remains `max_tokens`. The only accepted wire names
+are `max_tokens` and `max_completion_tokens`, for `openai-compatible` endpoints.
+The selection is operator-owned and cannot be changed by agent/prompt metadata.
+It participates in the existing profile/configuration identity through `features`;
+unchanged profiles retain their prior identity. Context output reservations and
+strict token-budget admission apply to the selected wire bound, including tools
+and streaming. Do not put raw output limits in `features`.
+
+`temperature: null` omits that optional wire setting. API reasoning controls accept
+`none`, `low`, `medium`, `high`, `xhigh` and `max`; endpoint support must be qualified.
+This does not expand Prosaic's canonical agent `effort` values. GPT-6 Sol's Chat
+Completions tool calling requires `reasoning_effort: none`; reasoning-enabled tool
+workflows need a Responses transport, which this adapter does not implement.
+See the [official model contract](https://developers.openai.com/api/docs/models/gpt-6-sol).
+Model IDs are opaque operator values, not inferred capability switches.
+
 Check setup before making a model request:
 
 ```sh

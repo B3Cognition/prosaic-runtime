@@ -40,6 +40,7 @@ class EndpointConfig:
             raise ValueError('unsupported provider')
         if self.provider == 'anthropic' and self.max_tokens is None:
             raise ValueError('Anthropic max_tokens must be a positive integer')
+        completion_token_parameter(self)
         if self.temperature is not None and not math.isfinite(self.temperature):
             raise ValueError("temperature must be finite")
         for name in ("max_tokens", "max_response_bytes"):
@@ -48,6 +49,16 @@ class EndpointConfig:
                 continue
             if type(value) is not int or value <= 0:
                 raise ValueError(f"{name} must be a positive integer")
+
+
+def completion_token_parameter(endpoint):
+    """Operator-owned wire name; max_tokens remains the semantic cap."""
+    parameter = endpoint.features.get('completion_token_parameter', 'max_tokens')
+    if not isinstance(parameter, str) or parameter not in {'max_tokens', 'max_completion_tokens'}:
+        raise ValueError('unsupported completion_token_parameter')
+    if 'completion_token_parameter' in endpoint.features and endpoint.provider != 'openai-compatible':
+        raise ValueError('completion_token_parameter requires openai-compatible provider')
+    return parameter
 
 
 @dataclass(frozen=True)

@@ -375,7 +375,7 @@ class ProsaicRuntime:
     capabilities |= frozenset({'conversation_turn_v1'})
     capabilities |= frozenset({'context_assembly_v1', 'http_correlation_v1', 'execution_lifecycle_v1'})
     capabilities |= frozenset({'token_admission_v1'})
-    capabilities |= frozenset({'tool_outcomes_v1', 'bounded_tool_recovery_v1'})
+    capabilities |= frozenset({'tool_outcomes_v1', 'bounded_tool_recovery_v1', 'direct_tool_v1'})
     def __init__(self, config: RuntimeConfig, *, source=".prosaic", executable="prosaic", custom_tools=None,
                  accounting=None, context_defaults=None, lifecycle=None):
         self.lifecycle = lifecycle if lifecycle is not None else ExecutionLifecycle()
@@ -580,6 +580,20 @@ class ProsaicRuntime:
         names = (self._custom_tools.keys() | self.config.allowed_tools) if all_tools else requested_tools(artifact.frontmatter.get('tools'))
         return self._preflight_names(names, str(Path(cwd).resolve()), policy,
                                      dict(os.environ if env is None else env), deadline)
+
+    @tracked
+    def run_tool(self, name, arguments, *, policy=None, cwd='.', on_event=None,
+                 cancelled=None, operation_context=None, tool_journal=None,
+                 observer=None, context=None, accounting=None) -> Result:
+        """Execute one granted host CustomTool with literal JSON arguments and no model.
+
+        Builtin and CLI tools are unsupported. Trusted callbacks cooperate with
+        cancellation/deadlines; unknown effects require host reconciliation.
+        """
+        from .direct_tool import run_tool
+        return run_tool(self, name, arguments, policy=policy, cwd=cwd,
+                        on_event=on_event, cancelled=cancelled, operation_context=operation_context,
+                        tool_journal=tool_journal, observer=observer, context=context, accounting=accounting)
 
     @tracked
     def run(self, artifact: str | ProsaicArtifact, arguments: str = "", *,
