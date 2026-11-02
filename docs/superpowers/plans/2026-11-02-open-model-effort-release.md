@@ -28,3 +28,15 @@ tests validate control wiring; live hosted inference is not claimed.
   pre-commit full-suite run used the previous release archive; restart after the
   version/source commit for release evidence.
 - Version 0.9.10 retains the published recorder 0.3.0 dependency range.
+
+## Release qualification
+
+- Full committed-source suite: 1625 passed, 2 skipped in 532.29s.
+- Fresh installed-wheel environment: 162 reasoning/completion tests passed;
+  ownership, native fallback, production and conversation smokes passed.
+- First exact-source CI run passed all Linux/Python and PostgreSQL lanes. A
+  macOS 3.13 case hit the existing HTTP deadline test's 0.35s scheduling threshold
+  (0.51s); the same case passed locally. Two queued macOS jobs were cancelled by
+  GitHub with "not acquired by Runner" and ARM capacity-constraint annotations.
+- Move macOS CI to the documented Intel pool and require the same complete
+  Python/source/wheel/framework checks against the updated source commit.

@@ -85,7 +85,9 @@ access. Missing access fails qualification. Do not infer access from configurati
 or paste credentials into reports or chat.
 
 Required source and installed-wheel checks cover Linux AMD64/ARM64 and macOS on
-Python3.11/3.12/3.13. Linux requires the patched Bubblewrap broker and operational
+Python3.11/3.12/3.13. macOS uses the explicit `macos-15-intel` hosted pool while
+GitHub's ARM pool has capacity constraints; source, wheel and framework checks
+remain mandatory. Linux requires the patched Bubblewrap broker and operational
 confinement; macOS additionally runs its actual framework-interpreter check.
 The Linux source selector excludes only that macOS-specific case. The separately
 mandatory clean installed metadata test is excluded from source selectors and
