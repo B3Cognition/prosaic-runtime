@@ -4,7 +4,7 @@
 
 The [local Qwen/Gemma guide](LOCAL_REASONING.md) uses one Markdown `effort` field,
 including `none` for thinking off and positive values for Gemma's binary on
-setting. These additions are after Runtime 0.9.10.
+setting. These additions follow the tagged Runtime 0.9.11 release.
 
 ## Reasoning effort (Runtime 0.9.10)
 

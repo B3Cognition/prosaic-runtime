@@ -46,3 +46,14 @@ answer correctness separate from native control verification in the evidence.
 - Updated live SDK: all 10 wire/prompt control checks passed. Gemma answered all 6
   correctly; Qwen answered 2 of 4 correctly, with the none/xhigh misses retained.
 - This is an unreleased follow-up, separate from published Runtime 0.9.10.
+
+## Merge and release follow-up
+
+The user authorized merging PR13 after CI and requested version0.9.11. PR13's
+original CI passed. Main advanced with PR14 (terminal completion), and tag
+v0.9.11 already points at that feature's qualified commit while publication is
+running. A version clarification is pending: recommend0.9.12 or merge/hold.
+Preserve the existing tag and all terminal work; do not overwrite release bytes.
+The combined integration has no review blockers. Explicit Gemma on/off plus
+terminal-completion tests cover streaming/non-streaming, one provider request,
+retained host artifacts and no acknowledgement model call.

@@ -13,6 +13,7 @@ from .policy import BUILTIN_TOOLS
 from .operation_context import ToolExecutionContext, bounded_reference
 from .tool_effects import ToolEffectFailure, ToolFailure, canonical_json, snapshot_outcome, validate_claim, failure_outcome
 from .tool_outcomes import ToolOutcome
+from .terminal import TerminalCompletion, TerminalCompletionError
 
 
 class ToolDeadlineExceeded(TimeoutError):
@@ -77,10 +78,11 @@ class CustomTool:
     authorize: Callable | None
     with_context: bool
     operation_key: Callable | None
+    terminal: bool
 
     def __init__(self, name, description, parameters, handler, version, *,
                  max_argument_bytes=16384, max_result_bytes=65536, authorize=None,
-                 with_context=False, operation_key=None):
+                 with_context=False, operation_key=None, terminal=False):
         if not isinstance(name, str) or not re.fullmatch(r'[A-Za-z][A-Za-z0-9_-]{0,63}', name) or name in BUILTIN_TOOLS:
             raise ValueError('invalid or reserved custom tool name')
         for label, value, limit in [('description', description, 4096), ('version', version, 128)]:
@@ -93,6 +95,10 @@ class CustomTool:
             raise ValueError('handler and authorizer must be callable')
         if type(with_context) is not bool:
             raise ValueError('with_context must be boolean')
+        if type(terminal) is not bool:
+            raise ValueError('terminal must be boolean')
+        if terminal and not bounded_reference(version):
+            raise ValueError('invalid terminal tool version')
         if operation_key is not None and (not with_context or not callable(operation_key)):
             raise ValueError('operation_key requires contextual tools and a callable resolver')
         try:
@@ -107,7 +113,7 @@ class CustomTool:
         for key, value in dict(name=name, description=description, _schema_json=schema_json,
                                handler=handler, version=version, max_argument_bytes=max_argument_bytes,
                                max_result_bytes=max_result_bytes, authorize=authorize,
-                               with_context=with_context, operation_key=operation_key).items():
+                               with_context=with_context, operation_key=operation_key, terminal=terminal).items():
             object.__setattr__(self, key, value)
 
     @property
@@ -123,6 +129,8 @@ class CustomTool:
             descriptor['with_context'] = True
         if self.operation_key is not None:
             descriptor['journaled'] = True
+        if self.terminal:
+            descriptor['terminal'] = True
         return descriptor
 
 
@@ -185,7 +193,8 @@ def bounded_result(value, maximum, *, on_outcome=None):
 
 def execute_custom_tool(tool, raw_arguments, *, check_boundary, scope=None,
                         deadline=None, cancelled=lambda: False, call_index=0, tool_journal=None,
-                        on_completion=None, accounting_context=None, on_outcome=None):
+                        on_completion=None, accounting_context=None, on_outcome=None,
+                        on_terminal=None):
     if on_outcome is not None and not callable(on_outcome):
         raise ValueError('invalid tool outcome observer')
     def report(code, replayed=False):
@@ -301,7 +310,15 @@ def execute_custom_tool(tool, raw_arguments, *, check_boundary, scope=None,
         report('handler_error')
         check_boundary()
         return {'status': 'error', 'error': 'handler_error'}
-    result = bounded_result(value, tool.max_result_bytes, on_outcome=on_outcome)
+    if type(value) is TerminalCompletion:
+        if not tool.terminal or on_terminal is None:
+            report('invalid_result')
+            raise TerminalCompletionError('terminal_completion_not_granted')
+        on_terminal(value, arguments)
+        result = {'status': 'ok', 'result': value.output}
+        report('ok')
+    else:
+        result = bounded_result(value, tool.max_result_bytes, on_outcome=on_outcome)
     if on_completion is not None:
         on_completion(result, signature=completion_signature)
     check_boundary()

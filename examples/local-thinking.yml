@@ -1,4 +1,4 @@
-# Requires the checkout with canonical none/Gemma support (after Runtime 0.9.10).
+# Requires the development checkout after Runtime 0.9.11.
 # Set each base_url to the server that hosts that profile's model.
 default_profile: qwen
 allowed_tools: []

@@ -1,9 +1,10 @@
 # Live reasoning-control verification — 2026-11-02
 
 These observations verify native controls on two user-supplied oMLX servers.
-They are not a statistical accuracy or performance benchmark. The change is in
-the development checkout after Runtime 0.9.10; the published 0.9.10 package does
-not contain the new canonical `none`/Gemma mappings.
+They are not a statistical accuracy or performance benchmark. The new canonical
+`none`/Gemma mappings are in the development checkout after tagged Runtime 0.9.11.
+The observations were captured during development after 0.9.10; neither tagged
+release includes these mappings.
 
 [Machine-readable evidence](evidence/live-thinking-2026-11-02.json) contains the
 wire settings, prompt hashes/counts, server usage, independently checked answer

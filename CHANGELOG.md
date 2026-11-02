@@ -8,6 +8,14 @@
   explicitly for none, avoiding server-side effort alias fallback.
 - Add local Markdown examples and live control verification evidence.
 
+## 0.9.11 — 2026-11-02
+
+- Add opt-in host-owned terminal tool completion with an independently bound
+  inline artifact, native provider accounting and no acknowledgement model call.
+- Admit terminal authority before effects, reject unsafe multi-call/journal and
+  unsupported transport combinations, and retain known completion on cancellation.
+- Prevent RuntimeAdapter redispatch or replacement of a terminal delegate result.
+
 ## 0.9.10 — 2026-11-02
 
 - Map canonical Markdown `effort` to OpenAI-compatible, Claude Code and Codex

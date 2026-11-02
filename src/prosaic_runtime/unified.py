@@ -37,6 +37,8 @@ class UnifiedRuntime:
             on_event=None, cancelled=None, env=None):
         if not isinstance(policy, PoolPolicy):
             raise ValueError('unified execution requires explicit PoolPolicy')
+        if policy.api_policy is not None and policy.api_policy.allowed_terminal_tools:
+            raise ValueError('terminal tools are unsupported in unified pools')
         started = time.monotonic()
         policy, config = deepcopy(policy), deepcopy(self.config)
         PoolPolicy.__post_init__(policy)
