@@ -80,16 +80,24 @@ def test_post_plain_handler_cancellation_does_not_erase_completed_call(turn_fixt
         assert result.evidence.to_dict()['toolOutcomes'][0]['status'] == 'completed'
 
 
-def test_post_handler_deadline_retains_completed_call(turn_fixture):
+def test_post_handler_deadline_retains_completed_call(turn_fixture, monkeypatch):
+    from types import SimpleNamespace
+    import prosaic_runtime.runtime as runtime_module
+    # Expire the runtime clock only after the handler executes. A 50ms startup
+    # allowance can expire before HTTP/tool dispatch on a busy hosted runner.
+    offset = [0]
+    real_monotonic = time.monotonic
+    monkeypatch.setattr(runtime_module, 'time', SimpleNamespace(
+        monotonic=lambda: real_monotonic() + offset[0]))
     with turn_fixture('openai-compatible') as fx:
         effects = []
         def handler(args):
             effects.append(1)
-            time.sleep(0.08)
+            offset[0] = 60
             return {'completed': True}
         fx.add_tool('lookup', handler)
         fx.queue_calls([{'id': 'a', 'name': 'lookup', 'arguments': '{}'}])
-        result = fx.runtime.turn(fx.agent, message='Find', policy=replace(fx.policy, timeout_s=.05))
+        result = fx.runtime.turn(fx.agent, message='Find', policy=replace(fx.policy, timeout_s=30))
         assert effects == [1] and result.result.metadata['failure_reason'] == 'timeout'
         assert result.evidence.to_dict()['toolOutcomes'][0]['status'] == 'completed'
 

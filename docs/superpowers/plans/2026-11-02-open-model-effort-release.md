@@ -40,3 +40,9 @@ tests validate control wiring; live hosted inference is not claimed.
   GitHub with "not acquired by Runner" and ARM capacity-constraint annotations.
 - Move macOS CI to the documented Intel pool and require the same complete
   Python/source/wheel/framework checks against the updated source commit.
+- The Intel candidate passed Linux/PostgreSQL and macOS 3.11. macOS 3.12/3.13
+  exposed an older post-handler test whose 50ms deadline expired before dispatch;
+  3.13 also exposed an 80ms pre-dispatch expiry in an ambiguous-response test.
+  Advance a module-local runtime clock only inside the completed handler, and
+  give HTTP-error cases startup headroom while retaining a true late-response
+  deadline case. Preserve effect, request-count, recovery and no-fallback checks.

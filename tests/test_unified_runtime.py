@@ -86,12 +86,14 @@ def test_api_first_429_falls_back_to_real_native_transport(rejection_server, tmp
 
 
 @pytest.mark.parametrize('status,body,delay', [(401, b'unauthorized', 0), (503, b'bad', 0),
-    (200, b'malformed', 0), (200, b'late', .2)])
+    (200, b'malformed', 0), (200, b'late', 1)])
 def test_api_ambiguous_failure_never_dispatches_native(rejection_server, tmp_path, status, body, delay):
     url, requests, responses = rejection_server
     responses.append((status, body, delay))
     result = runtime(tmp_path, url, order=('local', 'codex'), native_error='success').run(
-        artifact(), cwd=tmp_path, policy=policy(api_policy=sdk.RunPolicy(timeout_s=.08,
+        # Only the late-response case needs a short deadline. Leave enough
+        # startup time to reach the server and test ambiguous accepted work.
+        artifact(), cwd=tmp_path, policy=policy(api_policy=sdk.RunPolicy(timeout_s=.5 if delay else 2,
             max_provider_requests=2, max_tool_calls=0)))
     assert result.exit_code != 0 and len(requests) == 1
     assert not (tmp_path / 'codex.calls').exists()
