@@ -40,7 +40,7 @@ from prosaic_runtime.execution import ExecutionBackend
 from prosaic_runtime.provider_types import ProviderTurn
 from prosaic_runtime.config import EndpointConfig, completion_token_parameter
 from prosaic_runtime.events import print, emit, check_cancelled
-from prosaic_runtime.effort import EFFORTS, api_default_effort, api_effort_capabilities, resolve_effort
+from prosaic_runtime.effort import EFFORTS, api_default_effort, api_effort_capabilities, api_effort_format, resolve_effort
 
 
 _OPENAI_COMPATIBLE_TOOL_GUIDANCE = (
@@ -172,9 +172,7 @@ class OpenAICompatibleBackend(ExecutionBackend):
                 "stream": False,
             }
             payload.update(_generation_parameters(llm, {}))
-            effort = _request_reasoning_effort({'model': model}, llm)
-            if effort:
-                payload["reasoning_effort"] = effort
+            payload.update(_request_reasoning_parameters({'model': model}, llm))
             token, token_error = _api_key(
                 llm.api_key_env, llm.api_key_file, request.env
             )
@@ -246,9 +244,7 @@ class OpenAICompatibleBackend(ExecutionBackend):
         payload.update(_generation_parameters(llm, prompt_metadata))
         if _feature_enabled(llm.features, "json_mode", default=False):
             payload["response_format"] = {"type": "json_object"}
-        reasoning_effort = _request_reasoning_effort(prompt_metadata, llm)
-        if reasoning_effort:
-            payload["reasoning_effort"] = reasoning_effort
+        payload.update(_request_reasoning_parameters(prompt_metadata, llm))
         if streaming:
             payload["stream"] = True
             if _feature_enabled(llm.features, "stream_options", default=True):
@@ -392,9 +388,7 @@ class OpenAICompatibleBackend(ExecutionBackend):
         payload.update(_generation_parameters(llm, prompt_metadata))
         if _feature_enabled(llm.features, "json_mode", default=False):
             payload["response_format"] = {"type": "json_object"}
-        reasoning_effort = _request_reasoning_effort(prompt_metadata, llm)
-        if reasoning_effort:
-            payload["reasoning_effort"] = reasoning_effort
+        payload.update(_request_reasoning_parameters(prompt_metadata, llm))
         if tools:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
@@ -1652,14 +1646,33 @@ def _reasoning_effort(features: dict[str, object]) -> str:
 
 
 def _request_reasoning_effort(metadata, config):
-    requested = (_metadata_reasoning_effort(metadata, 'reasoning_effort')
-                 or _metadata_reasoning_effort(metadata, 'effort')
-                 or _reasoning_effort(config.features))
+    operator_value = _metadata_reasoning_effort(metadata, 'reasoning_effort')
+    # The old host/native setting is an operator assertion, distinct from the
+    # newly admitted canonical Markdown none setting.
+    if operator_value == 'none':
+        return 'none'
+    requested = operator_value or _metadata_reasoning_effort(metadata, 'effort')
     model = _metadata_str(metadata, 'model') or config.model
     # Model overrides cannot inherit capabilities declared for a different model.
     declared = (api_effort_capabilities(model, config.features, config.supported_efforts)
-                if model == config.model else None)
-    return resolve_effort(requested or None, provider='openai-compatible', model=model, supported=declared)
+                if model == config.model else api_effort_capabilities(model, {}, None))
+    return resolve_effort(requested or None, _reasoning_effort(config.features) or None,
+                          provider='openai-compatible', model=model, supported=declared)
+
+
+def _request_reasoning_parameters(metadata, config):
+    effort = _request_reasoning_effort(metadata, config)
+    if effort is None:
+        return {}
+    model = _metadata_str(metadata, 'model') or config.model
+    features = config.features if model == config.model else {}
+    wire_format = api_effort_format(model, features)
+    if wire_format in ('thinking_toggle', 'chat_template_effort'):
+        parameters = {'chat_template_kwargs': {'enable_thinking': effort != 'none'}}
+        if wire_format == 'chat_template_effort' and effort != 'none':
+            parameters['reasoning_effort'] = effort
+        return parameters
+    return {'reasoning_effort': effort}
 
 
 def _raw_response_metadata(parsed: object) -> dict[str, object]:

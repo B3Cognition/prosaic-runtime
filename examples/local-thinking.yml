@@ -1,0 +1,25 @@
+# Requires the checkout with canonical none/Gemma support (after Runtime 0.9.10).
+# Set each base_url to the server that hosts that profile's model.
+default_profile: qwen
+allowed_tools: []
+limits:
+  timeout_s: 240
+  max_tool_rounds: 1
+profiles:
+  qwen:
+    base_url: http://127.0.0.1:8000/v1
+    api_key_env: LOCAL_LLM_API_KEY
+    model: ThinkingCap-Qwen3.8-27B-MLX-4bit-DWQ
+    temperature: 0
+    max_tokens: 4096
+    features:
+      streaming: false
+  gemma:
+    # Change this URL if Gemma runs on a different machine.
+    base_url: http://127.0.0.1:8000/v1
+    api_key_env: LOCAL_LLM_API_KEY
+    model: gemma-4-31B-it-oQ4e-mtp
+    temperature: 0
+    max_tokens: 4096
+    features:
+      streaming: false

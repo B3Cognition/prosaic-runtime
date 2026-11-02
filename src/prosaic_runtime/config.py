@@ -5,7 +5,7 @@ from urllib.parse import urlsplit
 import math
 import yaml
 
-from .effort import supported_efforts
+from .effort import api_effort_format, supported_efforts
 
 CONFIG_FILENAMES = ("prosaic-runtime.yaml", "prosaic-runtime.yml")
 
@@ -42,6 +42,10 @@ class EndpointConfig:
         if self.provider not in {'openai-compatible', 'anthropic'}:
             raise ValueError('unsupported provider')
         object.__setattr__(self, 'supported_efforts', supported_efforts(self.supported_efforts, self.provider))
+        if 'reasoning_effort_format' in self.features:
+            if self.provider != 'openai-compatible':
+                raise ValueError('reasoning_effort_format requires openai-compatible provider')
+            api_effort_format(self.model, self.features)
         if self.provider == 'anthropic' and self.max_tokens is None:
             raise ValueError('Anthropic max_tokens must be a positive integer')
         completion_token_parameter(self)

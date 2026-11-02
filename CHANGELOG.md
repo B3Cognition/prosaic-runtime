@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Add canonical `effort: none`. Map Gemma 4 none/positive efforts to its native
+  thinking switch; keep ultra Codex-only and preserve tiered model controls.
+- Recognize verified local ThinkingCap Qwen aliases and turn thinking off
+  explicitly for none, avoiding server-side effort alias fallback.
+- Add local Markdown examples and live control verification evidence.
+
 ## 0.9.10 — 2026-11-02
 
 - Map canonical Markdown `effort` to OpenAI-compatible, Claude Code and Codex

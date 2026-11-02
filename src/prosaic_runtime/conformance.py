@@ -211,7 +211,8 @@ def _run_suite(config, profile, fingerprint, policy, observer, origin):
     # Never discover configured CLI tools or enable arbitrary transcript/file/web
     # features. This suite exercises only the provider request controls below.
     features = {key: value for key, value in endpoint.features.items()
-                if key in {'streaming', 'stream_options', 'json_mode', 'reasoning_effort', 'effort', 'thinking'}}
+                if key in {'streaming', 'stream_options', 'json_mode', 'reasoning_effort',
+                           'reasoning_effort_format', 'effort', 'thinking'}}
     isolated_endpoint = replace(endpoint, features=features,
                                 max_response_bytes=min(_MAX_BYTES, endpoint.max_response_bytes))
     isolated = RuntimeConfig({profile: isolated_endpoint}, {}, profile, frozenset({_TOOL_NAME}))

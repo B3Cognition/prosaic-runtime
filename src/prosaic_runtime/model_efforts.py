@@ -37,7 +37,39 @@ CLAUDE_MODELS = {
 CLAUDE_MODELS.update({name: ('low', 'medium', 'high', 'max')
                       for name in ('claude-opus-4-6', 'claude-sonnet-4-6')})
 
+# Gemma 4 has a native thinking switch, not distinct effort budgets.
+# https://ai.google.dev/gemma/docs/capabilities/thinking
+# Exact community aliases below were verified against their served templates.
+GEMMA_TOGGLE_MODELS = {
+    alias for model in ('gemma-4-e2b-it', 'gemma-4-e4b-it', 'gemma-4-12b-it',
+                       'gemma-4-26b-a4b-it', 'gemma-4-31b-it')
+    for alias in (model, 'google/' + model)
+} | {'gemma-4-31b-it-oq4e-mtp', 'jundot/gemma-4-31b-it-oq4e-mtp'}
+QWEN_TEMPLATE_MODELS = {
+    'thinkingcap-qwen3.8-27b-mlx-4bit-dwq',
+    'bottlecapai/thinkingcap-qwen3.8-27b-mlx-4bit-dwq',
+}
+# These documented APIs also accept none as an off control. Keep it separate
+# from their positive effort tiers; unknown models require an explicit assertion.
+# https://api-docs.deepseek.com/api/list-models/
+# https://www.alibabacloud.com/help/en/model-studio/qwen-api-via-openai-chat-completions
+API_OFF_MODELS = {'deepseek-flash', 'deepseek-v4-pro', 'qwen3.8-max',
+                  'qwen3.8-max-0902', 'qwen3.8-flash', 'qwen3.8-2.4t-a95b', 'qwen3.8-27b'}
+
+
+def automatic_effort_format(model):
+    if model.lower() in GEMMA_TOGGLE_MODELS:
+        return 'thinking_toggle'
+    if model.lower() in QWEN_TEMPLATE_MODELS:
+        return 'chat_template_effort'
+    return 'reasoning_effort'
+
 
 def automatic_efforts(provider, model):
+    if provider == 'openai-compatible':
+        if model.lower() in GEMMA_TOGGLE_MODELS:
+            return ('none', *STANDARD)
+        if model.lower() in QWEN_TEMPLATE_MODELS:
+            return ('low', 'medium', 'xhigh')
     return {'openai-compatible': API_MODELS, 'codex-cli': CODEX_MODELS,
             'claude-code': CLAUDE_MODELS}.get(provider, {}).get(model)

@@ -1,11 +1,12 @@
 """Pure neutral effort admission against an operator-bound model profile."""
 
-EFFORTS = ('low', 'medium', 'high', 'xhigh', 'max', 'ultra')
-BASE_EFFORTS = EFFORTS[:3]
+POSITIVE_EFFORTS = ('low', 'medium', 'high', 'xhigh', 'max', 'ultra')
+EFFORTS = ('none', *POSITIVE_EFFORTS)
+BASE_EFFORTS = POSITIVE_EFFORTS[:3]
 PROVIDER_EFFORTS = {
-    'openai-compatible': EFFORTS[:5],
-    'claude-code': EFFORTS[:5],
-    'codex-cli': EFFORTS,
+    'openai-compatible': ('none', *POSITIVE_EFFORTS[:5]),
+    'claude-code': POSITIVE_EFFORTS[:5],
+    'codex-cli': POSITIVE_EFFORTS,
     'anthropic': (),
 }
 
@@ -16,14 +17,14 @@ class EffortUnavailableError(ValueError):
 
 def validate_effort(value):
     if value is not None and (not isinstance(value, str) or value not in EFFORTS):
-        raise ValueError('unsupported effort; expected low, medium, high, xhigh, max, or ultra')
+        raise ValueError('unsupported effort; expected none, low, medium, high, xhigh, max, or ultra')
     return value
 
 
 def api_default_effort(features):
     """Preserve the API transport's tolerant, case-insensitive default setting."""
     value = features.get('reasoning_effort')
-    if isinstance(value, str) and value.strip().lower() in ('none', *EFFORTS):
+    if isinstance(value, str) and value.strip().lower() in EFFORTS:
         return value.strip().lower()
     return None
 
@@ -50,7 +51,12 @@ def effective_efforts(provider, model, supported=None):
 
 def api_effort_capabilities(model, features, supported=None):
     """Retain 0.9.9 operator defaults for unknown custom API model identities."""
-    from .model_efforts import automatic_efforts
+    from .model_efforts import API_OFF_MODELS, automatic_efforts
+    if supported is None and api_effort_format(model, features) == 'thinking_toggle':
+        return PROVIDER_EFFORTS['openai-compatible']
+    if supported is None and (api_effort_format(model, features) == 'chat_template_effort'
+                              or model in API_OFF_MODELS):
+        return ('none', *(automatic_efforts('openai-compatible', model) or BASE_EFFORTS))
     if supported is None and automatic_efforts('openai-compatible', model) is None:
         default = api_default_effort(features)
         if default in PROVIDER_EFFORTS['openai-compatible'] and default not in BASE_EFFORTS:
@@ -58,10 +64,19 @@ def api_effort_capabilities(model, features, supported=None):
     return supported
 
 
+def api_effort_format(model, features):
+    """Choose a trusted wire format, never a prompt-provided extension body."""
+    from .model_efforts import automatic_effort_format
+    value = features.get('reasoning_effort_format', automatic_effort_format(model))
+    if not isinstance(value, str) or value not in (
+            'reasoning_effort', 'thinking_toggle', 'chat_template_effort'):
+        raise ValueError('unsupported reasoning_effort_format')
+    return value
+
+
 def resolve_effort(value, default=None, *, provider, model, supported=None):
-    # Preserve the API's existing opt-out control; neutral Markdown still only
-    # accepts the six positive effort levels through validate_effort.
-    if provider == 'openai-compatible' and (default if value is None else value) == 'none':
+    # Preserve the API's existing opt-out control for legacy/custom profiles.
+    if provider == 'openai-compatible' and value is None and default == 'none':
         return 'none'
     value = validate_effort(default if value is None else value)
     if value is None:

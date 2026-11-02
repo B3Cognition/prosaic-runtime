@@ -1,5 +1,11 @@
 # Run Prosaic prose with and without tools
 
+## Local thinking controls (development checkout)
+
+The [local Qwen/Gemma guide](LOCAL_REASONING.md) uses one Markdown `effort` field,
+including `none` for thinking off and positive values for Gemma's binary on
+setting. These additions are after Runtime 0.9.10.
+
 ## Reasoning effort (Runtime 0.9.10)
 
 See [DeepSeek V4, Qwen 3.8 and Nemotron examples](REASONING.md) for canonical

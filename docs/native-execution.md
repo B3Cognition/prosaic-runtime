@@ -108,16 +108,40 @@ effort: high
 Review {{args}} and report the findings.
 ```
 
-The neutral effort values are `low`, `medium`, `high`, `xhigh`, `max`, and
+The neutral effort values are `none`, `low`, `medium`, `high`, `xhigh`, `max`, and
 `ultra`. Use these spellings in canonical Markdown and Runtime configuration;
 picker labels such as Extra High are written as `xhigh`. Runtime maps an
 admitted value to the selected provider's setting:
 
 | Execution adapter | Native request setting | Available neutral values |
 | --- | --- | --- |
-| OpenAI-compatible API | Chat Completions JSON `reasoning_effort` | `low`, `medium`, `high`, `xhigh`, `max` |
+| OpenAI-compatible API | Model-specific projection (below) | `none`, `low`, `medium`, `high`, `xhigh`, `max` |
 | Claude Code native | `--effort <value>` | `low`, `medium`, `high`, `xhigh`, `max` |
 | Codex CLI native | `-c 'model_reasoning_effort="<value>"'` | `low`, `medium`, `high`, `xhigh`, `max`, `ultra` |
+
+Canonical `none` requires a known off control or an explicit capability/format
+assertion; an unsupported model or restrictive `supported_efforts` declaration
+rejects it before transport. Existing API operator defaults such as
+`features.reasoning_effort: none` keep their legacy compatibility separately.
+`none` disables native thinking where the serving API supports an off control.
+For Gemma 4's binary control, `none` sends
+`chat_template_kwargs: {enable_thinking: false}`; all positive values through
+`max` send true. Those positive values share one native setting on Gemma.
+Omitting effort leaves the server default unchanged. Native Claude/Codex adapters
+currently reject `none`; Runtime does not invent an off flag for them.
+
+The verified ThinkingCap Qwen 3.8 aliases preserve their real `low`, `medium`,
+`xhigh` tiers and explicitly enable thinking; `none` disables it through the
+template. Hosted Qwen API model IDs retain their existing top-level
+`reasoning_effort` projection. Effort is a soft control, not a guaranteed token
+count, quality ranking or response format.
+
+For custom serving aliases, an operator can set `features.reasoning_effort_format`
+to `reasoning_effort` (the ordinary API field), `thinking_toggle` (binary template
+switch), or `chat_template_effort` (native effort plus an explicit template
+switch). Markdown cannot select a wire format. A model override does not inherit
+the original model's format/capability assertion. See the
+[local Qwen/Gemma examples](../examples/LOCAL_REASONING.md).
 
 Effort support is resolved automatically from the selected provider and model.
 For higher-effort native runs without an explicit override, Runtime reads Codex
