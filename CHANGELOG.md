@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.10 — 2026-11-02
+
+- Map canonical Markdown `effort` to OpenAI-compatible, Claude Code and Codex
+  native controls, consistently overriding profile defaults.
+- Support `xhigh`, `max` and Codex-only `ultra` using bounded native metadata
+  discovery and documented model defaults. Retain optional `supported_efforts`
+  overrides; reject unavailable levels without silently changing effort.
+- Add credential-free integration tests and runnable DeepSeek V4, Qwen 3.8 and
+  Nemotron NIM examples with automatic provider/model capabilities.
+- Preserve existing API `none` settings and completion token dialect controls.
+
 ## 0.9.9 — 2026-10-29
 
 - Add policy-admitted model-free `run_tool()` with schema checks, shared tool budgets,

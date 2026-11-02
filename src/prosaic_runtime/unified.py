@@ -1,6 +1,7 @@
 """Ordered assignment selection; existing engines own execution and safety proof."""
 from copy import deepcopy
 from dataclasses import replace
+import os
 from pathlib import Path
 import time
 
@@ -13,6 +14,8 @@ from .policy import BUILTIN_TOOLS, WRITE_TOOLS, requested_tools
 from .runtime import ProsaicRuntime
 from .types import Result
 from .unified_config import PoolPolicy, UnifiedRuntimeConfig
+from .effort import PROVIDER_EFFORTS, EffortUnavailableError, api_default_effort, api_effort_capabilities, effective_efforts, resolve_effort, validate_effort
+from .effort_discovery import MetadataCancelled, discover_native_efforts
 
 
 class UnifiedRuntime:
@@ -83,6 +86,7 @@ class UnifiedRuntime:
             artifact = inspect_artifact(artifact, self.source, executable=self.executable,
                 timeout_s=min(30, max(.001, deadline - time.monotonic())))
         artifact = _inspection_artifact(artifact)
+        effort = validate_effort(artifact.frontmatter.get('effort'))
         if not isinstance(arguments, str):
             raise ValueError('unified arguments must be text')
         tier = artifact.frontmatter.get('model_tier')
@@ -139,6 +143,31 @@ class UnifiedRuntime:
                 resets.append(state['until'])
                 last_skip = 'capacity_unavailable'
                 emit('profile_skipped', profile=name, reason='capacity_unavailable')
+                continue
+            endpoint = native[name] if is_native else api[name]
+            try:
+                provider = endpoint.backend if is_native else endpoint.provider
+                default = endpoint.effort if is_native else api_default_effort(endpoint.features)
+                requested_effort = effort if effort is not None else default
+                declared = endpoint.supported_efforts
+                if not is_native and provider == 'openai-compatible':
+                    declared = api_effort_capabilities(endpoint.model, endpoint.features, declared)
+                if is_native and declared is None and requested_effort in ('xhigh', 'max', 'ultra') and requested_effort in PROVIDER_EFFORTS[provider]:
+                    declared = discover_native_efforts(endpoint, backend_policy, cwd=workspace,
+                        env=dict(os.environ if env is None else env), deadline=deadline, cancelled=cancelled)
+                    early = stopped()
+                    if early is not None:
+                        return finish(early)
+                declared = effective_efforts(provider, endpoint.model, declared)
+                effective_effort = resolve_effort(effort, default,
+                    provider=provider, model=endpoint.model, supported=declared)
+                if is_native:
+                    native[name] = replace(endpoint, effort=effective_effort, supported_efforts=declared)
+            except MetadataCancelled:
+                return finish(Result(130, '', 'invocation cancelled', metadata={'failure_reason': 'cancelled'}))
+            except EffortUnavailableError:
+                last_skip = 'effort_unavailable'
+                emit('profile_skipped', profile=name, reason='effort_unavailable')
                 continue
             emit('profile_selected', profile=name, backend=native[name].backend if is_native else api[name].provider)
             early = stopped()

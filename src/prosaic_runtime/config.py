@@ -5,6 +5,8 @@ from urllib.parse import urlsplit
 import math
 import yaml
 
+from .effort import supported_efforts
+
 CONFIG_FILENAMES = ("prosaic-runtime.yaml", "prosaic-runtime.yml")
 
 
@@ -29,6 +31,7 @@ class EndpointConfig:
     features: dict[str, object] = field(default_factory=dict)
     max_response_bytes: int = 8_388_608
     provider: str = 'openai-compatible'
+    supported_efforts: tuple[str, ...] | None = None
 
     def __post_init__(self):
         url = urlsplit(self.base_url)
@@ -38,6 +41,7 @@ class EndpointConfig:
             raise ValueError("model must be nonempty")
         if self.provider not in {'openai-compatible', 'anthropic'}:
             raise ValueError('unsupported provider')
+        object.__setattr__(self, 'supported_efforts', supported_efforts(self.supported_efforts, self.provider))
         if self.provider == 'anthropic' and self.max_tokens is None:
             raise ValueError('Anthropic max_tokens must be a positive integer')
         completion_token_parameter(self)

@@ -1,5 +1,12 @@
 # Run Prosaic prose with and without tools
 
+## Reasoning effort (Runtime 0.9.10)
+
+See [DeepSeek V4, Qwen 3.8 and Nemotron examples](REASONING.md) for canonical
+Markdown `effort`, automatic model capabilities, native request fields and
+credential-free integration tests. The [profiles](reasoning.yml) require no
+manual `supported_efforts` declarations.
+
 ## Unified Claude, Codex and local pool (Runtime 0.9.8)
 
 The [unified configuration](unified.yml) references the checked-in

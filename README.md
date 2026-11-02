@@ -1,5 +1,9 @@
 # Prosaic Runtime
 
+Runtime **0.9.10** maps Markdown `effort` to native OpenAI-compatible, Claude
+Code and Codex controls, with automatic model capabilities. See the
+[DeepSeek V4, Qwen 3.8 and Nemotron examples](examples/REASONING.md).
+
 Runtime **0.9.8** adds the opt-in [unified pool extension](docs/unified-pools.md), selecting Claude Code,
 Codex CLI and local/API profiles with independent native/API permissions, explicit
 deadlines and attempt/request/tool budgets. Switching is allowed only before
@@ -15,7 +19,7 @@ Runtime is distributed as `b3-prosaic-runtime` and requires
 `b3-prosaic>=0.4,<0.5` from the package index. Python imports (`prosaic_runtime`)
 and the `prosaic-runtime` CLI remain unchanged. The separately installed recorder
 is `b3-prosaic-runtime-postgres` **0.3.0**, selecting Runtime 0.9.x.
-Install the release with `python -m pip install 'b3-prosaic-runtime==0.9.8'`.
+Install the release with `python -m pip install 'b3-prosaic-runtime==0.9.10'`.
 
 ### Opt-in final-answer phase
 

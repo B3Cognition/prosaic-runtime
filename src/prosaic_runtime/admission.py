@@ -3,6 +3,7 @@ from .artifacts import ProsaicArtifact
 from .config import EndpointConfig, RuntimeConfig
 from .policy import requested_tools
 from .anthropic import validate_anthropic_controls
+from .effort import api_default_effort, api_effort_capabilities, resolve_effort, validate_effort
 
 
 def _inspection_artifact(artifact):
@@ -28,9 +29,7 @@ def validate_execution_artifact(artifact, config, *, acquisition=None) -> None:
     if not isinstance(config, RuntimeConfig):
         raise ValueError('execution admission requires a RuntimeConfig')
     requested = requested_tools(artifact.frontmatter.get('tools'))
-    effort = artifact.frontmatter.get('effort')
-    if effort is not None and (not isinstance(effort, str) or effort not in {'low', 'medium', 'high'}):
-        raise ValueError(f'unsupported effort: {effort}')
+    effort = validate_effort(artifact.frontmatter.get('effort'))
     tier = artifact.frontmatter.get('model_tier')
     try:
         if tier is not None and (not isinstance(tier, str) or tier not in config.routes):
@@ -45,6 +44,10 @@ def validate_execution_artifact(artifact, config, *, acquisition=None) -> None:
         raise ValueError('invalid selected runtime profile or route') from exc
     if endpoint.provider == 'anthropic':
         validate_anthropic_controls(features, {'effort': effort})
+    else:
+        resolve_effort(effort, api_default_effort(features), provider=endpoint.provider,
+                       model=endpoint.model, supported=api_effort_capabilities(
+                           endpoint.model, features, endpoint.supported_efforts))
     if acquisition is not None:
         acquisition = _inspection_artifact(acquisition)
         acquisition_tools = requested_tools(acquisition.frontmatter.get('tools'))

@@ -11,6 +11,8 @@ from .native_backends import execute_native
 from .native_config import NativePolicy, NativeRuntimeConfig
 from .policy import BUILTIN_TOOLS, WRITE_TOOLS, requested_tools
 from .types import Result
+from .effort import PROVIDER_EFFORTS, EffortUnavailableError, effective_efforts, resolve_effort, validate_effort
+from .effort_discovery import MetadataCancelled, discover_native_efforts
 
 
 class NativeRuntime:
@@ -58,9 +60,7 @@ class NativeRuntime:
             artifact = inspect_artifact(artifact, self.source, executable=self.executable,
                                         timeout_s=min(30, max(.001, deadline - time.monotonic())))
         artifact = _inspection_artifact(artifact)
-        effort = artifact.frontmatter.get('effort')
-        if effort not in {None, 'low', 'medium', 'high'}:
-            raise ValueError('unsupported native artifact effort')
+        effort = validate_effort(artifact.frontmatter.get('effort'))
         declaration = artifact.frontmatter.get('tools')
         # Native coding agents supply the full loop; API execution continues to
         # reject this declaration. Both host and operator must explicitly grant
@@ -101,6 +101,7 @@ class NativeRuntime:
         workspace = Path(cwd).resolve(strict=True)
         if not workspace.is_dir():
             raise ValueError('native cwd must be a directory')
+        eligible_names = []
         attempts = []
         known_tokens = 0
         complete_usage = True
@@ -134,10 +135,29 @@ class NativeRuntime:
             except (TimeoutError, InterruptedError) as exc:
                 return capacity_interrupted(exc)
             if not available:
+                eligible_names.append(name)
                 emit('profile_skipped', profile=name, reason='capacity_unavailable')
                 continue
-            if endpoint.effort is None and effort is not None:
-                endpoint = replace(endpoint, effort=effort)
+            declared = endpoint.supported_efforts
+            selected_effort = effort if effort is not None else endpoint.effort
+            if declared is None and selected_effort in ('xhigh', 'max', 'ultra') and selected_effort in PROVIDER_EFFORTS[endpoint.backend]:
+                try:
+                    declared = discover_native_efforts(endpoint, policy, cwd=workspace,
+                        env=dict(os.environ if env is None else env), deadline=deadline, cancelled=cancelled)
+                except MetadataCancelled:
+                    return finish(Result(130, '', 'invocation cancelled', metadata={'failure_reason': 'cancelled'}))
+                early = stopped()
+                if early is not None:
+                    return finish(early)
+            try:
+                declared = effective_efforts(endpoint.backend, endpoint.model, declared)
+                selected_effort = resolve_effort(effort, endpoint.effort,
+                    provider=endpoint.backend, model=endpoint.model, supported=declared)
+            except EffortUnavailableError:
+                emit('profile_skipped', profile=name, reason='effort_unavailable')
+                continue
+            endpoint = replace(endpoint, effort=selected_effort, supported_efforts=declared)
+            eligible_names.append(name)
             emit('profile_selected', profile=name, backend=endpoint.backend, model=endpoint.model)
             early = stopped()
             if early is not None:
@@ -174,9 +194,11 @@ class NativeRuntime:
                 result.metadata['recovery_required'] = result.metadata['effects_uncertain']
                 return finish(result)
             emit('profile_fallback', profile=name, reason=reason)
+        if not eligible_names:
+            raise EffortUnavailableError('requested effort is unavailable for every selected native profile')
         try:
             resets = [self.capacity.status(self.config.profiles[name].quota_key,
-                deadline=deadline, cancelled=cancelled).get('until') for name in names]
+                deadline=deadline, cancelled=cancelled).get('until') for name in eligible_names]
         except (TimeoutError, InterruptedError) as exc:
             return capacity_interrupted(exc)
         metadata = {'failure_reason': 'capacity_unavailable', 'safe_to_fallback': False,

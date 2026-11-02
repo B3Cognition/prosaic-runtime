@@ -219,6 +219,8 @@ def prepare_turn(runtime, artifact, *, message, history=(), input_data=None, pol
         # Validate before copying; dataclasses.asdict recursively expands
         # aliases/cycles without the bounded JSON traversal.
         endpoint_identity = {f.name: getattr(endpoint, f.name) for f in fields(endpoint)}
+        if endpoint.supported_efforts is not None:
+            endpoint_identity['supported_efforts'] = list(endpoint.supported_efforts)
         endpoint_identity.pop('api_key_env', None)
         endpoint_identity.pop('api_key_file', None)
         material = {'agent': raw_agent, 'history': owned_history, 'message': message, 'inputData': data,

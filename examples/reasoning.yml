@@ -1,0 +1,36 @@
+# Runtime 0.9.10+. Canonical Markdown stays under examples/.prosaic.
+# Defaults are low; each example's Markdown overrides that setting.
+default_profile: deepseek
+allowed_tools: []
+limits:
+  timeout_s: 180
+  max_tool_rounds: 1
+profiles:
+  deepseek:
+    base_url: https://api.deepseek.com/v1
+    api_key_env: DEEPSEEK_API_KEY
+    model: deepseek-v4-pro
+    temperature: null
+    max_tokens: 8192
+    features:
+      streaming: false
+      reasoning_effort: low
+  qwen:
+    # Singapore endpoint; replace with your workspace/region endpoint if needed.
+    base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+    api_key_env: DASHSCOPE_API_KEY
+    model: qwen3.8-max
+    temperature: null
+    max_tokens: 8192
+    features:
+      streaming: false
+      reasoning_effort: low
+  nemotron:
+    # Locally deployed NVIDIA NIM 2.0.13; no hosted NVIDIA credential assumed.
+    base_url: http://localhost:8000/v1
+    model: nvidia/nemotron-3.5-super-vl-120b-a12b
+    temperature: null
+    max_tokens: 8192
+    features:
+      streaming: false
+      reasoning_effort: low

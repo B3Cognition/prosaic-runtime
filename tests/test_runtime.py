@@ -189,6 +189,7 @@ def test_real_prosaic_inspection_and_cli(server, tmp_path):
     assert completed.returncode == 0, completed.stderr
     assert json.loads(completed.stdout)["stdout"] == "done"
     assert "Summarize findings." in requests[0]["messages"][0]["content"]
+    assert requests[0]['reasoning_effort'] == 'low'
 
 
 @pytest.mark.parametrize("with_tools,grant", [(False, False), (True, True), (True, False)])

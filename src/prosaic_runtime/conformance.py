@@ -132,6 +132,8 @@ def _profile_fingerprint(endpoint):
                 'baseUrl': endpoint.base_url, 'features': endpoint.features,
                 'temperature': endpoint.temperature, 'maxTokens': endpoint.max_tokens,
                 'maxResponseBytes': endpoint.max_response_bytes}
+    if endpoint.supported_efforts is not None:
+        identity['supportedEfforts'] = list(endpoint.supported_efforts)
     return hashlib.sha256(_canonical(identity)).hexdigest()
 
 

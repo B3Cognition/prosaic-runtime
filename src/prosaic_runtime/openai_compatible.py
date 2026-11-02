@@ -40,6 +40,7 @@ from prosaic_runtime.execution import ExecutionBackend
 from prosaic_runtime.provider_types import ProviderTurn
 from prosaic_runtime.config import EndpointConfig, completion_token_parameter
 from prosaic_runtime.events import print, emit, check_cancelled
+from prosaic_runtime.effort import EFFORTS, api_default_effort, api_effort_capabilities, resolve_effort
 
 
 _OPENAI_COMPATIBLE_TOOL_GUIDANCE = (
@@ -171,7 +172,7 @@ class OpenAICompatibleBackend(ExecutionBackend):
                 "stream": False,
             }
             payload.update(_generation_parameters(llm, {}))
-            effort = _reasoning_effort(llm.features)
+            effort = _request_reasoning_effort({'model': model}, llm)
             if effort:
                 payload["reasoning_effort"] = effort
             token, token_error = _api_key(
@@ -245,11 +246,7 @@ class OpenAICompatibleBackend(ExecutionBackend):
         payload.update(_generation_parameters(llm, prompt_metadata))
         if _feature_enabled(llm.features, "json_mode", default=False):
             payload["response_format"] = {"type": "json_object"}
-        reasoning_effort = (
-            _metadata_reasoning_effort(prompt_metadata, "reasoning_effort")
-            or _metadata_reasoning_effort(prompt_metadata, "effort")
-            or _reasoning_effort(llm.features)
-        )
+        reasoning_effort = _request_reasoning_effort(prompt_metadata, llm)
         if reasoning_effort:
             payload["reasoning_effort"] = reasoning_effort
         if streaming:
@@ -395,11 +392,7 @@ class OpenAICompatibleBackend(ExecutionBackend):
         payload.update(_generation_parameters(llm, prompt_metadata))
         if _feature_enabled(llm.features, "json_mode", default=False):
             payload["response_format"] = {"type": "json_object"}
-        reasoning_effort = (
-            _metadata_reasoning_effort(prompt_metadata, "reasoning_effort")
-            or _metadata_reasoning_effort(prompt_metadata, "effort")
-            or _reasoning_effort(llm.features)
-        )
+        reasoning_effort = _request_reasoning_effort(prompt_metadata, llm)
         if reasoning_effort:
             payload["reasoning_effort"] = reasoning_effort
         if tools:
@@ -1639,7 +1632,7 @@ def _generation_parameters(endpoint, metadata):
 
 def _metadata_reasoning_effort(metadata: Mapping[str, object], key: str) -> str:
     normalized = _metadata_str(metadata, key).lower()
-    if normalized in {"none", "low", "medium", "high", "xhigh", "max"}:
+    if normalized == 'none' or normalized in EFFORTS:
         return normalized
     return ""
 
@@ -1655,13 +1648,18 @@ def _reasoning_content_policy(features: dict[str, object]) -> str:
 
 
 def _reasoning_effort(features: dict[str, object]) -> str:
-    value = features.get("reasoning_effort")
-    if not isinstance(value, str):
-        return ""
-    normalized = value.strip().lower()
-    if normalized in {"none", "low", "medium", "high", "xhigh", "max"}:
-        return normalized
-    return ""
+    return api_default_effort(features) or ''
+
+
+def _request_reasoning_effort(metadata, config):
+    requested = (_metadata_reasoning_effort(metadata, 'reasoning_effort')
+                 or _metadata_reasoning_effort(metadata, 'effort')
+                 or _reasoning_effort(config.features))
+    model = _metadata_str(metadata, 'model') or config.model
+    # Model overrides cannot inherit capabilities declared for a different model.
+    declared = (api_effort_capabilities(model, config.features, config.supported_efforts)
+                if model == config.model else None)
+    return resolve_effort(requested or None, provider='openai-compatible', model=model, supported=declared)
 
 
 def _raw_response_metadata(parsed: object) -> dict[str, object]:

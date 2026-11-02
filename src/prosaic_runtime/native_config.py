@@ -6,6 +6,8 @@ import re
 
 import yaml
 
+from .effort import PROVIDER_EFFORTS, resolve_effort, supported_efforts, validate_effort
+
 
 def _text(value, name):
     if not isinstance(value, str) or not value.strip() or '\x00' in value:
@@ -28,6 +30,7 @@ class NativeProfile:
     native_profile: str | None = None
     settings_file: str | None = None
     config_dir: str | None = None
+    supported_efforts: tuple[str, ...] | None = None
 
     def __post_init__(self):
         if self.backend not in {'claude-code', 'codex-cli'}:
@@ -36,8 +39,12 @@ class NativeProfile:
             _text(getattr(self, name), name)
         if self.permission_mode not in {'read-only', 'workspace-write'}:
             raise ValueError('unsupported native permission_mode')
-        if self.effort not in {None, 'low', 'medium', 'high'}:
+        object.__setattr__(self, 'supported_efforts', supported_efforts(self.supported_efforts, self.backend))
+        validate_effort(self.effort)
+        if self.effort is not None and self.effort not in PROVIDER_EFFORTS[self.backend]:
             raise ValueError('unsupported native effort')
+        if self.supported_efforts is not None:
+            resolve_effort(self.effort, provider=self.backend, model=self.model, supported=self.supported_efforts)
         if self.native_profile is not None:
             if self.backend != 'codex-cli' or not re.fullmatch(r'[A-Za-z0-9_][A-Za-z0-9_-]{0,127}', self.native_profile):
                 raise ValueError('native_profile requires a Codex profile name')
