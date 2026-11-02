@@ -57,3 +57,7 @@ Preserve the existing tag and all terminal work; do not overwrite release bytes.
 The combined integration has no review blockers. Explicit Gemma on/off plus
 terminal-completion tests cover streaming/non-streaming, one provider request,
 retained host artifacts and no acknowledgement model call.
+
+The user selected release0.9.12, preserving the existing0.9.11 tag/publication.
+Update version-bound checks, qualify the exact combined source, merge after
+current CI passes, then tag/promote0.9.12 and verify actual public bytes.

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.9.12 — 2026-11-02
 
 - Add canonical `effort: none`. Map Gemma 4 none/positive efforts to its native
   thinking switch; keep ultra Codex-only and preserve tiered model controls.

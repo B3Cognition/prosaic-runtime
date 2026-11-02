@@ -1,8 +1,8 @@
 # Local Qwen and Gemma thinking controls
 
-Requires the development checkout after Runtime 0.9.11. The tagged 0.9.11
-release does not include these canonical `none`/Gemma mappings. Install this
-checkout in your project environment before using [local-thinking.yml](local-thinking.yml).
+Requires Runtime 0.9.12 or later. Runtime 0.9.11 does not include these canonical
+`none`/Gemma mappings. Install the release in your project environment before
+using [local-thinking.yml](local-thinking.yml).
 
 The same Markdown `effort` field controls both models:
 
