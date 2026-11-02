@@ -21,14 +21,14 @@ Generated reasoning text is not retained in that report.
 - Updated SDK cases supplied neither `supported_efforts` nor a wire-format
   override. The model catalogue selected the control mapping automatically.
 - The question and messages were identical within each model's comparison.
-  Temperature was zero, output allowance4096 tokens, non-streaming, no tools,
+  Temperature was zero, output allowance 4,096 tokens, non-streaming, no tools,
   no structured-output mode and no separate thinking-token budget.
 - Each captured request's messages and effective template settings were passed
   to the server's `/v1/tokenize`, then decoded through `/v1/detokenize`. Actual
   generation prompt-token counts matched all ten reconstructed prompts.
 
-The synthetic question asks for the smallest positive n with residues3 modulo7,
-5 modulo11, and7 modulo13. Independent exhaustive search over1..1001 gives423.
+The synthetic question asks for the smallest positive n with residues 3 modulo 7,
+5 modulo 11, and 7 modulo 13. Independent exhaustive search over 1 through 1001 gives 423.
 Each state has one observation here; the released-SDK baseline separately
 repeated Qwen's three positive settings. Do not infer a quality ranking from it.
 
@@ -46,7 +46,7 @@ three distinct prompt hashes: low inserts its brief-thinking instruction,
 medium uses the template's middle behavior, and xhigh inserts its detailed
 reasoning instruction. These match the installed template and server's actual
 generation prompt counts. The same three positive counts and answers appeared
-in the released Runtime0.9.10 baseline, whose custom alias capabilities came
+in the released Runtime 0.9.10 baseline, whose custom alias capabilities came
 from authenticated server metadata.
 
 `none` uses the template's explicit off switch and omits `reasoning_effort`.

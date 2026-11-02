@@ -28,8 +28,8 @@ xhigh produced matching rendered prompt counts 88/58/100 for identical messages,
 and reasoning counts 626/560/427. Low and medium solved the CRT question with
 n=423 (low wrapped its JSON in a Markdown fence); xhigh returned the incorrect
 n=654. Gemma effort-high-only and explicit off
-both rendered59 prompt tokens and zero reasoning tokens; explicit on rendered62
-and produced2148 reasoning tokens. These are control checks, not quality rankings.
+both rendered 59 prompt tokens and zero reasoning tokens; explicit on rendered 62
+and produced 2148 reasoning tokens. These are control checks, not quality rankings.
 
 The updated Runtime's explicit none test also produced a Qwen arithmetic miss
 (n=173), with zero reasoning tokens and the off-template prompt verified. Keep
@@ -37,12 +37,12 @@ answer correctness separate from native control verification in the evidence.
 
 ## Verification
 
-- Final full source suite: 1680 passed, 2 skipped in543.01s.
+- Final full source suite: 1680 passed, 2 skipped in 543.01s.
 - Focused effort/conformance regression selection: 276 passed.
-- Development wheel built successfully;55 installed-wheel thinking/Markdown
+- Development wheel built successfully; 55 installed-wheel thinking/Markdown
   tests and package ownership/CLI smoke passed.
 - Independent review found no remaining blockers after strict canonical-none
   admission, target-model capability resolution and conformance format fixes.
-- Updated live SDK: all10 wire/prompt control checks passed. Gemma answered all6
-  correctly; Qwen answered2of4 correctly, with the none/xhigh misses retained.
-- This is an unreleased follow-up, separate from published Runtime0.9.10.
+- Updated live SDK: all 10 wire/prompt control checks passed. Gemma answered all 6
+  correctly; Qwen answered 2 of 4 correctly, with the none/xhigh misses retained.
+- This is an unreleased follow-up, separate from published Runtime 0.9.10.
