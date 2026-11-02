@@ -25,7 +25,8 @@ class DisabledBuiltinRegistry:
 
 class BoundedToolRegistry:
     def __init__(self, builtin_registry, custom_tools, allowed_tools, check_boundary, before_tool=None,
-                 execution_options=None, *, index_all_calls=False, bounded_recovery=False):
+                 execution_options=None, *, index_all_calls=False, bounded_recovery=False,
+                 terminal_capture=None, terminal_tools=()):
         self.builtin = builtin_registry
         self.custom = custom_tools
         self.allowed = frozenset(allowed_tools)
@@ -34,6 +35,9 @@ class BoundedToolRegistry:
         self.execution_options = execution_options
         self.index_all_calls = index_all_calls
         self.bounded_recovery = bounded_recovery
+        self.terminal_capture = terminal_capture
+        self.terminal_tools = frozenset(terminal_tools) & self.allowed
+        self.turn = 0
         self.last_outcome = ToolOutcome('unclassified')
 
     def _outcome(self, outcome):
@@ -41,7 +45,7 @@ class BoundedToolRegistry:
 
     def _finish(self, message):
         evidence = self.last_outcome.to_dict()
-        if self.bounded_recovery and evidence['recovery'] in {'stop', 'reconcile'}:
+        if (self.bounded_recovery or self.terminal_tools) and evidence['recovery'] in {'stop', 'reconcile'}:
             raise ToolEffectFailure('tool_effect_uncertain' if evidence['effect']=='unknown' else 'tool_recovery_blocked')
         return message
 
@@ -58,6 +62,9 @@ class BoundedToolRegistry:
         try:
             if type(calls) not in (list, tuple):
                 raise ValueError('batch shape')
+            if len(calls) > 1 and any(type(c) is dict and type(c.get('function')) is dict
+                    and c['function'].get('name') in self.terminal_tools for c in calls):
+                raise ValueError('terminal tools require a singleton batch')
             for call in calls:
                 if type(call) is not dict or set(call) != {'id', 'type', 'function'}:
                     raise ValueError('call shape')
@@ -97,6 +104,10 @@ class BoundedToolRegistry:
         payload = {'status': 'error', 'error': 'not_granted'}
         self.last_outcome = ToolOutcome('not_granted')
         if isinstance(name, str) and name in self.allowed and tool_call.get('type') == 'function':
+            if name in self.terminal_tools:
+                options['on_terminal'] = lambda value, arguments: self.terminal_capture.capture(
+                    value, tool=self.custom[name], arguments=arguments, scope=options['scope'],
+                    call_id=tool_call['id'], turn=self.turn)
             payload = execute_custom_tool(self.custom[name], function.get('arguments'),
                 check_boundary=self.check_boundary,
                 on_outcome=self._outcome, **options)

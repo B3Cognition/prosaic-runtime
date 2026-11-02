@@ -74,6 +74,8 @@ def run_tool(runtime, name, arguments, *, policy=None, cwd='.', on_event=None,
             result = finish('unsupported_direct_tool')
         elif name not in grants or name not in policy.allowed_tools:
             result = finish('not_granted')
+        elif custom[name].terminal:
+            result = finish('unsupported_terminal_tools')
         else:
             tool = custom[name]
             try:

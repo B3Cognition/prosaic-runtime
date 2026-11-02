@@ -5,6 +5,10 @@ from collections.abc import Mapping
 from pathlib import Path
 from .types import Invocation as CliRunRequest, Result as CliRunResult
 from .events import print, emit
+from .events import Cancelled, emit_tool_completion
+from .tools import ToolDeadlineExceeded
+from .terminal import binding
+from .terminal import content_digest
 from .openai_compatible_compaction import compact_tool_result_messages, ToolResultCompactionStats
 from .openai_compatible_progress import (_progress, _progress_llm_preview, _progress_turn_summary, _single_line_preview, _tool_call_name, _tool_result_status, _elapsed_s)
 
@@ -213,7 +217,7 @@ class ExecutionBackend:
                             **_transcript_metadata(transcript),
                         },
                     )
-                if initial_messages is not None:
+                if initial_messages is not None or getattr(registry, 'terminal_tools', ()):
                     if turn.finish_reason not in {'tool_calls', 'tool_use'}:
                         return CliRunResult(1, '', 'incomplete tool batch', token_usage=token_usage,
                             metadata={'provider': self.name, 'streamed': turn.streamed,
@@ -308,6 +312,7 @@ class ExecutionBackend:
                     previous_tool_signature = tool_signature
                     identical_tool_rounds = 1
                 tool_started = time.monotonic()
+                registry.turn = turn_number
                 for tool_call in turn.tool_calls:
                     tool_call_count += 1
                     tool_name = _tool_call_name(tool_call)
@@ -322,14 +327,23 @@ class ExecutionBackend:
                     call_id = str(tool_call.get("id") or "")
                     call_started = time.monotonic()
                     emit("tool_started", name=tool_name, call_id=call_id, turn=turn_number,
-                         **self.tool_event_metadata(tool_name))
+                         **self.tool_event_metadata(tool_name),
+                         **({'argumentsSha256': content_digest(json.loads(tool_call['function']['arguments']))}
+                            if getattr(registry, 'terminal_tools', ()) else {}))
                     from .tool_effects import ToolEffectFailure
                     from .tool_outcomes import ToolOutcome
                     try:
                         tool_message = registry.execute_message(tool_call)
+                    except (Cancelled, ToolDeadlineExceeded):
+                        terminal = getattr(registry, 'terminal_capture', None)
+                        if terminal is not None and terminal.evidence is not None:
+                            emit_tool_completion(name=tool_name, call_id=call_id, turn=turn_number,
+                                status='ok', duration_ms=round((time.monotonic()-call_started)*1000, 3),
+                                read_receipts=[], tool_outcome=ToolOutcome('ok').to_dict(),
+                                terminalCompletion=binding(terminal.evidence), **self.tool_event_metadata(tool_name))
+                        raise
                     except ToolEffectFailure:
                         outcome = getattr(registry, 'last_outcome', ToolOutcome('unclassified')).to_dict()
-                        from .events import Cancelled
                         try:
                             emit('tool_completed', name=tool_name, call_id=call_id, turn=turn_number,
                                  status='error', duration_ms=round((time.monotonic()-call_started)*1000, 3),
@@ -349,11 +363,22 @@ class ExecutionBackend:
                     if tool_name == "read_file" and status == "ok":
                         read_receipts = [{key: tool_payload[key] for key in
                                           ("path", "sha256", "offset", "lines_read", "line_count")}]
+                    terminal = getattr(registry, 'terminal_capture', None)
+                    completion = terminal.evidence if terminal is not None else None
                     emit("tool_completed", name=tool_name, call_id=call_id, turn=turn_number,
                          status=status, duration_ms=round((time.monotonic() - call_started) * 1000, 3),
                          read_receipts=read_receipts,
                          tool_outcome=getattr(registry, 'last_outcome', ToolOutcome('ok' if status=='ok' else 'unclassified')).to_dict(),
-                         **self.tool_event_metadata(tool_name))
+                         **self.tool_event_metadata(tool_name),
+                         **({'terminalCompletion': binding(completion)} if completion is not None else {}))
+                    if completion is not None:
+                        self.check_boundary()
+                        return CliRunResult(0, json.dumps(tool_payload['result'], ensure_ascii=False,
+                            allow_nan=False), '', token_usage=token_usage,
+                            metadata={'provider': self.name, 'finish_reason': turn.finish_reason,
+                                'completion_source': 'host', 'tool_call_count': tool_call_count,
+                                'tool_rounds': tool_rounds, 'token_usage_details': token_usage_details,
+                                **_transcript_metadata(transcript)})
                     tool_result = _tool_result_status(tool_message)
                     _progress(
                         f"tool {tool_name} result: "

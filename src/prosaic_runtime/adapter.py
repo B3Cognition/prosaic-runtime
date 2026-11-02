@@ -31,8 +31,14 @@ class _Attempts:
         self.complete = True
         self.cost = 0.0
         self.last = None
+        self.terminal = None
+        self.terminal_violation = False
+        self.terminal_dispatch_failed = False
 
     def remaining(self, timeout_s=None, allowed_tools=None, max_tool_rounds=None, max_input_bytes=None):
+        if self.terminal is not None or self.terminal_dispatch_failed:
+            self.terminal_violation = True
+            raise AdapterBoundary('terminal_completion_already_observed')
         if self.cancelled():
             raise AdapterBoundary('adapter_cancelled')
         remaining = self.deadline - time.monotonic()
@@ -55,6 +61,7 @@ class _Attempts:
             if grant - policy.allowed_tools:
                 raise ValueError('adapter cannot broaden tool grants')
             values['allowed_tools'] = grant
+            values['allowed_terminal_tools'] = policy.allowed_terminal_tools & grant
         for name, value in (('max_tool_rounds', max_tool_rounds), ('max_input_bytes', max_input_bytes)):
             if value is not None:
                 if type(value) is not int or value <= 0:
@@ -93,6 +100,10 @@ class _Attempts:
             raise ValueError('invalid delegate cost evidence')
         self.cost += owned.cost_usd
         self.last = owned
+        if self.policy.allowed_terminal_tools and tools and owned.exit_code != 0:
+            self.terminal_dispatch_failed = True
+        if 'terminalCompletion' in owned.metadata:
+            self.terminal = deepcopy(owned)
         self.records.append({'index': len(self.records) + 1, 'exit_code': owned.exit_code,
             'timed_out': owned.timed_out, 'token_usage': usage, 'known_tokens': known, 'provider_requests': requests,
             'tool_calls': tools, 'arguments_sha256': hashlib.sha256(arguments.encode()).hexdigest()})
@@ -102,6 +113,12 @@ class _Attempts:
             result = Result(1, '', 'adapter returned an invalid result', metadata={'failure_reason': 'adapter_result_mismatch'})
         if result.exit_code == 0 and (self.last is None or self.last.exit_code != 0):
             result = Result(1, '', 'adapter cannot admit a failed execution', metadata={'failure_reason': 'adapter_result_mismatch'})
+        if result.exit_code == 0 and (self.terminal_violation or
+                self.terminal is not None and (result.stdout != self.terminal.stdout or
+                    result.metadata.get('terminalCompletion') != self.terminal.metadata['terminalCompletion']) or
+                self.terminal is None and 'terminalCompletion' in result.metadata):
+            result = Result(1, '', 'adapter cannot replace host completion',
+                            metadata={'failure_reason': 'adapter_result_mismatch'})
         reason = None
         for name, value, code in (('max_provider_requests', self.requests, 'provider_request_limit'),
                                   ('max_tool_calls', self.tools, 'tool_call_limit'),

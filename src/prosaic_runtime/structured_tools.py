@@ -48,6 +48,8 @@ class StructuredToolLoop:
         self.allowed_tools = frozenset(allowed_tools)
         if self.allowed_tools - self.tools.keys():
             raise ValueError('granted tools must be registered')
+        from .terminal import admit_terminal_tools
+        admit_terminal_tools(self.tools, self.allowed_tools, supported=False)
         self.operation_context = InvocationScope(str(uuid4())) if operation_context is None else operation_context
         admit_tool_effects(self.tools, self.allowed_tools, self.operation_context, tool_journal)
         self.tool_journal = tool_journal

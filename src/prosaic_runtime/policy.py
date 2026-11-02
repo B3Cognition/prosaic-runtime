@@ -20,8 +20,16 @@ class RunPolicy:
     max_tool_calls: int | None = None
     max_reported_tokens: int | None = None
     bounded_tool_recovery: bool = False
+    allowed_terminal_tools: frozenset[str] = frozenset()
 
     def __post_init__(self):
+        if type(self.allowed_terminal_tools) not in (frozenset, set, tuple, list):
+            raise ValueError('invalid terminal grants')
+        if any(type(name) is not str or not name for name in self.allowed_terminal_tools):
+            raise ValueError('invalid terminal grants')
+        object.__setattr__(self, 'allowed_terminal_tools', frozenset(self.allowed_terminal_tools))
+        if self.allowed_terminal_tools - self.allowed_tools:
+            raise ValueError('terminal tools must be explicitly allowed')
         if type(self.bounded_tool_recovery) is not bool:
             raise ValueError('bounded_tool_recovery must be boolean')
         import math
