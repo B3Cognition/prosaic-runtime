@@ -14,7 +14,10 @@ from .conversation import (PreparedTurn, TurnLimits, TurnAdmissionError, encode_
 
 
 def policy_document(policy):
-    return {**{f.name: getattr(policy, f.name) for f in fields(policy)},
+    if policy.allowed_terminal_tools:
+        raise ValueError('terminal tools are unsupported in conversation turns')
+    return {**{f.name: getattr(policy, f.name) for f in fields(policy)
+               if f.name != 'allowed_terminal_tools'},
             'allowed_tools': sorted(policy.allowed_tools),
             'read_roots': list(policy.read_roots), 'write_paths': list(policy.write_paths),
             'forbidden_roots': list(policy.forbidden_roots)}
@@ -155,6 +158,8 @@ def prepare_turn(runtime, artifact, *, message, history=(), input_data=None, pol
                 raise ValueError('invalid path scope')
         policy = policy_from_document(json.loads(encode_owned(policy_document(policy))))
         names = requested & runtime.config.allowed_tools & policy.allowed_tools
+        from .terminal import admit_terminal_tools
+        admit_terminal_tools(runtime._custom_tools, names, policy.allowed_terminal_tools, supported=False)
         if names != requested or requested - BUILTIN_TOOLS - runtime.tool_descriptors.keys():
             raise ValueError('tools not granted or registered')
         if requested & (BUILTIN_TOOLS | runtime.cli_tool_names) and workspace is None:

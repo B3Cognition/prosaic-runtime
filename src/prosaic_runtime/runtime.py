@@ -30,6 +30,7 @@ from .tool_effects import admit_tool_effects, ToolEffectFailure
 from .telemetry import ObserverEmitter, observation_context, observe, execution_started
 from .budgets import InvocationBudget, InvocationBudgetExceeded
 from .turn_capture import TurnOutputExceeded
+from .terminal import TerminalCapture, TerminalCompletionError, admit_terminal_tools
 from .execution_budget import active_budgets, check_budgets, reserve_dispatch, record_shared_usage, token_reservations
 from .context_execution import ContextExecutionFailure
 
@@ -51,7 +52,7 @@ def _reported_usage(details):
 
 class _BoundedMixin:
     def __init__(self, endpoint, max_input_bytes, custom_tools, deadline, capture=None, budget=None,
-                 scope=None, tool_journal=None, cancelled=None):
+                 scope=None, tool_journal=None, cancelled=None, terminal_capture=None):
         super().__init__(endpoint)
         self.max_input_bytes = max_input_bytes
         self.reported_token_usage = None
@@ -74,6 +75,7 @@ class _BoundedMixin:
         self.accounting_context = None
         self.turn_mode = False
         self.turn_capture = None
+        self.terminal_capture = terminal_capture
         self.known_usage_details = {}
         self._dispatch_reservation = None
         self._request_token_reservations = {}
@@ -93,7 +95,9 @@ class _BoundedMixin:
                                    self.custom_tools, metadata.get('allowed_tools', ()), self.check_boundary,
                                    self.before_tool_dispatch,
                                    self.tool_execution_options, index_all_calls=self.turn_mode,
-                                   bounded_recovery=self.budget is not None and self.budget.policy.bounded_tool_recovery)
+                                   bounded_recovery=self.budget is not None and self.budget.policy.bounded_tool_recovery,
+                                   terminal_capture=self.terminal_capture,
+                                   terminal_tools=self.budget.policy.allowed_terminal_tools if self.budget is not None else ())
 
     def before_tool_dispatch(self):
         if self.budget is not None:
@@ -376,6 +380,7 @@ class ProsaicRuntime:
     capabilities |= frozenset({'context_assembly_v1', 'http_correlation_v1', 'execution_lifecycle_v1'})
     capabilities |= frozenset({'token_admission_v1'})
     capabilities |= frozenset({'tool_outcomes_v1', 'bounded_tool_recovery_v1', 'direct_tool_v1'})
+    capabilities |= frozenset({'terminal_tool_v1'})
     def __init__(self, config: RuntimeConfig, *, source=".prosaic", executable="prosaic", custom_tools=None,
                  accounting=None, context_defaults=None, lifecycle=None):
         self.lifecycle = lifecycle if lifecycle is not None else ExecutionLifecycle()
@@ -653,16 +658,30 @@ class ProsaicRuntime:
             _turn_capture.bind_accounting(resolved, recorder, policy.max_provider_requests,
                                           policy.max_tool_calls if requested_tools(artifact.frontmatter.get('tools')) else 0)
         captures = []
+        terminal = TerminalCapture()
         try:
             result = self._run(artifact, arguments, _recorder=recorder, _context=resolved,
                                _capture_ref=captures.append, _budget=budget, cwd=cwd, policy=policy, on_event=on_event,
                                cancelled=cancelled, env=env, acquisition=acquisition,
                                _operation_context=operation_context, _tool_journal=tool_journal,
-                               _turn_prepared=_turn_prepared, _turn_capture=_turn_capture, _turn_snapshot=_turn_snapshot)
+                               _turn_prepared=_turn_prepared, _turn_capture=_turn_capture, _turn_snapshot=_turn_snapshot,
+                               _terminal_capture=terminal)
         except AccountingError:
             result = Result(1, '', 'accounting persistence failed; do not retry the provider automatically',
                             token_usage=budget.reported_tokens if budget.usage_complete and budget.provider_requests else None,
                             metadata={'failure_reason': 'accounting_failed','reported_token_usage':budget.reported_tokens})
+        except TerminalCompletionError as exc:
+            result = Result(1, '', exc.reason,
+                token_usage=budget.reported_tokens if budget.usage_complete else None,
+                metadata={'failure_reason': exc.reason})
+        except Exception:
+            if terminal.evidence is None:
+                raise
+            result = Result(1, '', 'critical_hook_error',
+                token_usage=budget.reported_tokens if budget.usage_complete else None,
+                metadata={'failure_reason': 'critical_hook_error'})
+        if terminal.evidence is not None:
+            result.metadata['terminalCompletion'] = terminal.evidence
         if enabled:
             # Capture lineage is supplied by the result when a request began;
             # failures before capture still expose the resolved attribution.
@@ -677,7 +696,7 @@ class ProsaicRuntime:
             if not budget.usage_complete:
                 result.token_usage=None
                 result.metadata['token_usage_status']='unknown'
-        if budget.enabled or strict:
+        if budget.enabled or strict or policy.allowed_terminal_tools:
             result.metadata['invocation_budgets_v1'] = budget.metadata()
         return result
 
@@ -686,7 +705,7 @@ class ProsaicRuntime:
             on_event=None, cancelled=None, env=None,
             acquisition: str | ProsaicArtifact | None = None, _recorder=None, _context=None, _capture_ref=None,
             _budget=None, _operation_context=None, _tool_journal=None,
-            _turn_prepared=None, _turn_capture=None, _turn_snapshot=None) -> Result:
+            _turn_prepared=None, _turn_capture=None, _turn_snapshot=None, _terminal_capture=None) -> Result:
         config, custom, cli = _turn_snapshot if _turn_snapshot is not None else (self.config, self._custom_tools, self._cli_tools)
         policy = policy or RunPolicy(timeout_s=self.config.limits.timeout_s,
                                      max_tool_rounds=self.config.limits.max_tool_rounds)
@@ -720,6 +739,8 @@ class ProsaicRuntime:
                         failed = {name: check['message'] for name, check in report['checks'].items() if check['status'] != 'ok'}
                         raise ValueError(f'CLI tool preflight failed: {failed}')
                 tools = requested & config.allowed_tools & frozenset(policy.allowed_tools)
+                terminal_tools = admit_terminal_tools(custom, tools, policy.allowed_terminal_tools,
+                                                       supported=_turn_prepared is None)
                 if policy.initial_tool is not None and policy.initial_tool not in tools:
                     raise ValueError('initial_tool must be granted by prose, runtime and host')
                 if acquisition is not None:
@@ -784,7 +805,8 @@ class ProsaicRuntime:
                 backend_type = _BoundedAnthropicBackend if endpoint.provider == 'anthropic' else _BoundedBackend
                 backend = backend_type(endpoint, policy.max_input_bytes, custom,
                                        started + policy.timeout_s, capture, _budget,
-                                       _operation_context, _tool_journal, cancelled)
+                                       _operation_context, _tool_journal, cancelled,
+                                       terminal_capture=_terminal_capture)
                 backend.accounting_context = _context
                 request = Invocation(str(Path(cwd).resolve()) if cwd is not None else None,
                                      prompt, invocation_env, remaining, {"prompt_metadata": metadata})
@@ -822,7 +844,12 @@ class ProsaicRuntime:
                 result.metadata['token_usage_status'] = 'unknown' if result.token_usage is None else 'reported'
                 if result.exit_code and backend.turns:
                     result.metadata['usage_scope'] = 'reported_completed_turns'
-                if result.exit_code == 0 and result.metadata.get("finish_reason") != "stop":
+                if result.exit_code == 0 and terminal_tools and _terminal_capture.evidence is None:
+                    result.exit_code = 1
+                    result.stderr = 'host terminal completion is required'
+                    result.metadata['failure_reason'] = 'terminal_completion_missing'
+                if (result.exit_code == 0 and result.metadata.get("finish_reason") != "stop"
+                        and _terminal_capture.evidence is None):
                     result.exit_code = 1
                     result.stderr = "endpoint did not confirm a complete response"
                     result.metadata["failure_reason"] = "incomplete_response"
@@ -838,6 +865,8 @@ class ProsaicRuntime:
                     result.metadata['prework_failure_v1'] = {
                         'safe_to_fallback': True, 'reason': backend._prework_capacity_failure}
                 emit("completed", exit_code=result.exit_code, token_usage=result.token_usage)
+                if _terminal_capture.evidence is not None:
+                    backend.check_boundary()
                 return result
             except TurnOutputExceeded:
                 return Result(1, '', 'outputLimit', metadata={'failure_reason': 'outputLimit'})

@@ -35,6 +35,15 @@ def _deliver(sink, event):
         raise
 
 
+def emit_tool_completion(**data):
+    """Retain already known completion even after a cancellation boundary."""
+    token = _cancel.set(None)
+    try:
+        emit('tool_completed', **data)
+    finally:
+        _cancel.reset(token)
+
+
 def print(*values, **kwargs):
     """Compatibility console when no sink is bound; structured output otherwise."""
     check_cancelled()

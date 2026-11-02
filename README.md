@@ -1,5 +1,9 @@
 # Prosaic Runtime
 
+[Host-owned terminal completion](docs/terminal-completion.md) lets explicitly
+authorized native tools return a verified inline artifact without a final model
+acknowledgement call. Harness applies durable receipt and result validation.
+
 Runtime **0.9.10** maps Markdown `effort` to native OpenAI-compatible, Claude
 Code and Codex controls, with automatic model capabilities. See the
 [DeepSeek V4, Qwen 3.8 and Nemotron examples](examples/REASONING.md).
