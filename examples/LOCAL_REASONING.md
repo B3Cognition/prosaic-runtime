@@ -56,6 +56,12 @@ The live evidence report records rendered prompt counts and reasoning tokens;
 it does not assume higher effort must generate more tokens on each question.
 See [live control verification](../docs/live-reasoning-2026-11-02.md).
 
+For reusable Markdown, a Harness workflow, installed-SDK transport checks and
+persistent bounded live allowances, use the Integration Lab's
+[reasoning-effort guide](https://github.com/B3Cognition/prosaic-integration-lab/blob/main/docs/reasoning-effort.md).
+Its fixture results are separate from the historical live prompt verification
+above; a successful response alone cannot certify that a server honored thinking.
+
 Native-control references:
 [Google Gemma thinking](https://ai.google.dev/gemma/docs/capabilities/thinking),
 [oMLX effort compatibility](https://github.com/jundot/omlx/blob/main/omlx/reasoning_effort.py),

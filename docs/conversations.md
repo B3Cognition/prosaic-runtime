@@ -1,4 +1,4 @@
-# Stateless conversation turns (0.9.0 candidate)
+# Stateless conversation turns
 
 ## Optional token-aware context admission
 
@@ -117,10 +117,10 @@ establish commitment. Critical event-hook failure fails the invocation; ordinary
 observer exceptions keep their existing best-effort semantics. Do not automatically
 retry an interrupted invocation: a provider or tool may already have performed it.
 
-Install the qualified Runtime 0.9.0 and recorder 0.3.0 candidate wheels in a fresh
-environment and run `python -m pip check`, then `python -I
+Install published Runtime 0.9.12 in a fresh environment. Add recorder 0.3.0 only
+when durable API-usage accounting is needed. Run `python -m pip check`, then `python -I
 scripts/conversation_wheel_smoke.py` from the source archive. This gate checks
 installed ownership, pure preparation and a two-turn synthetic exchange. These
-candidate versions are not available through the public index until publication
-and downloaded-byte verification have completed. Recorder schema/data remain
+versions are available on PyPI; reproducible deployments should verify the exact
+release hashes. Recorder schema/data remain
 unchanged; the adapter now selects the Runtime 0.9.x family.

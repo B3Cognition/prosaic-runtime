@@ -1,10 +1,9 @@
 # Prosaic Runtime PostgreSQL metering
 
-The `b3-prosaic-runtime-postgres` 0.3.0 candidate selects Runtime 0.9.x. Its
-accounting schema/data are unchanged; use explicit qualified wheels until index
-publication is verified. The released 0.2.1 adapter selects Runtime 0.8.x, which
-provides the accounting contracts. Install the Runtime wheel first. Runtime
-accounting off needs no database or psycopg dependency.
+The published `b3-prosaic-runtime-postgres` **0.3.0** package selects Runtime
+0.9.x, including Runtime 0.9.12. Its accounting schema/data are unchanged.
+Runtime accounting off needs no database or psycopg dependency. The historical
+0.2.1 adapter selects Runtime 0.8.x and retains its original release artifacts.
 
 The supported Psycopg binary package floor is 3.2.1. Its preceding 3.2.0 release
 has broken binary-extra metadata referring to an unavailable development wheel;
@@ -13,9 +12,16 @@ record the packaging correction. The Harness PostgreSQL store has a separate
 libpq 17 requirement and therefore a higher binary-package floor.
 
 Use a fresh virtual environment/image: legacy and renamed packages share imports.
-For the released train, install with `python -m pip install 'b3-prosaic-runtime-postgres==0.2.1'`.
-Before publication use explicit qualified candidate wheels. The Python import
+Install with `python -m pip install 'b3-prosaic-runtime==0.9.12' 'b3-prosaic-runtime-postgres==0.3.0'`.
+For reproducible deployments, use a complete checksum-pinned manifest. The Python import
 remains `prosaic_runtime_postgres`; no stored accounting format changes are required.
+
+Reasoning effort is an execution setting owned by Runtime. This recorder does
+not enable thinking or prove that a provider honored a requested effort. Preserve
+reported reasoning tokens when supplied; missing usage remains unknown. Native
+Claude/Codex subscription runs remain outside this recorder's supported paid-API
+accounting scope. See the [reasoning lab](https://github.com/B3Cognition/prosaic-integration-lab/blob/main/docs/reasoning-effort.md)
+for separate control and answer-quality checks.
 
 ```python
 from prosaic_runtime.accounting import ExecutionContext, RateCard
