@@ -5,6 +5,9 @@ controls alongside [live Qwen/Gemma verification](docs/live-reasoning-2026-11-02
 Use the [local thinking examples](examples/LOCAL_REASONING.md) for the same
 Markdown field across tiered and binary models.
 
+The Integration Lab provides [reasoning-effort blueprints and control tests](https://github.com/B3Cognition/prosaic-integration-lab/blob/main/docs/reasoning-effort.md)
+for installed SDKs, with separate credential-free fixtures and bounded live runs.
+
 [Host-owned terminal completion](docs/terminal-completion.md) lets explicitly
 authorized native tools return a verified inline artifact without a final model
 acknowledgement call. Harness applies durable receipt and result validation.
@@ -32,8 +35,8 @@ Install the release with `python -m pip install 'b3-prosaic-runtime==0.9.12'`.
 
 ### Opt-in final-answer phase
 
-The local `0.9.3+finalize.4` candidate adds an operator-controlled endpoint
-feature for bounded lookup workflows:
+Runtime includes an operator-controlled endpoint feature for bounded lookup
+workflows:
 
 ```yaml
 features:
@@ -52,7 +55,7 @@ or that the final answer is correct.
 The value must be an integer from one through the invocation's effective
 `max_tool_rounds`. Omit it to retain existing multi-round and no-progress
 behavior. Agent prose and model output cannot set this host configuration.
-This candidate is for pinned-wheel qualification, not a published release.
+This feature is included in the published Runtime 0.9.12 package.
 
 For an oMLX endpoint serving Qwen JSON tool envelopes, the host can also set
 `omlx_tool_call_envelope: true`. This requires an explicit
@@ -193,7 +196,7 @@ an isolated Python environment; no sudo or global Python installation is needed:
 ```sh
 git clone https://github.com/B3Cognition/prosaic-runtime.git
 cd prosaic-runtime
-git checkout v0.8.1
+git checkout v0.9.12
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install .
@@ -202,10 +205,10 @@ python -m pip install .
 The package installs compatible `b3-prosaic` 0.4.x into the same environment.
 Use the release tag after publication; older release tags retain historical docs.
 
-For index installation after publication, create a fresh virtual environment or
-container image and run `python -m pip install 'b3-prosaic-runtime==0.8.1'`.
+For public-index installation, create a fresh virtual environment or
+container image and run `python -m pip install 'b3-prosaic-runtime==0.9.12'`.
 Install the optional recorder with
-`python -m pip install 'b3-prosaic-runtime-postgres==0.2.1'`. Never add renamed
+`python -m pip install 'b3-prosaic-runtime-postgres==0.3.0'`. Never add renamed
 packages to an environment containing legacy `prosaic`, `prosaic-runtime` or
 `prosaic-runtime-postgres`: they share import paths. Preserve old environments
 for historical reconstruction. PyPI's unrelated `prosaic` is not a dependency.
@@ -707,7 +710,7 @@ python -m pip install -e '.[test]'
 pytest
 ```
 
-Tests cover extracted transport edge cases, tool denial, path containment, artifact loading, routing, cancellation, and local HTTP/SSE integration. The end-to-end Prosaic test requires the CLI on PATH; CI installs an explicit immutable Core candidate while index publication is pending. Tests do not require paid LLM access. Successful conformance tests do not establish model quality; evaluate each agent/model pair against its own acceptance criteria.
+Tests cover extracted transport edge cases, tool denial, path containment, artifact loading, routing, cancellation, and local HTTP/SSE integration. The end-to-end Prosaic test requires the CLI on PATH; CI curates the exact qualified Core 0.4.1 artifact. Tests do not require paid LLM access. Successful conformance tests do not establish model quality; evaluate each agent/model pair against its own acceptance criteria.
 
 `tests/test_distribution_metadata.py` builds both distributions from `git archive`
 (override the source with `PROSAIC_RUNTIME_RELEASE_REF`). The optional test extra
