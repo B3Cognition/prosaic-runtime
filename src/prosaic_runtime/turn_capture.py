@@ -26,7 +26,8 @@ def failure_code(result):
         'tool_effect_uncertain': 'toolEffectUncertain', 'tool_journal_failed': 'toolJournalFailure',
         'tool_identity_conflict': 'toolEffectUncertain', 'tool_recovery_blocked': 'toolFailure',
         'incomplete_generation': 'incompleteGeneration',
-        'incomplete_response': 'incompleteGeneration', 'outputLimit': 'outputLimit'}.get(
+        'incomplete_response': 'incompleteGeneration', 'outputLimit': 'outputLimit',
+        'ruleViolation': 'ruleViolation'}.get(
             reason, 'timeout' if result.timed_out else 'providerFailure')
 
 

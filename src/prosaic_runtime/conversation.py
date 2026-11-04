@@ -17,16 +17,21 @@ FAILURE_CODES = frozenset({
     'inputLimit', 'outputLimit', 'budgetExceeded', 'accountingFailure',
     'observationFailure', 'toolEffectUncertain', 'toolJournalFailure', 'toolFailure',
     'incompleteGeneration', 'bindingMismatch', 'interrupted',
+    # Only hosts that register guards and bind rules can observe this code.
+    'ruleViolation',
 })
 
 
 class TurnAdmissionError(ValueError):
     """Closed safe admission failure; no original parser or prompt text."""
-    def __init__(self, code, limit=None):
+    def __init__(self, code, limit=None, detail=None):
         if code not in {'invalidHistory', 'invalidArtifact', 'invalidPolicy',
                        'bindingMismatch', 'unsupportedCapability', 'inputLimit', 'contextLimit'}:
             raise ValueError('invalid admission code')
-        self.code, self.limit = code, limit
+        if detail is not None and (type(detail) is not str or len(detail) > 256):
+            raise ValueError('invalid admission detail')
+        # detail is host-policy wording only (e.g. which required-guard pin refused).
+        self.code, self.limit, self.detail = code, limit, detail
         super().__init__(code)
 
 
@@ -309,6 +314,12 @@ class TurnResult:
     evidence: TurnEvidence
     context_report: object = None
     context_work: object = None
+    # Rule ids only (never rule text, settings or values) and a binding hash
+    # hosts can fold into workflow identity. Empty/None without bindings.
+    rules_evaluated: tuple = ()
+    rules_violated: tuple = ()
+    rules_fixed: tuple = ()
+    rules_fingerprint: str | None = None
 
 
 @dataclass(frozen=True, init=False)

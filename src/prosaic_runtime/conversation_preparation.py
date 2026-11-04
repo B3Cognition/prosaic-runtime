@@ -9,6 +9,7 @@ from .artifacts import ProsaicArtifact
 from .anthropic import AnthropicBackend, encode_messages
 from .openai_compatible import OpenAICompatibleBackend, _OpenAIToolRegistry, _feature_enabled
 from .policy import RunPolicy, requested_tools, BUILTIN_TOOLS, READ_TOOLS, WRITE_TOOLS
+from .rules import RuleAdmissionError, turn_rules
 from .conversation import (PreparedTurn, TurnLimits, TurnAdmissionError, encode_owned,
                            validate_conversation_history)
 
@@ -126,7 +127,7 @@ def initial_payload(runtime, artifact, policy, history, message, input_data, *, 
 
 def prepare_turn(runtime, artifact, *, message, history=(), input_data=None, policy=None,
                  limits=None, workspace=None, context_policy=None, token_counters=None,
-                 context_selection=None, context_report=None, context_work=None):
+                 context_selection=None, context_report=None, context_work=None, _warn_rules=True):
     limits = limits if limits is not None else TurnLimits()
     if type(limits) is not TurnLimits:
         raise TurnAdmissionError('invalidPolicy')
@@ -134,8 +135,8 @@ def prepare_turn(runtime, artifact, *, message, history=(), input_data=None, pol
     try:
         if type(artifact) is not ProsaicArtifact:
             raise ValueError('already inspected artifact required')
-        raw_agent = {'id': artifact.id, 'type': artifact.type, 'frontmatter': artifact.frontmatter,
-                     'body': artifact.body, 'resources': list(artifact.resources)}
+        # Rule keys appear only when inspection carried rules: untagged bytes are unchanged.
+        raw_agent = artifact.inspection()
         raw_agent = json.loads(encode_owned(raw_agent, max_bytes=limits.max_history_bytes,
             max_depth=limits.max_json_depth, max_nodes=limits.max_json_nodes))
         owned_agent = ProsaicArtifact.from_inspection(raw_agent)
@@ -145,6 +146,10 @@ def prepare_turn(runtime, artifact, *, message, history=(), input_data=None, pol
         requested = requested_tools(owned_agent.frontmatter.get('tools'))
     except (TypeError, ValueError, AttributeError, UnicodeError) as exc:
         raise TurnAdmissionError('invalidArtifact') from exc
+    try:
+        ruleset = turn_rules(runtime, owned_agent, warn=_warn_rules)
+    except RuleAdmissionError as exc:
+        raise TurnAdmissionError(exc.code, detail=exc.detail) from None
     try:
         policy = policy if policy is not None else RunPolicy(max_input_bytes=limits.max_input_bytes,
             max_provider_requests=8, max_tool_calls=16)
@@ -235,6 +240,9 @@ def prepare_turn(runtime, artifact, *, message, history=(), input_data=None, pol
                     'cliSandbox': {'mode': runtime.config.cli_sandbox.mode,
                                    'runtimeRoots': list(runtime.config.cli_sandbox.runtime_roots)},
                     'messages': messages}
+        if not ruleset.empty:
+            # Guard versions and effective bindings: readmission detects drift.
+            material['rules'] = ruleset.material()
         if context_policy is not None:
             if input_bytes != report.encoded_input_bytes:
                 raise TurnAdmissionError('bindingMismatch')
@@ -248,9 +256,12 @@ def prepare_turn(runtime, artifact, *, message, history=(), input_data=None, pol
         identity = hashlib.sha256(encode_owned(identity_material,
             max_bytes=limits.max_history_bytes + limits.max_input_bytes * 2,
             max_depth=limits.max_json_depth, max_nodes=limits.max_json_nodes)).hexdigest()
-        return PreparedTurn._create(encoded, identity, input_bytes,
+        prepared = PreparedTurn._create(encoded, identity, input_bytes,
             encoding_version='conversation-turn-v2' if context_policy is not None else 'conversation-turn-v1',
             context_work=work)
+        # Private compiled rules, reused by execution; never serialized or compared.
+        object.__setattr__(prepared, '_rules', ruleset)
+        return prepared
     except TurnAdmissionError:
         raise
     except (ValueError, TypeError, KeyError, AttributeError, UnicodeError) as exc:

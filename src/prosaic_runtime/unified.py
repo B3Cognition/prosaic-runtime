@@ -11,6 +11,7 @@ from .capacity import CapacityStore
 from .native import NativeRuntime
 from .native_config import NativeRuntimeConfig, ProfilePool
 from .policy import BUILTIN_TOOLS, WRITE_TOOLS, requested_tools
+from .rules import refuse_unenforced
 from .runtime import ProsaicRuntime
 from .types import Result
 from .unified_config import PoolPolicy, UnifiedRuntimeConfig
@@ -88,6 +89,10 @@ class UnifiedRuntime:
             artifact = inspect_artifact(artifact, self.source, executable=self.executable,
                 timeout_s=min(30, max(.001, deadline - time.monotonic())))
         artifact = _inspection_artifact(artifact)
+        # Refuse before any backend: inside a delegate this would surface as an uncertain execution.
+        refuse_unenforced(artifact)
+        if config.api_config is not None and config.api_config.required_guards:
+            raise ValueError('required_guards need conversation turn admission; unified pools cannot enforce them')
         effort = validate_effort(artifact.frontmatter.get('effort'))
         if not isinstance(arguments, str):
             raise ValueError('unified arguments must be text')

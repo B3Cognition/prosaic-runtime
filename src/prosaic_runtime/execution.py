@@ -10,6 +10,7 @@ from .tools import ToolDeadlineExceeded
 from .terminal import binding
 from .terminal import content_digest
 from .openai_compatible_compaction import compact_tool_result_messages, ToolResultCompactionStats
+from .rule_hooks import RETRY, STOP
 from .openai_compatible_progress import (_progress, _progress_llm_preview, _progress_turn_summary, _single_line_preview, _tool_call_name, _tool_result_status, _elapsed_s)
 
 
@@ -82,6 +83,14 @@ class ExecutionBackend:
         ):
             raise ValueError('finalize_after_tool_rounds must be an integer between 1 and max_tool_rounds')
         run_started = time.monotonic()
+        # Rule hooks exist only for admitted conversation turns with bound rules.
+        hooks = getattr(self, 'rule_hooks', None)
+
+        def rule_stop():
+            return CliRunResult(1, '', 'rule violation', token_usage=token_usage, metadata={
+                'provider': self.name, 'failure_reason': 'ruleViolation', 'tool_call_count': tool_call_count,
+                'tool_rounds': tool_rounds, 'token_usage_details': token_usage_details,
+                **_transcript_metadata(transcript)})
 
         while True:
             turn_number = tool_rounds + 1
@@ -302,6 +311,10 @@ class ExecutionBackend:
                     f"rounds={tool_rounds}/{max_tool_rounds} "
                     f"calls_total={tool_call_count}"
                 )
+                # Whole-batch rule admission precedes history, wire and effects,
+                # so all three record the arguments that actually run.
+                if hooks is not None and hooks.before_tools(turn, registry) is STOP:
+                    return rule_stop()
                 if turn_capture is not None:
                     turn_capture.assistant(turn)
                 messages.append(_assistant_tool_message(turn_capture.wire_turn(turn) if turn_capture is not None else turn))
@@ -332,8 +345,10 @@ class ExecutionBackend:
                             if getattr(registry, 'terminal_tools', ()) else {}))
                     from .tool_effects import ToolEffectFailure
                     from .tool_outcomes import ToolOutcome
+                    refusal = hooks.refusal(tool_call) if hooks is not None else None
                     try:
-                        tool_message = registry.execute_message(tool_call)
+                        tool_message = (registry.refuse_message(tool_call, refusal) if refusal is not None
+                                        else registry.execute_message(tool_call))
                     except (Cancelled, ToolDeadlineExceeded):
                         terminal = getattr(registry, 'terminal_capture', None)
                         if terminal is not None and terminal.evidence is not None:
@@ -353,9 +368,14 @@ class ExecutionBackend:
                             # later cancellation boundary; neither permits replay.
                             pass
                         raise
-                    if turn_capture is not None:
+                    executed = tool_message
+                    if hooks is not None and refusal is None:
+                        # The model and history see the checked result; events,
+                        # conformance and effect evidence keep what actually ran.
+                        tool_message = hooks.after_tool(tool_call, executed)
+                    if turn_capture is not None and tool_message is not STOP:
                         turn_capture.tool(tool_call, tool_message)
-                    tool_payload = json.loads(tool_message["content"])
+                    tool_payload = json.loads(executed["content"])
                     from .conformance import _record_tool_result
                     _record_tool_result(tool_name, tool_payload)
                     status = tool_payload.get("status", "unknown")
@@ -379,6 +399,8 @@ class ExecutionBackend:
                                 'completion_source': 'host', 'tool_call_count': tool_call_count,
                                 'tool_rounds': tool_rounds, 'token_usage_details': token_usage_details,
                                 **_transcript_metadata(transcript)})
+                    if hooks is not None and tool_message is STOP:
+                        return rule_stop()
                     tool_result = _tool_result_status(tool_message)
                     _progress(
                         f"tool {tool_name} result: "
@@ -502,6 +524,12 @@ class ExecutionBackend:
                     metadata,
                     str(incomplete),
                 )
+            if hooks is not None:
+                decision = hooks.answer(turn, messages)
+                if decision is STOP:
+                    return rule_stop()
+                if decision == RETRY:
+                    continue  # Draft and unprivileged feedback were appended; budgets still apply.
             if turn_capture is not None:
                 turn_capture.assistant(turn)
             if turn.text and not operator_previewed:

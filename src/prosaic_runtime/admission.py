@@ -10,9 +10,8 @@ def _inspection_artifact(artifact):
     if not isinstance(artifact, ProsaicArtifact):
         raise ValueError('execution admission requires a Prosaic inspection artifact')
     try:
-        return ProsaicArtifact.from_inspection({
-            'id': artifact.id, 'type': artifact.type, 'frontmatter': artifact.frontmatter,
-            'body': artifact.body, 'resources': list(artifact.resources)})
+        # Keep inspection rules: a rebuild must not hide enforcement from later checks.
+        return ProsaicArtifact.from_inspection(artifact.inspection())
     except (TypeError, AttributeError) as exc:
         raise ValueError('invalid Prosaic inspection artifact') from exc
 

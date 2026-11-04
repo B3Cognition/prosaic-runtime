@@ -33,6 +33,7 @@ from .turn_capture import TurnOutputExceeded
 from .terminal import TerminalCapture, TerminalCompletionError, admit_terminal_tools
 from .execution_budget import active_budgets, check_budgets, reserve_dispatch, record_shared_usage, token_reservations
 from .context_execution import ContextExecutionFailure
+from .rules import check_required_pins, refuse_unenforced, required_guard_specs, validate_guards
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -381,8 +382,9 @@ class ProsaicRuntime:
     capabilities |= frozenset({'token_admission_v1'})
     capabilities |= frozenset({'tool_outcomes_v1', 'bounded_tool_recovery_v1', 'direct_tool_v1'})
     capabilities |= frozenset({'terminal_tool_v1'})
+    capabilities |= frozenset({'rule_admission_v1'})
     def __init__(self, config: RuntimeConfig, *, source=".prosaic", executable="prosaic", custom_tools=None,
-                 accounting=None, context_defaults=None, lifecycle=None):
+                 accounting=None, context_defaults=None, lifecycle=None, guards=None, allow_unbound_guards=False):
         self.lifecycle = lifecycle if lifecycle is not None else ExecutionLifecycle()
         if not isinstance(self.lifecycle, ExecutionLifecycle):
             raise TypeError("lifecycle must be an ExecutionLifecycle")
@@ -396,6 +398,15 @@ class ProsaicRuntime:
         if self._custom_tools.keys() & self._cli_tools.keys():
             raise ValueError('duplicate custom tool registration and CLI manifest')
         self._custom_tools.update({name: tool.custom_tool() for name, tool in self._cli_tools.items()})
+        # Guards are host code registered here, like custom tools. Markdown
+        # binds only what is registered; registering nothing changes nothing.
+        self._guards = validate_guards(guards)
+        check_required_pins(required_guard_specs(config.required_guards), self._guards)
+        # Resolved now: a later chdir must not move where path-like rule settings point.
+        self._project_root = Path(source).resolve().parent
+        if type(allow_unbound_guards) is not bool:
+            raise ValueError('allow_unbound_guards must be boolean')
+        self._allow_unbound_guards = allow_unbound_guards
 
     @property
     def tool_descriptors(self):
@@ -407,14 +418,15 @@ class ProsaicRuntime:
 
     def prepare_turn(self, artifact, *, message, history=(), input_data=None,
                      policy=None, limits=None, workspace=None, context_policy=None,
-                     token_counters=None, context_selection=None, context_report=None, context_work=None):
+                     token_counters=None, context_selection=None, context_report=None, context_work=None,
+                     _warn_rules=True):
         """Purely admit and own one role-aware conversational input."""
         from .conversation_preparation import prepare_turn
         return prepare_turn(self, artifact, message=message, history=history,
                             input_data=input_data, policy=policy, limits=limits, workspace=workspace,
                             context_policy=context_policy, token_counters=token_counters,
                             context_selection=context_selection, context_report=context_report,
-                            context_work=context_work)
+                            context_work=context_work, _warn_rules=_warn_rules)
 
     @tracked
     def turn(self, artifact, *, message=None, history=(), input_data=None,
@@ -448,10 +460,12 @@ class ProsaicRuntime:
                         context_work=context_work if context_work is not None else artifact.context_work)
                 elif token_counters is not None or context_work is not None:
                     raise TurnAdmissionError('invalidPolicy')
+                # Readmission repeats admission silently; warnings were raised at preparation.
                 prepared = self.prepare_turn(approved, message=owned['message'],
                     history=tuple(ConversationMessage.from_dict(m) for m in owned['history']),
                     input_data=owned['inputData'], policy=policy_from_document(owned['policy']),
-                    limits=TurnLimits(**owned['limits']), workspace=owned['workspace'], **context_args)
+                    limits=TurnLimits(**owned['limits']), workspace=owned['workspace'], _warn_rules=False,
+                    **context_args)
                 if (artifact.encoding_version != prepared.encoding_version or
                         artifact.context_identity != prepared.context_identity or
                         artifact.input_bytes != prepared.input_bytes or artifact._encoded != prepared._encoded):
@@ -468,6 +482,17 @@ class ProsaicRuntime:
             approved = ProsaicArtifact.from_inspection(owned['agent'])
         policy = policy_from_document(owned['policy'])
         limits = TurnLimits(**owned['limits'])
+        # Compiled once at (re)admission and carried privately on the prepared turn.
+        ruleset = prepared._rules
+        owned['_ruleSet'] = ruleset
+
+        def with_rules(turn_result):
+            hooks = owned.get('_ruleHooks')
+            if hooks is not None:
+                return replace(turn_result, **hooks.report())
+            if ruleset.bindings:
+                return replace(turn_result, rules_fingerprint=ruleset.rules_fingerprint())
+            return turn_result
         snapshot = execution_snapshot(self, owned)
         scope = InvocationScope(str(uuid4())) if operation_context is None else operation_context
         # Static effect admission precedes callbacks/observation as well as I/O.
@@ -508,12 +533,12 @@ class ProsaicRuntime:
             except ToolDeadlineExceeded:
                 terminal = capture.finish(Result(1, '', 'timeout', timed_out=True,
                     metadata={'failure_reason': 'invocation_timeout'}), budget)
-                return replace(terminal, context_report=guard.report, context_work=guard.work)
+                return with_rules(replace(terminal, context_report=guard.report, context_work=guard.work))
             owned['_contextGuard'] = guard
         if guard is not None and cancelled is not None and cancelled():
             terminal = capture.finish(Result(1, '', 'cancelled',
                 metadata={'failure_reason': 'cancelled'}), budget)
-            return replace(terminal, context_report=guard.report, context_work=guard.work)
+            return with_rules(replace(terminal, context_report=guard.report, context_work=guard.work))
         if on_admitted is not None:
             on_admitted()
         emitter = ObserverEmitter(observer, source='runtime', scope=scope)
@@ -537,7 +562,8 @@ class ProsaicRuntime:
                     duration_ms=(time.monotonic() - started) * 1000,
                     exit_code=result.exit_code if result is not None else None)
         completed = capture.finish(result, budget)
-        return replace(completed, context_report=guard.report, context_work=guard.work) if guard is not None else completed
+        completed = replace(completed, context_report=guard.report, context_work=guard.work) if guard is not None else completed
+        return with_rules(completed)
 
     @classmethod
     def from_config(cls, path=None, **kwargs):
@@ -722,9 +748,13 @@ class ProsaicRuntime:
                                                 timeout_s=min(30, policy.timeout_s))
                 if not isinstance(artifact, ProsaicArtifact):
                     raise TypeError("artifact must be a Prosaic artifact identifier or inspection artifact")
-                artifact = ProsaicArtifact.from_inspection({
-                    "id": artifact.id, "type": artifact.type, "frontmatter": artifact.frontmatter,
-                    "body": artifact.body, "resources": list(artifact.resources)})
+                artifact = ProsaicArtifact.from_inspection(artifact.inspection())
+                if _turn_prepared is None:
+                    # No rule hooks here: neither an enforce tag nor a host-required
+                    # guard may look enforced but run unchecked.
+                    if config.required_guards:
+                        raise ValueError('required_guards need conversation turn admission; run() cannot enforce them')
+                    refuse_unenforced(artifact)
                 validate_execution_artifact(artifact, config)
                 requested = requested_tools(artifact.frontmatter.get("tools"))
                 admit_tool_effects(custom, requested, _operation_context, _tool_journal)
@@ -752,9 +782,8 @@ class ProsaicRuntime:
                                                        timeout_s=min(30, remaining))
                     if not isinstance(acquisition, ProsaicArtifact):
                         raise TypeError('acquisition must be a Prosaic artifact identifier or inspection artifact')
-                    acquisition = ProsaicArtifact.from_inspection({
-                        'id': acquisition.id, 'type': acquisition.type, 'frontmatter': acquisition.frontmatter,
-                        'body': acquisition.body, 'resources': list(acquisition.resources)})
+                    acquisition = ProsaicArtifact.from_inspection(acquisition.inspection())
+                    refuse_unenforced(acquisition)
                     validate_execution_artifact(artifact, config, acquisition=acquisition)
                     acquisition_tools = requested_tools(acquisition.frontmatter.get('tools'))
                     if acquisition_tools - requested or policy.initial_tool not in acquisition_tools:
@@ -818,6 +847,12 @@ class ProsaicRuntime:
                     backend.context_guard = _turn_prepared.get('_contextGuard')
                     backend.turn_capture = _turn_capture
                     _turn_capture.backend = backend
+                    ruleset = _turn_prepared.get('_ruleSet')
+                    if ruleset is not None and any(binding.bound for binding in ruleset.bindings):
+                        from .rule_hooks import RuleHooks
+                        backend.rule_hooks = _turn_prepared['_ruleHooks'] = RuleHooks(
+                            ruleset, message=_turn_prepared['message'], input_data=_turn_prepared['inputData'],
+                            budget=_budget, check_boundary=backend.check_boundary)
                     result = backend._run_prompt_with_tools(request, metadata,
                         _feature_enabled(endpoint.features, 'streaming', default=True),
                         initial_messages=_turn_prepared['messages'],

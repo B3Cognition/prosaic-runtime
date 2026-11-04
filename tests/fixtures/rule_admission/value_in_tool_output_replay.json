@@ -1,0 +1,174 @@
+{
+ "header": {
+  "fixture": "Replay of realistic synthetic tool shapes for the value_in_tool_output guard",
+  "review": "Reviewed fixture. Changing an expectation is a deliberate act that requires re-review.",
+  "data": "Invented programme, sites and figures. No real organisation, person or dataset.",
+  "source": "Cases 1-6 are the maintainer-specified examples; the rest are edge cases derived from the same rules."
+ },
+ "toolResults": [
+  {
+   "programmeId": "HL-3",
+   "programme": "Harbour Light home retrofit (synthetic)",
+   "currency": "EUR",
+   "summary": {
+    "annualBenefit": 1400000,
+    "costRatio": 4.66,
+    "reference": "R-650",
+    "payback": "12"
+   },
+   "narrative": "Projected savings put the programme EUR 63.6M ahead of the baseline; 650 homes were surveyed and pilot streets returned 2.2x the expected uptake.",
+   "survey": {
+    "homes_id": 3,
+    "year": 2026,
+    "date": "2026-03-01",
+    "id": 77
+   },
+   "sites": [
+    {
+     "site": "North Quay",
+     "spend": "794,541.79",
+     "households": 1149
+    },
+    {
+     "site": "Gull Reach",
+     "spend": 15.5,
+     "currency": "GBP"
+    }
+   ]
+  },
+  {
+   "note": "Second lookup kept as a separate result.",
+   "grant": 2349999
+  }
+ ],
+ "cases": [
+  {
+   "name": "1 currency amount with scale matches a numeric field",
+   "answer": "The benefit is EUR 1.4M",
+   "ok": true
+  },
+  {
+   "name": "2 x-marked multiple rounds to written precision",
+   "answer": "Cost cover is 4.7x.",
+   "ok": true
+  },
+  {
+   "name": "3 currency-marked amount inside longer source text",
+   "answer": "The programme is EUR 63.6M ahead.",
+   "ok": true
+  },
+  {
+   "name": "4 bare number inside a source sentence is not a source",
+   "answer": "Survey cost was EUR 650.",
+   "ok": false,
+   "refused": [
+    "EUR 650"
+   ]
+  },
+  {
+   "name": "5 only matching figure is in an id field",
+   "answer": "Uptake grew 3x.",
+   "ok": false,
+   "refused": [
+    "3x"
+   ]
+  },
+  {
+   "name": "6 data names EUR, answer states GBP",
+   "answer": "North Quay spent GBP 795K.",
+   "ok": false,
+   "refused": [
+    "GBP 795K"
+   ]
+  },
+  {
+   "name": "same figure with the data currency",
+   "answer": "North Quay spent EUR 795K.",
+   "ok": true
+  },
+  {
+   "name": "euro symbol maps to EUR",
+   "answer": "The benefit is €1.4M.",
+   "ok": true
+  },
+  {
+   "name": "nearest currency wins for nested object",
+   "answer": "Gull Reach spent GBP 15.5.",
+   "ok": true
+  },
+  {
+   "name": "nested GBP object is not EUR",
+   "answer": "Gull Reach spent EUR 15.5.",
+   "ok": false,
+   "refused": [
+    "EUR 15.5"
+   ]
+  },
+  {
+   "name": "truncation also matches",
+   "answer": "A grant of EUR 2.34M.",
+   "ok": true
+  },
+  {
+   "name": "rounding also matches",
+   "answer": "A grant of EUR 2.35M.",
+   "ok": true
+  },
+  {
+   "name": "wrong precision digit fails",
+   "answer": "A grant of EUR 2.4M.",
+   "ok": false,
+   "refused": [
+    "EUR 2.4M"
+   ]
+  },
+  {
+   "name": "whole formatted number text field counts",
+   "answer": "Payback costs EUR 12.",
+   "ok": true
+  },
+  {
+   "name": "x-marked multiple in source text",
+   "answer": "Pilot streets saw 2.2x uptake.",
+   "ok": true
+  },
+  {
+   "name": "bare numbers in the answer are not checked",
+   "answer": "We surveyed 999 homes in 2031.",
+   "ok": true
+  },
+  {
+   "name": "year and date keys are never read",
+   "answer": "That is EUR 2026.",
+   "ok": false,
+   "refused": [
+    "EUR 2026"
+   ]
+  },
+  {
+   "name": "reference key is never read",
+   "answer": "Ratio 650x.",
+   "ok": false,
+   "refused": [
+    "650x"
+   ]
+  },
+  {
+   "name": "plain id key is never read",
+   "answer": "Worth EUR 77.",
+   "ok": false,
+   "refused": [
+    "EUR 77"
+   ]
+  },
+  {
+   "name": "several amounts report every unmatched one",
+   "answer": "EUR 1.4M benefit, GBP 9M cost, 8x return.",
+   "ok": false,
+   "refused": [
+    "GBP 9M",
+    "8x"
+   ]
+  }
+ ]
+}
