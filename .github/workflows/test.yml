@@ -19,7 +19,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: B3Cognition/prosaic
-          ref: 6ac6cfdfd47dc70ecf68e441aa004f07c3be3822
+          ref: 9d5a02f87469da373ba35e1e599b456b45459cd2
           path: .ci-prosaic
       - name: Install explicit Core candidate and Runtime
         run: |
@@ -108,7 +108,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: B3Cognition/prosaic
-          ref: 6ac6cfdfd47dc70ecf68e441aa004f07c3be3822
+          ref: 9d5a02f87469da373ba35e1e599b456b45459cd2
           path: .ci-prosaic
       - name: Build core and separately installed recorder
         run: |

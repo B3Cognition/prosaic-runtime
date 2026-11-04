@@ -580,6 +580,20 @@ can execute fixed application commands. They are unsandboxed in the default
 `off` mode; `required` mode adds the CLI OS boundary described above.
 Hosts retain their output validation, workflow decisions and publication rules.
 
+### Rule admission (opt-in)
+
+Prose can declare checkable rules with Prosaic Core's inert enforcement tags,
+such as `<!-- enforce: strict_json(on_violation=retry) -->`. Runtime enforces them
+only for conversation turns, and only with guards the host registers in Python:
+`ProsaicRuntime(config, guards=[...])`. An unregistered guard refuses turn
+admission (always for `on_violation=fail`), and `RuntimeConfig.required_guards`
+sets minimum actions, optionally with pinned settings and stage, that prose cannot
+weaken. Bound guards run before tools, after
+tools, on the draft and on the final answer, to `fix`, `retry` once within existing
+budgets, or `fail` with `ruleViolation`. `run()` refuses enforce-tagged prose
+rather than running it unchecked. Without tags nothing changes, byte for byte. See
+[rule admission](docs/rules-admission.md), including Harness compatibility.
+
 ## Limits and events
 
 Default invocation limits: 120 seconds, 8 tool rounds, 256 KiB input. Endpoint defaults: 4,096 output tokens per turn and 8 MiB captured response per turn. Conversation requests are checked against the input limit before tool-loop turns; oversized responses fail. Old tool results can be compacted. Repeated identical tool rounds disable tools for a final answer.

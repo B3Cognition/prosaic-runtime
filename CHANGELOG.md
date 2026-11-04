@@ -1,5 +1,33 @@
 # Changelog
 
+## Unreleased
+
+- Add opt-in rule admission for conversation turns, consuming Prosaic Core's
+  inert enforcement tags (`rules`). Hosts register `Guard`s in Python; prose
+  binds only registered guards. Off by default: untagged agents are
+  byte-identical, pinned by a golden capture from the previous main.
+- Refuse turn admission for unregistered guards (always for `on_violation=fail`;
+  otherwise unless `allow_unbound_guards=True`), rule issues, invalid settings,
+  unsupported stages, `fix` bindings on guards not declaring `fixes=True`, path
+  settings outside the project and ambiguous multi-file bindings (resolved per
+  guard and stage). Turn identity records project-relative paths, so it is
+  portable across machines. Add `RuntimeConfig.required_guards`: minimum actions,
+  optionally with host-authoritative pinned settings and stage.
+- Run guards at `before_tool`, `after_tool`, `before_answer` and `final` inside
+  the existing loop with `fix` (bounded, rechecked), one `retry` per turn within
+  existing budgets (feedback quotes the rule and refused values as unprivileged
+  data) and `fail` (new failure code `ruleViolation`; Harness needs a matching
+  `_FAILURES` update).
+- Add `TurnResult.rules_evaluated`, `rules_violated`, `rules_fixed` (ids only)
+  and `rules_fingerprint`; send the model Core's `strip_tags` text.
+- `run()`, acquisitions and `NativeRuntime.run` refuse artifacts with enforce
+  tags (including composed inspection rules) rather than run them unenforced;
+  `run()` also refuses while `required_guards` is configured.
+- Ship four generic guards, inert until registered and bound:
+  `no_wrapped_links`, `value_in_tool_output`, `args_reference_seen_ids`,
+  `strict_json`. Requires Core with `parse_rules` (9d5a02f+); older Core
+  refuses tagged artifacts and leaves untagged ones unchanged.
+
 ## 0.9.12 — 2026-11-02
 
 - Add canonical `effort: none`. Map Gemma 4 none/positive efforts to its native
