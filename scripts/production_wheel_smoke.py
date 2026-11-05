@@ -48,8 +48,8 @@ def installed_origins():
     assert not {"prosaic", "prosaic-runtime", "prosaic-runtime-postgres"} & installed
     owners = {}
     origins = {}
-    for package, name, version in ((prosaic, "b3-prosaic", "0.4.1"),
-            (runtime, "b3-prosaic-runtime", "0.9.12"),
+    for package, name, version in ((prosaic, "b3-prosaic", "0.5.0"),
+            (runtime, "b3-prosaic-runtime", "0.9.13"),
             (postgres, "b3-prosaic-runtime-postgres", "0.3.0")):
         owner = metadata.distribution(name)
         assert owner.version == package.__version__ == version

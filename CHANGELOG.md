@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.13 — 2026-11-05
+
+- Require Prosaic >=0.5.0,<0.6 and qualify its exact published artifacts.
+- Update current installation and release pins; preserve provider contracts and
+  the separately published PostgreSQL recorder 0.3.0.
+
 ## 0.9.12 — 2026-11-02
 
 - Add canonical `effort: none`. Map Gemma 4 none/positive efforts to its native

@@ -4,13 +4,13 @@ After the qualified first publication, install in a fresh Python 3.11+ environme
 
 ```sh
 python -m venv .venv
-.venv/bin/python -m pip install 'b3-prosaic-runtime==0.9.8'
+.venv/bin/python -m pip install 'b3-prosaic-runtime==0.9.13'
 .venv/bin/python -m pip install 'b3-prosaic-runtime-postgres==0.3.0'
 .venv/bin/prosaic-runtime --help
 ```
 
 The imports remain `prosaic_runtime` and `prosaic_runtime_postgres`; CLI commands
-remain unchanged. Runtime's normal index dependency is `b3-prosaic>=0.4,<0.5`.
+remain unchanged. Runtime's normal index dependency is `b3-prosaic>=0.5.0,<0.6`.
 PyPI's unrelated `prosaic` distribution is never a migration shortcut. The legacy
 GitHub distributions and new B3 distributions share module paths; create a new
 virtual environment or image rather than installing both families together.
@@ -70,7 +70,7 @@ commands, interpreter/platform identities and JUnit counts where applicable.
 Every qualification binds the exact package hashes and upstream receipt digest.
 A build, fingerprint or fixture report does not itself prove qualification.
 
-While Core publication is pending, supply its explicit successful `Publish SDK`
+Supply Core 0.5.0's explicit successful `Publish SDK`
 run ID and exact source commit. The pipeline downloads that run's
 `qualified-release`, verifies the Core receipt and hashes, and installs only its
 named B3 wheel from a curated wheelhouse. `upstream-receipt.json` retains that
@@ -109,13 +109,13 @@ ecosystem code and native service/legacy-upgrade gates before publication.
 Publish Core first, Runtime and its recorder second, Harness and its store third,
 and then adopt the downloaded SDK bytes in the lab.
 
-The conversation candidate train is Runtime 0.9.0 and recorder 0.3.0. It preserves
-Core 0.4.1 and existing recorder data/schema, adds the installed
+The current train is Runtime 0.9.13, Core 0.5.0 and recorder 0.3.0. It preserves
+existing recorder data/schema and retains the installed
 `conversation_wheel_smoke.py` gate, and selects Runtime 0.9.x for the adapter.
 Use explicit qualified wheels until the index versions have been verified.
 See [conversation usage and limits](conversations.md).
 
-Tag the qualified source `v0.9.0` and explicitly dispatch `Publish SDK` on that tag
+Tag the qualified source `v0.9.13` and explicitly dispatch `Publish SDK` on that tag
 with `candidate_run_id` naming its successful exact-source candidate, the same
 Core run/commit inputs, and `publish=true`. Promotion downloads original qualified
 bytes and reruns required checks; it never rebuilds the publication payload.
