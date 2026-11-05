@@ -446,25 +446,17 @@ usable repair on a violation fails the turn.
 
 ## Compatibility
 
-- **Core.** Requires Prosaic Core with `parse_rules`/`strip_tags`
-  (B3Cognition/prosaic `9d5a02f` or later). Its package version is still 0.4.1,
-  the same as the released 0.4.1 that lacks them, so the dependency floor cannot
-  express this yet. With an older Core, tagged artifacts are refused and untagged
-  ones are unchanged. When Core releases `parse_rules`, the release change is:
-  raise the `b3-prosaic` floor in `pyproject.toml` to that version; if it is
-  0.5.0 or later, also raise the `<0.5` cap and update
-  `tests/test_package_compatibility.py`, which asserts 0.5.0 is excluded; and
-  move `publish.yml` and the release scripts off the curated 0.4.1 wheel. CI
-  installs Core from git, so it would not catch a range that excludes the
-  release.
+- **Core.** Uses Prosaic Core's `parse_rules`/`strip_tags`, first released in
+  Core 0.5.0; the declared dependency `b3-prosaic>=0.5.0,<0.6` guarantees them.
+  If an older Core is installed anyway, tagged artifacts are refused and
+  untagged ones are unchanged.
 - **Release gate.** `scripts/rule_admission_wheel_smoke.py` runs a tagged agent
   from the installed wheels: coverage, an enforced retry, tag stripping and an
   unregistered `fail` guard refused. It fails unless the installed Core provides
   `parse_rules`. Release qualification (`publish.yml`, isolated-wheel and
-  dependency-floor environments) installs Core from the curated upstream wheel
-  that satisfies the declared dependency, so it cannot pass until the Core
-  release and the steps above land. PR CI runs the same script against the
-  pinned Core candidate.
+  dependency-floor environments) runs it against the curated, receipt-verified
+  Core 0.5.0 wheel that satisfies the declared dependency, and PR CI runs it
+  against the same Core release commit (`67b3807`).
 - **Harness: guarded conversations are unsupported** until a companion Harness
   release. Against Harness main `797d03c` (0.9.7), its conversation path drops
   enforcement requirements before Runtime sees them:

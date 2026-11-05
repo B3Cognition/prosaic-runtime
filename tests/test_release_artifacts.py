@@ -456,15 +456,15 @@ def test_qualification_records_real_junit_counts_and_rejects_skips(
 def curated_candidates(release_tool, tmp_path):
     directory, wheelhouse = tmp_path / 'artifacts', tmp_path / 'wheels'
     directory.mkdir(); wheelhouse.mkdir()
-    filename = 'b3_prosaic-0.4.1-py3-none-any.whl'
+    filename = 'b3_prosaic-0.5.0-py3-none-any.whl'
     content = b'synthetic qualified upstream wheel'
     (wheelhouse / filename).write_bytes(content)
     artifacts = [
         {'filename': filename, 'sha256': release_tool.digest(content)},
-        {'filename': 'b3_prosaic-0.4.1.tar.gz', 'sha256': release_tool.digest(b'synthetic sdist')},
+        {'filename': 'b3_prosaic-0.5.0.tar.gz', 'sha256': release_tool.digest(b'synthetic sdist')},
     ]
     receipt = {'version': 1, 'source_commit': 'a' * 40,
-               'distributions': [{'name': 'b3-prosaic', 'version': '0.4.1'}],
+               'distributions': [{'name': 'b3-prosaic', 'version': '0.5.0'}],
                'artifacts': artifacts}
     serialized = (json.dumps(receipt, sort_keys=True, indent=2) + '\n').encode()
     binding = {'repository': 'B3Cognition/prosaic', 'run_id': '123',

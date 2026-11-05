@@ -50,12 +50,20 @@
   scales such as `m`/`bn`/`million`/`crore`, space and apostrophe grouping,
   European decimals, prefixed dollars, trailing symbols), refuses ranges and
   unreadable figures, never reads a bullet as a minus, matches by rounding only, and
-  requires the sign to agree unless `sign=magnitude`; marked figures it cannot
-  parse are refused. `no_wrapped_links` never rewrites code and handles link
-  titles and parenthesised targets. Requires Core with `parse_rules` (9d5a02f+); older
-  Core refuses tagged artifacts and leaves untagged ones unchanged, and the new
-  `scripts/rule_admission_wheel_smoke.py` release gate fails until the declared
-  Core dependency provides it.
+  requires the sign of amounts and x-multiples to agree unless `sign=magnitude`;
+  marked figures it cannot parse are refused in the answer and give no evidence
+  in tool results (one figure grammar and boundary check for both).
+  `no_wrapped_links` never rewrites code and handles link titles and
+  parenthesised targets. Uses Core 0.5.0's `parse_rules`; an older Core refuses
+  tagged artifacts and leaves untagged ones unchanged. The new
+  `scripts/rule_admission_wheel_smoke.py` runs a tagged agent in release
+  qualification against the installed Core.
+
+## 0.9.13 — 2026-11-05
+
+- Require Prosaic >=0.5.0,<0.6 and qualify its exact published artifacts.
+- Update current installation and release pins; preserve provider contracts and
+  the separately published PostgreSQL recorder 0.3.0.
 
 ## 0.9.12 — 2026-11-02
 

@@ -15,13 +15,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '${{ matrix.python }}'
-      - name: Check out immutable Core candidate while index publication is pending
+      - name: Check out the immutable Core 0.5.0 release
         uses: actions/checkout@v4
         with:
           repository: B3Cognition/prosaic
-          ref: 9d5a02f87469da373ba35e1e599b456b45459cd2
+          ref: 67b3807281ed0cdfd345fff84c56b236ec82cfb1
           path: .ci-prosaic
-      - name: Install explicit Core candidate and Runtime
+      - name: Install explicit Core release and Runtime
         run: |
           python -m pip install ./.ci-prosaic
           python -m pip install -e '.[test]'
@@ -104,11 +104,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Check out immutable Core candidate while index publication is pending
+      - name: Check out the immutable Core 0.5.0 release
         uses: actions/checkout@v4
         with:
           repository: B3Cognition/prosaic
-          ref: 9d5a02f87469da373ba35e1e599b456b45459cd2
+          ref: 67b3807281ed0cdfd345fff84c56b236ec82cfb1
           path: .ci-prosaic
       - name: Build core and separately installed recorder
         run: |
@@ -118,7 +118,7 @@ jobs:
           python -m build adapters/postgres
       - name: Install release wheels
         run: |
-          python -m pip install dist/b3_prosaic_runtime-0.9.12-py3-none-any.whl
+          python -m pip install dist/b3_prosaic_runtime-0.9.13-py3-none-any.whl
           python -m pip install adapters/postgres/dist/b3_prosaic_runtime_postgres-0.3.0-py3-none-any.whl
       - name: Tagged-agent rule admission from the installed wheel
         run: python -I scripts/rule_admission_wheel_smoke.py

@@ -14,7 +14,7 @@ class ProsaicArtifact:
     frontmatter: dict
     body: str
     resources: tuple[dict, ...] = ()
-    # Inspection's inert enforcement entries (Core 9d5a02f+), kept only when
+    # Inspection's inert enforcement entries (Core 0.5.0+), kept only when
     # inspection supplied them. Never part of the digest: tags live in body.
     rules: tuple[dict, ...] | None = None
     rule_issues: tuple[dict, ...] | None = None

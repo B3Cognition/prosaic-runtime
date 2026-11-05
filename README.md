@@ -1,5 +1,10 @@
 # Prosaic Runtime
 
+Runtime **0.9.13** supports Prosaic **0.5.0**, including its native output
+contracts. Providers consume canonical inspection, so Claude Code, Codex and
+OpenAI-compatible execution retain their existing behavior. Core output layouts
+do not change provider selection or runtime permissions.
+
 Runtime **0.9.12** adds canonical `effort: none` and native Gemma thinking
 controls alongside [live Qwen/Gemma verification](docs/live-reasoning-2026-11-02.md).
 Use the [local thinking examples](examples/LOCAL_REASONING.md) for the same
@@ -28,10 +33,10 @@ capacity-aware pools. Native permissions and sessions remain vendor-owned;
 existing direct API execution and Harness contracts stay unchanged.
 
 Runtime is distributed as `b3-prosaic-runtime` and requires
-`b3-prosaic>=0.4,<0.5` from the package index. Python imports (`prosaic_runtime`)
+`b3-prosaic>=0.5.0,<0.6` from the package index. Python imports (`prosaic_runtime`)
 and the `prosaic-runtime` CLI remain unchanged. The separately installed recorder
 is `b3-prosaic-runtime-postgres` **0.3.0**, selecting Runtime 0.9.x.
-Install the release with `python -m pip install 'b3-prosaic-runtime==0.9.12'`.
+Install the release with `python -m pip install 'b3-prosaic-runtime==0.9.13'`.
 
 ### Opt-in final-answer phase
 
@@ -196,17 +201,17 @@ an isolated Python environment; no sudo or global Python installation is needed:
 ```sh
 git clone https://github.com/B3Cognition/prosaic-runtime.git
 cd prosaic-runtime
-git checkout v0.9.12
+git checkout v0.9.13
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install .
 ```
 
-The package installs compatible `b3-prosaic` 0.4.x into the same environment.
+The package installs compatible `b3-prosaic` 0.5.x into the same environment.
 Use the release tag after publication; older release tags retain historical docs.
 
 For public-index installation, create a fresh virtual environment or
-container image and run `python -m pip install 'b3-prosaic-runtime==0.9.12'`.
+container image and run `python -m pip install 'b3-prosaic-runtime==0.9.13'`.
 Install the optional recorder with
 `python -m pip install 'b3-prosaic-runtime-postgres==0.3.0'`. Never add renamed
 packages to an environment containing legacy `prosaic`, `prosaic-runtime` or
@@ -725,7 +730,7 @@ python -m pip install -e '.[test]'
 pytest
 ```
 
-Tests cover extracted transport edge cases, tool denial, path containment, artifact loading, routing, cancellation, and local HTTP/SSE integration. The end-to-end Prosaic test requires the CLI on PATH; CI curates the exact qualified Core 0.4.1 artifact. Tests do not require paid LLM access. Successful conformance tests do not establish model quality; evaluate each agent/model pair against its own acceptance criteria.
+Tests cover extracted transport edge cases, tool denial, path containment, artifact loading, routing, cancellation, and local HTTP/SSE integration. The end-to-end Prosaic test requires the CLI on PATH; CI curates the exact qualified Core 0.5.0 artifact. Tests do not require paid LLM access. Successful conformance tests do not establish model quality; evaluate each agent/model pair against its own acceptance criteria.
 
 `tests/test_distribution_metadata.py` builds both distributions from `git archive`
 (override the source with `PROSAIC_RUNTIME_RELEASE_REF`). The optional test extra
