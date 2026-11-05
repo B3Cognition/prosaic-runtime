@@ -22,11 +22,14 @@ is a decimal. Scales (see ``_SCALES``) are a letter touching the digits
 (``€5m``), an upper-case letter after one space (``€5 M``), or a word after
 spacing, emphasis or a hyphen (``€1.4 million``, ``$5-million``, ``INR 5
 crore``). A marked figure this grammar cannot read (``EUR 1.2.3``,
-``EUR 12abc``, ``$5_000``) or a range (``$3-5m``) is refused, never skipped or
-read as a prefix.
+``EUR 12abc``, ``$5_000``) or a range (``$3-5m``, ``3-5m €``) is refused, never
+skipped or read as a prefix. A sign touching an x-multiple (``-4.7x``) is part
+of it; a bullet (``- 4.7x``) is not.
 
 Sources, from this turn's tool results only: numeric fields; text fields that
-are wholly a figure; and marked figures or x-multiples inside longer text. Keys
+are wholly a figure; and marked figures or x-multiples inside longer text, read
+by the same scan and boundary checks as the answer, so a figure the answer
+could not state gives no evidence (``EUR 12abc`` never supports ``EUR 12``). Keys
 whose last word is id, ids, reference, date, year, path, paths, url or urls,
 and ``sha256``, are never read. A stated figure matches a source that rounds to
 it (half up or half even) at the figure's written precision and scale; the sign
@@ -35,6 +38,7 @@ currency (a ``currency``/``currencyCode`` key on the object or an ancestor, or
 a text figure's marker), a different stated currency is unmatched. No repair.
 """
 
+from bisect import bisect_left
 from decimal import ROUND_HALF_EVEN, ROUND_HALF_UP, Decimal, InvalidOperation
 import math
 import re
@@ -74,8 +78,16 @@ _SCALE = (
 _FIGURE = r'(?:(?P<sign>' + _SIGN + r')' + _GAP + r'{0,3})?' + _BODY + _SCALE
 # After a figure: a word character, or a range (EUR 3-5m, $3 to 5m), means the figure cannot be read.
 _UNREADABLE_AFTER = re.compile(r'[\w]|' + _SPACE + r'?[-–—]' + _SPACE + r'?[\d.]|' + _SPACE + r'+to' + _SPACE + r'+\d')
+# Before a figure's digits: the end of a range (3-5m €, 3 - 5 €, 3 to 5 €) means it cannot be read.
+_RANGE_BEFORE = re.compile(
+    r'\d' + _SPACE + r'{0,2}[-−–—‑‐]' + _GAP + r'{0,3}\(?$|\d' + _SPACE + r'+to' + _SPACE + r'+\(?$'
+)
+_RANGE_REACH = 16
 _WHOLE = re.compile(r'\s*' + _FIGURE + r'\s*')
-_MULTIPLE = re.compile(r'(?<![\w.])(?P<num>\d+(?:\.\d+)?)[x×](?![A-Za-z0-9]|[.,]\d)')
+# A sign touching a multiple (-4.7x, -**4.7x**) is part of it; a bullet (- 4.7x) is not.
+_MULTIPLE = re.compile(
+    r'(?:(?<![\w.])(?P<sign>' + _SIGN + r')[*_`]{0,3})?(?<![\w.])(?P<num>\d+(?:\.\d+)?)[x×](?![A-Za-z0-9]|[.,]\d)'
+)
 _WORDS = re.compile(r'[A-Z]{2,}s?(?![a-z])|[A-Z]?[a-z]+|[A-Z]|\d+')  # Acronyms may take a plural s.
 _EXCLUDED_WORDS = frozenset({'id', 'ids', 'reference', 'date', 'year', 'path', 'paths', 'url', 'urls'})
 _CURRENCY_KEY = re.compile(r'(?i)currency(?:_?code)?')
@@ -169,19 +181,53 @@ def _figure(match):
     return readings, Decimal(10) ** _SCALES.get(unit, 0), negative
 
 
-def _trailing(text, end):
-    return _UNREADABLE_AFTER.match(text, end) is not None
+def _readable(text, match):
+    """False when a word character or range follows the figure, or a range ends at its digits."""
+    if _UNREADABLE_AFTER.match(text, match.end()) is not None:
+        return False
+    start = match.start('num')
+    return _RANGE_BEFORE.search(text, max(0, start - _RANGE_REACH), start) is None
+
+
+def _marked(text, patterns):
+    """(start, written, currency, figure or None) for every marked figure in text.
+
+    The answer and the sources share this scan, so a figure either side cannot
+    read is None on both: refused in the answer, no evidence in a source, and
+    never salvaged as a numeric prefix (``EUR 12abc`` is not ``EUR 12``). Where a
+    suffixed match overlaps a prefixed one, the prefixed reading stands.
+    """
+    prefixed, suffixed, markers = patterns
+    marked, starts, ends = [], [], []
+    for match in prefixed.finditer(text):
+        starts.append(match.start())
+        ends.append(match.end())
+        marked.append(match)
+    for match in suffixed.finditer(text):
+        before = bisect_left(starts, match.end()) - 1  # Prefixed spans never overlap, so ends ascend too.
+        if before < 0 or ends[before] <= match.start():
+            marked.append(match)
+    for match in marked:
+        figure = _figure(match) if _readable(text, match) else None
+        yield match.start(), match.group(0).strip()[:_MAX_WRITTEN], markers[match['cur']], figure
+
+
+def _multiples(text):
+    """(start, written, figure) for every x-multiple, its touching sign included."""
+    for match in _MULTIPLE.finditer(text):
+        number = match['num']
+        decimals = len(number.split('.', 1)[1]) if '.' in number else 0
+        negative = (match['sign'] or '+') != '+'
+        yield match.start(), match.group(0), ([(Decimal(number), decimals)], Decimal(1), negative)
 
 
 def _sources(results, patterns):
     """(signed value, currency or None, kind) for every readable source figure."""
-    prefixed, suffixed, markers = patterns
     found = []
 
-    def add(match, currency, kind):
-        figure = _figure(match)
+    def add(figure, currency, kind):
         if figure is None:
-            return
+            return  # Unreadable source text gives no evidence.
         readings, scale, negative = figure
         for magnitude, _ in readings:
             found.append(((-magnitude if negative else magnitude) * scale, currency, kind))
@@ -189,13 +235,12 @@ def _sources(results, patterns):
     def text(value, currency):
         whole = _WHOLE.fullmatch(value)
         if whole:
-            add(whole, currency, 'number')
+            add(_figure(whole), currency, 'number')
             return
-        for pattern in (prefixed, suffixed):
-            for match in pattern.finditer(value):
-                add(match, markers[match['cur']], 'currency')
-        for match in _MULTIPLE.finditer(value):
-            found.append((Decimal(match['num']), None, 'x'))
+        for _, _, marker, figure in _marked(value, patterns):
+            add(figure, marker, 'currency')
+        for _, _, figure in _multiples(value):
+            add(figure, None, 'x')
 
     stack = [(result, None) for result in reversed(results)]
     while stack:
@@ -231,20 +276,8 @@ def _matches(value, decimals, scale, source):
 
 def _stated(draft, patterns):
     """(position, written, currency, figure or None) for every marked figure and multiple."""
-    prefixed, suffixed, markers = patterns
-    stated, taken = [], []
-    for pattern in (prefixed, suffixed):
-        for match in pattern.finditer(draft):
-            if any(match.start() < end and start < match.end() for start, end in taken):
-                continue
-            taken.append(match.span())
-            figure = None if _trailing(draft, match.end()) else _figure(match)
-            written = match.group(0).strip()[:_MAX_WRITTEN]
-            stated.append((match.start(), written, markers[match['cur']], figure))
-    for match in _MULTIPLE.finditer(draft):
-        number = match['num']
-        decimals = len(number.split('.', 1)[1]) if '.' in number else 0
-        stated.append((match.start(), match.group(0), None, ([(Decimal(number), decimals)], Decimal(1), False)))
+    stated = list(_marked(draft, patterns))
+    stated.extend((start, written, None, figure) for start, written, figure in _multiples(draft))
     return sorted(stated, key=lambda item: item[0])
 
 

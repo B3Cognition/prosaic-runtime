@@ -400,3 +400,83 @@ def test_settings_compare_as_json_values():
     assert not _same_settings({'settings': {'x': 1}}, {'settings': {'x': True}})
     assert not _same_settings({'settings': {'x': 1}}, {'settings': {'x': 1.0}})
     assert _same_settings({'settings': {'x': 1, 'y': [2]}}, {'settings': {'y': [2], 'x': 1}})
+
+
+# Sources share the answer's figure grammar and boundaries --------------------------
+
+
+@pytest.mark.parametrize(
+    'source,stated',
+    [
+        ('EUR 12abc', 'EUR 12'),
+        ('EUR 12Mabc', 'EUR 12M'),
+        ('ref €12abc', '€12'),
+        ('EUR 1.2.3', 'EUR 1.2'),
+        ('between $3-5m', '$3'),
+        ('EUR 3 to 5m', 'EUR 3'),
+        ('between 3-5m €', '5m €'),
+        ('from 3 to 5 €', '5 €'),
+        ('from 3 - 5 €', '-5 €'),
+    ],
+)
+def test_a_malformed_source_figure_gives_no_evidence(source, stated):
+    assert not figures(f'The amount is {stated}.', ({'amount': source},)).ok
+
+
+@pytest.mark.parametrize(
+    'source,stated',
+    [
+        ('Revenue was EUR 12m, up 5%.', 'EUR 12m'),
+        ('It cost 500 € in total.', '500 €'),
+        ('A loss of EUR (12).', 'EUR (12)'),
+        ('EUR 12, EUR 13 later', 'EUR 13'),
+        ('Fees: $10-$20', '$20'),
+    ],
+)
+def test_valid_marked_amounts_inside_longer_source_text_still_count(source, stated):
+    assert figures(f'The amount is {stated}.', ({'note': source},)).ok
+
+
+@pytest.mark.parametrize(
+    'draft,written', [('3-5m €', '5m €'), ('3–5 €', '5 €'), ('3 to 5 €', '5 €'), ('3 - 5 €', '- 5 €')]
+)
+def test_a_range_ending_in_a_suffix_symbol_is_refused(draft, written):
+    sources = ({'low': 3, 'high': 5, 'top': 5_000_000, 'floor': -5},)
+    assert figures(f'It was {draft}.', sources).refused_values == (written,)
+
+
+# x-multiples carry their sign ----------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    'draft,source,ok',
+    [
+        ('-4.7x', 4.7, False),
+        ('−4.7×', 4.7, False),
+        ('**-4.7x**', 4.7, False),
+        ('-**4.7x**', 4.7, False),
+        ('4.7x', '-4.7x', False),
+        ('4.7x', -4.7, False),
+        ('-4.7x', -4.7, True),
+        ('-4.7x', 'fell to -4.7x', True),
+        ('-4.7x', '-4.7', True),
+        ('+4.7x', 4.7, True),
+        ('high-4.7x', 4.7, True),  # A hyphen after a word joins words; it is no sign.
+    ],
+)
+def test_a_multiple_sign_must_agree_with_its_source(draft, source, ok):
+    assert figures(f'Return {draft}.', ({'ratio': source},)).ok is ok
+
+
+def test_a_bullet_before_a_multiple_is_not_a_sign():
+    assert figures('Returns:\n- 4.7x on the fund', ({'ratio': 4.7},)).ok
+    assert not figures('Returns:\n- 4.7x on the fund', ({'ratio': -4.7},)).ok
+
+
+def test_a_refused_multiple_is_reported_with_its_sign():
+    assert figures('Return -4.7x.', ({'ratio': 4.7},)).refused_values == ('-4.7x',)
+
+
+@pytest.mark.parametrize('draft,source', [('-4.7x', 4.7), ('4.7x', '-4.7x'), ('4.7x', -4.7)])
+def test_magnitude_ignores_the_sign_of_multiples(draft, source):
+    assert figures(f'Return {draft}.', ({'ratio': source},), sign='magnitude').ok

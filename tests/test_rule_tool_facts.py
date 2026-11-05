@@ -219,3 +219,62 @@ def test_an_unsupported_signed_amount_fails_the_turn(provider, answer):
         runtime = ProsaicRuntime(fx.runtime.config, custom_tools=fx.tools, guards=generic_guards())
         turn = runtime.turn(tagged(VALUES), message='Summarise', policy=fx.policy)
     assert failure(turn) == 'ruleViolation' and turn.result.stdout == ''
+
+
+# Malformed source figures and signed multiples on the wire ---------------------------
+
+
+def figure_turn(fx, result, answer, *, body=VALUES):
+    """One custom tool call returning result, then the answer, under value_in_tool_output."""
+    fx.tools['ledger_total'] = CustomTool(
+        'ledger_total',
+        'Read a synthetic ledger total',
+        {'type': 'object', 'additionalProperties': False, 'properties': {}},
+        lambda arguments: result,
+        'ledger-v1',
+    )
+    fx.queue_calls([{'id': 'total-1', 'name': 'ledger_total', 'arguments': '{}'}])
+    fx.queue_text(answer)
+    runtime = ProsaicRuntime(fx.runtime.config, custom_tools=fx.tools, guards=generic_guards())
+    return runtime.turn(tagged(body, tools=fx.tools), message='Summarise the ledger', policy=fx.policy)
+
+
+@pytest.mark.parametrize('provider', PROVIDERS)
+@pytest.mark.parametrize(
+    'result,answer,ok',
+    [
+        ({'amount': 'EUR 12abc'}, 'The amount is EUR 12.', False),
+        ({'amount': 'EUR 12Mabc'}, 'The amount is EUR 12M.', False),
+        ({'amount': 'between 3-5m €'}, 'The amount is 5m €.', False),
+        ({'amount': 'Revenue was EUR 12m, up 5%.'}, 'The amount is EUR 12m.', True),
+    ],
+)
+def test_a_clean_answer_supported_only_by_a_malformed_source_fails(provider, result, answer, ok):
+    with ConversationFixture(provider) as fx:
+        turn = figure_turn(fx, result, answer)
+        assert len(fx.raw_requests) == 2  # The tool call, then the answer: no retry under fail.
+    assert failure(turn) == (None if ok else 'ruleViolation')
+    assert bool(turn.rules_violated) is not ok and turn.rules_faulted == ()
+    assert turn.result.stdout == (answer if ok else '')
+
+
+MAGNITUDE = VALUES.replace('on_violation=fail', 'on_violation=fail, sign="magnitude"')
+
+
+@pytest.mark.parametrize('provider', PROVIDERS)
+@pytest.mark.parametrize(
+    'result,answer,ok,body',
+    [
+        ({'ratio': 4.7}, 'Return -4.7x.', False, VALUES),
+        ({'ratio': '-4.7x'}, 'Return 4.7x.', False, VALUES),
+        ({'ratio': -4.7}, 'Return -4.7x.', True, VALUES),
+        ({'ratio': 4.7}, 'Return -4.7x.', True, MAGNITUDE),
+    ],
+    ids=['positive-source', 'negative-text-source', 'matching-negative', 'magnitude'],
+)
+def test_the_sign_of_a_multiple_is_enforced(provider, result, answer, ok, body):
+    with ConversationFixture(provider) as fx:
+        turn = figure_turn(fx, result, answer, body=body)
+    assert failure(turn) == (None if ok else 'ruleViolation')
+    assert bool(turn.rules_violated) is not ok and turn.rules_faulted == ()
+    assert turn.result.stdout == (answer if ok else '')
