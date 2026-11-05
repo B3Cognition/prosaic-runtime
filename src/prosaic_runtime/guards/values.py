@@ -165,6 +165,13 @@ def _check(stage, context):
 
 
 def value_in_tool_output():
+    # Refused values are regex-constrained figures ("EUR 650", "3x"), which cannot carry
+    # instructions, so this guard opts in to echoing them in answer-stage retry feedback.
     return Guard(
-        'value_in_tool_output', 'value-in-tool-output-v1', ('before_answer', 'final'), _check, settings_schema=_SCHEMA
+        'value_in_tool_output',
+        'value-in-tool-output-v1',
+        ('before_answer', 'final'),
+        _check,
+        echo_values=True,
+        settings_schema=_SCHEMA,
     )

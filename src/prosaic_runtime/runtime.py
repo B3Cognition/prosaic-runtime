@@ -416,6 +416,15 @@ class ProsaicRuntime:
     def cli_tool_names(self):
         return frozenset(self._cli_tools)
 
+    def rule_coverage(self, artifact):
+        """Enforcement coverage against this runtime's registered guards: ids and counts, no inference."""
+        from .rules import rule_coverage
+        if isinstance(artifact, str):
+            artifact = inspect_artifact(artifact, self.source, executable=self.executable)
+        if not isinstance(artifact, ProsaicArtifact):
+            raise TypeError('rule_coverage requires a Prosaic artifact identifier or inspection artifact')
+        return rule_coverage(artifact, self._guards)
+
     def prepare_turn(self, artifact, *, message, history=(), input_data=None,
                      policy=None, limits=None, workspace=None, context_policy=None,
                      token_counters=None, context_selection=None, context_report=None, context_work=None,

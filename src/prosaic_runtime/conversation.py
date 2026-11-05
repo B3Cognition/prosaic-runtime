@@ -319,6 +319,7 @@ class TurnResult:
     rules_evaluated: tuple = ()
     rules_violated: tuple = ()
     rules_fixed: tuple = ()
+    rules_faulted: tuple = ()  # Guards that raised or returned an unusable verdict or repair.
     rules_fingerprint: str | None = None
 
 

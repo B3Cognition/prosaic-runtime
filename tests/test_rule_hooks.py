@@ -66,8 +66,11 @@ def tool_turn(fx, guard, stage, action, *, answer='Shelf QA-104.', policy=None):
 
 
 @pytest.mark.parametrize('provider', PROVIDERS)
-def test_before_answer_retry_quotes_rule_and_refused_values_as_unprivileged_data(provider):
-    guard = recorder('shelf_check', Verdict(False, reason='guard-private-reason', refused_values=('QA-999',)))
+@pytest.mark.parametrize('echo', [False, True])
+def test_before_answer_retry_quotes_rule_and_refused_values_as_unprivileged_data(provider, echo):
+    guard = recorder(
+        'shelf_check', Verdict(False, reason='guard-private-reason', refused_values=('QA-999',)), echo_values=echo
+    )
     with ConversationFixture(provider) as fx:
         fx.queue_text('Shelf QA-999.')
         fx.queue_text('Shelf QA-104.')
@@ -76,8 +79,13 @@ def test_before_answer_retry_quotes_rule_and_refused_values_as_unprivileged_data
         )
         unprivileged, system = user_feedback(fx, 1)
         assert system == user_feedback(fx, 0)[1]  # The instruction role never changes.
+        feedback = json.loads(fx.raw_requests[1])['messages'][-1]
+    assert feedback['role'] == 'user'
+    feedback = json.dumps(feedback)
     assert turn.result.exit_code == 0 and turn.result.stdout == 'Shelf QA-104.'
-    assert 'Quote shelf marks exactly.' in unprivileged and 'QA-999' in unprivileged
+    assert 'Quote shelf marks exactly.' in feedback
+    # Raw values reach the user role only for guards that opt in; others send a count.
+    assert ('QA-999' in feedback) is echo and ('refusedCount' in feedback) is not echo
     assert 'guard-private-reason' not in unprivileged and 'enforce' not in unprivileged
     assert [m.role for m in turn.completed_turn.messages] == ['user', 'assistant']
     assert 'QA-999' not in json.dumps(turn.completed_turn.to_dict())
@@ -294,7 +302,7 @@ def test_streaming_retry_on_the_openai_wire():
 
 @pytest.mark.parametrize('provider', PROVIDERS)
 def test_a_refusal_never_carries_over_to_a_later_round_reusing_the_call_id(provider):
-    """Review finding: providers may reuse call ids across rounds; refusals are per batch."""
+    """Providers may reuse call ids across rounds; refusals are per batch."""
     guard = recorder('shelf_check', Verdict(False, refused_values=('REC-9',)), stages=TOOL_STAGES)
     calls = []
     with ConversationFixture(provider) as fx:
@@ -310,7 +318,7 @@ def test_a_refusal_never_carries_over_to_a_later_round_reusing_the_call_id(provi
 
 @pytest.mark.parametrize('provider', PROVIDERS)
 def test_only_results_the_model_saw_count_as_observed_facts(provider):
-    """Review finding: a refused or redacted tool result must not count as seen by later guards."""
+    """A refused or redacted tool result never counts as seen by later guards."""
     redacted = {'status': 'ok', 'result': {'shelfMark': 'QA-104'}}
     tool_guard = recorder('shelf_check', Verdict(False, fixed=redacted), Verdict(True), stages=TOOL_STAGES)
     answer_guard = recorder('brief_check')
@@ -342,7 +350,7 @@ def test_a_retry_replaced_result_is_not_an_observed_fact(provider):
 
 
 def test_each_check_gets_private_lazily_decoded_tool_results():
-    """Review finding: no per-check re-serialization; a guard mutating results cannot affect another."""
+    """No per-check re-serialization; a guard mutating results cannot affect another."""
     from prosaic_runtime.rules import ToolResults
 
     encoded = [json.dumps({'figure': 1}), json.dumps({'figure': 2})]

@@ -40,7 +40,7 @@ from .rule_types import (
 __all__ = [
     'ACTIONS', 'NAME', 'STAGES', 'STRENGTH', 'Binding', 'Guard', 'GuardContext', 'RuleAdmissionError',
     'RuleBindingWarning', 'RuleSet', 'ToolResults', 'Verdict', 'artifact_rules', 'check_required_pins',
-    'compile_rules', 'refuse_unenforced', 'required_guard_specs', 'rules_fingerprint', 'strip_for_model',
+    'compile_rules', 'refuse_unenforced', 'required_guard_specs', 'rule_coverage', 'rules_fingerprint', 'strip_for_model',
     'turn_rules', 'validate_guards',
 ]  # fmt: skip
 
@@ -118,6 +118,32 @@ class RuleSet:
             'proseOnly': [entry['id'] for entry in self.prose_only],
             'fingerprint': self.rules_fingerprint(),
         }
+
+    def coverage(self):
+        """Which compiled rules are enforced, admitted unbound, or left to the model (ids only)."""
+        return {
+            'enforced': [b.rule_id for b in self.bindings if b.bound],
+            'unbound': [b.rule_id for b in self.bindings if not b.bound],
+            'proseOnly': [entry['id'] for entry in self.prose_only],
+        }
+
+
+def rule_coverage(artifact, guards):
+    """Report enforcement coverage without admission or a turn; never refuses, ids and counts only.
+
+    ``registered`` rules name a guard the host registered; admission may still
+    refuse them (for example, invalid settings). ``unregistered`` rules would be
+    refused, or admitted unbound with allow_unbound_guards.
+    """
+    registry = guards if isinstance(guards, dict) else validate_guards(guards)
+    entries, issues = artifact_rules(artifact)
+    enforce = [entry for entry in entries if entry.get('kind') == 'enforce']
+    return {
+        'registered': [entry['id'] for entry in enforce if entry.get('guard') in registry],
+        'unregistered': [entry['id'] for entry in enforce if entry.get('guard') not in registry],
+        'proseOnly': [entry['id'] for entry in entries if entry.get('kind') == 'prose_only'],
+        'issues': len(issues),
+    }
 
 
 def rules_fingerprint(bindings):
@@ -357,7 +383,8 @@ def artifact_rules(artifact):
     known = {_projection(entry) for entry in entries}
     if any(_projection(entry) not in known for entry in parsed['rules']):
         raise RuleAdmissionError()
-    return entries, list(artifact.rule_issues or ()) + issues
+    # Inspection issues already include the body's; Runtime's own parse is the safety net when they are absent.
+    return entries, list(artifact.rule_issues or ()) or issues
 
 
 def turn_rules(runtime, artifact, *, warn=True):

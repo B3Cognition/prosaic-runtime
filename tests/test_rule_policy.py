@@ -1,4 +1,4 @@
-"""Second-review regressions: per-stage bindings, host-pinned required guards, numeric ids."""
+"""Rule policy: per-stage bindings, host-pinned required guards and canonical numeric ids."""
 
 import json
 from dataclasses import replace
@@ -66,7 +66,7 @@ def add_records(fx, calls, *, integer=False):
 
 @pytest.mark.parametrize('provider', ['openai-compatible', 'anthropic'])
 def test_one_guard_bound_at_two_stages_in_two_files_runs_at_both(provider):
-    """Regression: a before_tool fix must not silently disappear behind a final fail elsewhere."""
+    """A before_tool fix never silently disappears behind a final fail in another file."""
     guard = recorder('shelf_check', stages=BOTH)
     artifact = composed(
         '- Repair ids. <!-- enforce: shelf_check(stage=before_tool, on_violation=fix) -->\n',
@@ -117,7 +117,7 @@ def ids_tag(settings='keys=["__unused__"]', stage='before_tool', action='fail'):
 
 
 def test_no_op_settings_cannot_satisfy_a_pinned_required_guard():
-    """Regression: keys=["__unused__"] made a required guard a no-op."""
+    """keys=["__unused__"] cannot turn a pinned required guard into a no-op."""
     required = {'args_reference_seen_ids': {'action': 'fail', 'settings': IDS}}
     with ConversationFixture('openai-compatible') as fx:
         detail = refusal(fx, tagged(ids_tag()), required)
@@ -248,7 +248,7 @@ def test_numeric_ids_are_read_canonically_on_both_sides(arguments, results, refu
 
 @pytest.mark.parametrize('provider', ['openai-compatible', 'anthropic'])
 def test_float_id_on_an_integer_schema_cannot_bypass_the_guard(provider):
-    """Regression (security review): JSON Schema accepts 4242.0 as an integer; the guard must too."""
+    """JSON Schema accepts 4242.0 as an integer, so the guard reads it as 4242 too."""
     calls = []
     body = '- Only seen ids. <!-- enforce: args_reference_seen_ids(keys=["recordId"], stage=before_tool, on_violation=fail) -->\n'
     with ConversationFixture(provider) as fx:

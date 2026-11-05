@@ -178,8 +178,11 @@ class Guard:
     _schema_json: str
     path_settings: tuple
     fixes: bool
+    echo_values: bool
 
-    def __init__(self, name, version, stages, check, *, fixes=False, settings_schema=None, path_settings=()):
+    def __init__(
+        self, name, version, stages, check, *, fixes=False, echo_values=False, settings_schema=None, path_settings=()
+    ):
         from .tools import _reject_refs
 
         if type(name) is not str or not NAME.fullmatch(name):
@@ -197,6 +200,11 @@ class Guard:
             raise ValueError('guard check must be callable')
         if type(fixes) is not bool:
             raise ValueError('guard fixes must be boolean')
+        # Answer-stage feedback goes to the model in the user role. Raw refused values may echo
+        # tool or web text from the draft, so a guard opts in only when its values cannot carry
+        # instructions (for example, regex-constrained figures). Tool-stage feedback is tool-role.
+        if type(echo_values) is not bool:
+            raise ValueError('guard echo_values must be boolean')
         schema = {'type': 'object', 'additionalProperties': False} if settings_schema is None else settings_schema
         try:
             if type(schema) is not dict or schema.get('type') != 'object' or 'additionalProperties' not in schema:
@@ -218,6 +226,7 @@ class Guard:
             _schema_json=schema_json,
             path_settings=tuple(path_settings),
             fixes=fixes,
+            echo_values=echo_values,
         ).items():
             object.__setattr__(self, key, value)
 

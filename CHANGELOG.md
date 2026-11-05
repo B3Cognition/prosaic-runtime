@@ -18,8 +18,12 @@
   existing budgets (feedback quotes the rule and refused values as unprivileged
   data) and `fail` (new failure code `ruleViolation`; Harness needs a matching
   `_FAILURES` update).
-- Add `TurnResult.rules_evaluated`, `rules_violated`, `rules_fixed` (ids only)
-  and `rules_fingerprint`; send the model Core's `strip_tags` text.
+- Add `TurnResult.rules_evaluated`, `rules_violated`, `rules_fixed`,
+  `rules_faulted` (ids only) and `rules_fingerprint`; send the model Core's
+  `strip_tags` text. Add `ProsaicRuntime.rule_coverage()` and
+  `RuleSet.coverage()` to report enforcement coverage without a turn.
+- Answer-stage retry feedback sends raw refused values only for guards
+  registered with `echo_values=True`; others send a count.
 - `run()`, acquisitions and `NativeRuntime.run` refuse artifacts with enforce
   tags (including composed inspection rules) rather than run them unenforced;
   `run()` also refuses while `required_guards` is configured.

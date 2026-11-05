@@ -43,7 +43,16 @@ text (`before_answer`, `final`). A guard that can repair declares
 on any other guard, so the misconfiguration fails at startup rather than in
 production. `settings_schema` must be a closed object schema with explicit
 `additionalProperties`; settings are validated against it at admission.
-`path_settings` names settings that are paths (see Threat model).
+`path_settings` names settings that are paths (see Threat model). `echo_values`
+(default `False`) lets a guard's raw refused values appear in answer-stage retry
+feedback (see Retry feedback).
+
+Guards are trusted, synchronous host code and must be quick and bounded. Runtime
+checks the turn deadline and cancellation before and after every check, so an
+overrunning guard ends the turn as soon as it returns, but it cannot preempt a
+guard that never returns. Keep each check proportional to the facts it reads;
+`value_in_tool_output`, for example, compares each stated figure with each
+source figure of the turn.
 
 ## Admission
 
@@ -97,6 +106,16 @@ Prose cannot weaken a required guard:
   `required_guards` means none.
 - `run()` refuses every artifact while `required_guards` is non-empty, because it
   has no rule hooks.
+- `required_guards` is a Python-host setting: only a host that registers guards
+  (`ProsaicRuntime(guards=...)`) can satisfy it. Keep it out of configs shared
+  with the CLI, which cannot register guards; CLI `preflight` ignores it.
+
+**Scope.** `required_guards` applies to every agent the runtime admits. It means
+"the prose must bind this guard", not "the host attaches this guard": an agent
+that does not tag a required guard is refused. To require a guard for one agent
+or workflow only, give that scope its own `ProsaicRuntime` with its own
+`RuntimeConfig`. Per-agent or per-workflow scoping, and host-attached guards that
+run without a prose tag, are planned follow-ups.
 
 ### Several files in one turn
 
@@ -124,6 +143,14 @@ exception, invalid verdict or failed repair is a safe failure.
 | `after_tool` | each executed result, before the model sees it | repair the result the model sees | replace the result with error feedback; the tool is not re-run | the turn fails, effect evidence kept |
 | `before_answer` | the raw draft | repair the text | ask the model again | the turn fails |
 | `final` | the text after `before_answer` repairs | repair the text | ask the model again | the turn fails |
+
+`before_answer` and `final` both run on the model's final answer in the same
+phase and differ only in order: `before_answer` rules see the raw draft first,
+`final` rules see the text after `before_answer` repairs, and after any repair
+every rule of both stages is rechecked on the repaired text. Use `before_answer`
+for checks of what the model wrote and `final` for checks of what will be
+delivered. `final` is not tied to host terminal completion, which conversation
+turns do not support (see Terminal completion).
 
 - **fix** applies repairs in order, then rechecks every rule of the phase. Up to
   three repair passes; still violated after that is a failure. A repair is never
@@ -153,15 +180,22 @@ result under check at `after_tool` is `tool_result`, not yet in `tool_results`.
 
 ### Retry feedback
 
-Feedback always carries the broken rule's text and the refused values, because a
-reasonless retry tends to repeat the same answer. It is an unprivileged message
-(user role for answers, a tool error result for tools) in a fixed Runtime
-envelope, never the system/instruction role:
+Feedback always carries the broken rule's text, because a reasonless retry tends
+to repeat the same answer. It is an unprivileged message (user role for answers,
+a tool error result for tools) in a fixed Runtime envelope, never the
+system/instruction role:
 
 ```json
 {"ruleFeedback": {"version": 1, "violations": [
   {"rule": "State only figures the lookup returned.", "refusedValues": ["GBP 795K"]}]}}
 ```
+
+Refused values come from the model's draft, which can echo tool or web text, so
+in the user role they are sent only for guards registered with
+`echo_values=True`; other guards send `"refusedCount": n` instead. Opt in only
+when a guard's values cannot carry instructions: `value_in_tool_output` opts in,
+because its values are regex-constrained figures such as `EUR 650`. Tool-stage
+feedback returns as a tool result and always carries the values.
 
 Guard reasons and tag settings are never included. At most 64 refused values are
 sent, and a string value longer than 2,048 characters is cut short with `…`; a
@@ -169,8 +203,12 @@ long value never turns a fixable or retryable violation into a failure.
 
 ## Turn results
 
-`TurnResult` gains `rules_evaluated`, `rules_violated` and `rules_fixed` (rule ids
-only; never rule text, settings or values) and `rules_fingerprint`.
+`TurnResult` gains `rules_evaluated`, `rules_violated`, `rules_fixed` and
+`rules_faulted` (rule ids only; never rule text, settings or values) and
+`rules_fingerprint`. A guard fault (a raise, an invalid verdict or an unusable
+repair) fails the turn with `ruleViolation`, like a violation, and its rule id
+is also listed in `rules_faulted`, so a guard bug can be told apart from a rule
+the model broke.
 `rules_violated` lists rules whose violation decided an outcome: a repair, a
 retry, a failure, or the last pass before stopping. A verdict made stale by a
 later repair in the same pass is not reported. The
@@ -179,6 +217,19 @@ stage, effective action and settings, never the line-based id, so editing above 
 rule leaves it unchanged. It is `None` without bindings. Hosts such as Harness
 can fold it into workflow fingerprints. `RuleSet.rules_fingerprint()` and
 `rules_fingerprint(bindings)` compute the same value.
+
+### Coverage
+
+`ProsaicRuntime.rule_coverage(artifact)` reports, without admission, inference or
+a turn, which declared rules name a registered guard, which do not, which are
+`prose-only`, and how many tag problems there are (ids and counts only). For a
+compiled `RuleSet`, `coverage()` lists enforced, unbound and prose-only rule ids.
+
+```python
+runtime.rule_coverage(artifact)
+# {'registered': ['agent.md:4:value_in_tool_output'], 'unregistered': [],
+#  'proseOnly': ['agent.md:9:prose-only'], 'issues': 0}
+```
 
 ## Entry points
 
@@ -215,7 +266,11 @@ Rule text, `prose-only` reasons and settings are author data and untrusted.
   absolute resolved path is passed in `context.paths` for enforcement, while the
   turn identity (`PreparedTurn` material) records the project-relative form, so
   the same project at another root, such as another machine or a resumed Harness
-  session, keeps its identity.
+  session, keeps its identity. Paths are checked at admission, but a guard
+  reads the file later, during the turn: point path settings at files outside
+  the agent's writable workspace, or have the guard snapshot the file when the
+  turn starts, so an agent with write tools cannot edit the reference it is
+  checked against.
 - **Hostile tag content cannot crash admission.** Malformed tags, huge values,
   control characters and malformed host-supplied rule shapes produce a closed
   admission code; tests cover these cases.
@@ -283,7 +338,13 @@ usable repair on a violation fails the turn.
   (B3Cognition/prosaic `9d5a02f` or later). Its package version is still 0.4.1,
   the same as the released 0.4.1 that lacks them, so the dependency floor cannot
   express this yet. With an older Core, tagged artifacts are refused and untagged
-  ones are unchanged.
+  ones are unchanged. When Core releases `parse_rules`, the release change is:
+  raise the `b3-prosaic` floor in `pyproject.toml` to that version; if it is
+  0.5.0 or later, also raise the `<0.5` cap and update
+  `tests/test_package_compatibility.py`, which asserts 0.5.0 is excluded; and
+  move `publish.yml` and the release scripts off the curated 0.4.1 wheel. CI
+  installs Core from git, so it would not catch a range that excludes the
+  release.
 - **Harness.** Harness 0.9.7 and earlier validate receipt failure codes against a
   closed `_FAILURES` set (`session_contracts.py`). `make_receipt` raises
   `StoreCorrupt('invalid conversation receipt')` **after provider spend** for any

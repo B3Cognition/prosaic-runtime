@@ -35,11 +35,29 @@ class Recorder:
     """A guard whose verdicts are scripted per call; records what it saw."""
 
     def __init__(
-        self, name, verdicts=(), *, stages=TEXT_STAGES, version='v1', settings_schema=None, path_settings=(), fixes=True
+        self,
+        name,
+        verdicts=(),
+        *,
+        stages=TEXT_STAGES,
+        version='v1',
+        settings_schema=None,
+        path_settings=(),
+        fixes=True,
+        echo_values=False,
     ):
         self.verdicts, self.calls = list(verdicts), []
         kwargs = {} if settings_schema is None else {'settings_schema': settings_schema}
-        self.guard = Guard(name, version, stages, self.check, fixes=fixes, path_settings=path_settings, **kwargs)
+        self.guard = Guard(
+            name,
+            version,
+            stages,
+            self.check,
+            fixes=fixes,
+            echo_values=echo_values,
+            path_settings=path_settings,
+            **kwargs,
+        )
 
     def check(self, stage, context):
         self.calls.append((stage, context))

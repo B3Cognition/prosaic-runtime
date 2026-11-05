@@ -1,4 +1,4 @@
-"""Review regressions: entry-point refusal, rebuilt artifacts, resources and compile-once admission."""
+"""Admission boundaries: entry-point refusal, rebuilt artifacts, resources and compile-once admission."""
 
 import warnings
 

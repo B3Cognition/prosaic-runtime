@@ -102,7 +102,7 @@ class RuleHooks:
         self.seen_results = []
         self.retry_used, self.retry_token, self.batch = False, None, 0
         self.refusals = {}
-        self.evaluated, self.violated, self.fixed = set(), set(), set()
+        self.evaluated, self.violated, self.fixed, self.faulted = set(), set(), set(), set()
 
     # Reporting ---------------------------------------------------------------
     def report(self):
@@ -115,12 +115,27 @@ class RuleHooks:
             rules_evaluated=pick(self.evaluated),
             rules_violated=pick(self.violated),
             rules_fixed=pick(self.fixed),
+            rules_faulted=pick(self.faulted),
             rules_fingerprint=self.ruleset.rules_fingerprint(),
         )
 
     # Evaluation --------------------------------------------------------------
     def _check(self, binding, stage, facts):
-        """Run one guard; ``facts`` are already encoded. Returns a Verdict, or None for a fault."""
+        """Run one guard; ``facts`` are already encoded. Returns a Verdict, or None for a fault.
+
+        Guards are trusted synchronous host code and cannot be preempted. The
+        turn's deadline and cancellation are checked before and after every
+        check, so an overrun ends the turn as soon as the guard returns.
+        A fault (raise or invalid verdict) is recorded in ``rules_faulted``,
+        so a guard bug is distinguishable from a rule the model broke.
+        """
+        verdict = self._run_guard(binding, stage, facts)
+        self.check_boundary()
+        if verdict is None:
+            self.faulted.add(binding.rule_id)
+        return verdict
+
+    def _run_guard(self, binding, stage, facts):
         self.check_boundary()
         self.evaluated.add(binding.rule_id)
         settings, paths = self._binding_facts[binding.rule_id]
@@ -147,14 +162,22 @@ class RuleHooks:
             return None
         return verdict
 
-    def _feedback(self, violations):
-        return {
-            'version': 1,
-            'violations': [
-                {'rule': binding.text, 'refusedValues': _refused(verdict.refused_values)}
-                for binding, verdict in violations
-            ],
-        }
+    def _feedback(self, violations, *, user_role=False):
+        """Feedback quotes the rule and, where safe, the refused values.
+
+        In the user role (answer stage), raw values are sent only for guards
+        that declare ``echo_values=True``; others send ``refusedCount``, since a
+        draft's values may echo tool or web text. Tool-stage feedback returns
+        as a tool result and always carries the values.
+        """
+
+        def entry(binding, verdict):
+            values = _refused(verdict.refused_values)
+            if user_role and not binding.guard.echo_values:
+                return {'rule': binding.text, 'refusedCount': len(values)}
+            return {'rule': binding.text, 'refusedValues': values}
+
+        return {'version': 1, 'violations': [entry(binding, verdict) for binding, verdict in violations]}
 
     def _take_retry(self, token=None):
         """One retry per turn. All refusals of one tool batch share it (``token``)."""
@@ -188,6 +211,7 @@ class RuleHooks:
                 if binding.action == 'fix':
                     if not accept(verdict.fixed):
                         self.violated.add(binding.rule_id)
+                        self.faulted.add(binding.rule_id)  # An unusable repair is a guard bug.
                         return STOP
                     if not _same(verdict.fixed, value):
                         current, changed = encode_fact(verdict.fixed), True
@@ -319,7 +343,9 @@ class RuleHooks:
                 {
                     'role': 'user',
                     'content': FEEDBACK
-                    + json.dumps({'ruleFeedback': self._feedback(blocking)}, ensure_ascii=False, allow_nan=False),
+                    + json.dumps(
+                        {'ruleFeedback': self._feedback(blocking, user_role=True)}, ensure_ascii=False, allow_nan=False
+                    ),
                 }
             )
             return RETRY

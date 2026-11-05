@@ -41,7 +41,10 @@ def check_required_pins(specs, registry):
     for name, spec in specs.items():
         guard = registry.get(name)
         if guard is None:
-            raise ValueError(f'required guard {name} is not registered')
+            raise ValueError(
+                f'required guard {name} is not registered; required_guards need a Python host that '
+                'registers guards (ProsaicRuntime(guards=...)), so keep them out of CLI configs'
+            )
         if spec['stage'] is not None and spec['stage'] not in guard.stages:
             raise ValueError(f'required guard {name}: pinned stage is not supported by the guard')
         if spec['settings'] is not None:

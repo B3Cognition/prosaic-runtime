@@ -1,4 +1,4 @@
-"""Second code-review regressions: call indices, batch retries, settle order, entry points, id keys."""
+"""Rule hook robustness: call indices, batch retries, settle order, repairs, entry points and id keys."""
 
 import json
 from dataclasses import replace
@@ -45,7 +45,7 @@ def batch(fx, *records):
 
 @pytest.mark.parametrize('provider', PROVIDERS)
 def test_a_refused_call_keeps_every_later_call_index_and_outcome(provider):
-    """Review finding: a refusal skipped its call index, misattributing the next call's evidence."""
+    """A refused call keeps its index, so the next call's evidence is never misattributed."""
     guard = recorder('shelf_check', Verdict(False, refused_values=('R-9',)), stages=TOOL_STAGES)
     calls = []
     with ConversationFixture(provider) as fx:
@@ -68,7 +68,7 @@ def test_a_refused_call_keeps_every_later_call_index_and_outcome(provider):
 
 @pytest.mark.parametrize('provider', PROVIDERS)
 def test_all_refusals_of_one_batch_share_the_single_retry(provider):
-    """Review finding: a second after_tool refusal in the same batch stopped the turn."""
+    """Two after_tool refusals in one batch share the single retry."""
     bad = Verdict(False, refused_values=('QA-R-1',))
     guard = recorder('shelf_check', bad, bad, stages=TOOL_STAGES)
     with ConversationFixture(provider) as fx:
@@ -85,7 +85,7 @@ def test_all_refusals_of_one_batch_share_the_single_retry(provider):
 
 @pytest.mark.parametrize('provider', PROVIDERS)
 def test_a_retry_verdict_judged_before_a_later_repair_is_rechecked(provider):
-    """Review finding: R(retry) flagged the draft, F(fix) repaired it, but R's stale verdict spent the retry."""
+    """A retry verdict made stale by a later repair in the same pass is rechecked, not acted on."""
     body = (
         '- No bold. <!-- enforce: plain_check(stage=final, on_violation=retry) -->\n'
         '- Unwrap. <!-- enforce: unwrap_check(stage=final, on_violation=fix) -->\n'
@@ -103,7 +103,7 @@ def test_a_retry_verdict_judged_before_a_later_repair_is_rechecked(provider):
 
 
 def test_run_reports_malformed_artifacts_with_the_existing_value_error():
-    """Review finding: refusal ran before validation and leaked a raw KeyError."""
+    """A malformed artifact gets the existing ValueError, never a raw KeyError."""
     bad = ProsaicArtifact('a.md', 'subagent', {}, 'Plain prose.', ({'content': 'no relPath'},))
     with ConversationFixture('openai-compatible') as fx:
         with pytest.raises(ValueError, match='invalid bundled resource'):
@@ -111,7 +111,7 @@ def test_run_reports_malformed_artifacts_with_the_existing_value_error():
 
 
 def test_unified_runtime_refuses_tagged_artifacts_before_any_backend(rejection_server, tmp_path):  # noqa: F811
-    """Review finding: the delegate's refusal surfaced as an uncertain execution needing recovery."""
+    """UnifiedRuntime refuses before any backend instead of reporting an uncertain execution."""
     from test_unified_runtime import policy, runtime
 
     url, requests, _ = rejection_server
@@ -134,7 +134,7 @@ def test_unified_runtime_refuses_tagged_artifacts_before_any_backend(rejection_s
 
 @pytest.mark.parametrize('key', ['playerId', 'recordIDs', 'record_ids', 'startDate', 'fiscal_year', 'orderReference'])
 def test_value_guard_never_reads_id_date_year_or_reference_keys_in_any_case_style(key):
-    """Review finding: camelCase id keys could vouch for a made-up amount."""
+    """camelCase id keys never vouch for a made-up amount."""
     context = GuardContext(
         stage='final',
         rule_id='a.md:1:x',
@@ -192,7 +192,7 @@ def test_input_data_is_private_to_each_check(provider):
     assert seen == [{'branch': 'Gull Reach'}]
 
 
-# Third review pass ----------------------------------------------------------------------------
+# Repairs, reporting and runtime binding ------------------------------------------------------
 
 
 @pytest.mark.parametrize('provider', PROVIDERS)
@@ -303,7 +303,7 @@ def test_guard_context_is_read_only_and_decodes_only_what_is_read():
         context.draft = 'changed'
 
 
-# Focused review of the third-pass fixes ---------------------------------------------------------
+# Repair encodability and comparison ----------------------------------------------------------
 
 
 @pytest.mark.parametrize('provider', PROVIDERS)
