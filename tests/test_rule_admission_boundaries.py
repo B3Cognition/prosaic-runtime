@@ -68,7 +68,7 @@ def test_rules_compile_once_per_preparation_and_readmission_does_not_repeat_warn
     import prosaic_runtime.rules as rules
 
     body = '- Short. <!-- enforce: shelf_check(limit=10, on_violation=retry) -->\n'
-    other = parse_rules('- Shorter. <!-- enforce: shelf_check(limit=8, on_violation=fail) -->\n', 'b.md')['rules']
+    other = parse_rules('- Short too. <!-- enforce: shelf_check(limit=10, on_violation=fail) -->\n', 'b.md')['rules']
     artifact = ProsaicArtifact.from_inspection(
         {
             'id': 'a.md',

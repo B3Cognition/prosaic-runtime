@@ -168,6 +168,14 @@ def rules_fingerprint(bindings):
     return hashlib.sha256(json.dumps(identity, separators=(',', ':')).encode('utf-8')).hexdigest()
 
 
+def _encodable(text):
+    """Strict UTF-8 bytes; a lone surrogate could never reach feedback or evidence."""
+    try:
+        return len(text.encode('utf-8'))
+    except UnicodeError as exc:
+        raise RuleAdmissionError() from exc
+
+
 def _entry(value):
     """Validate one inspection entry exactly as Core shapes it."""
     if type(value) is not dict or set(value) != _ENTRY_KEYS:
@@ -178,7 +186,6 @@ def _entry(value):
         or type(value['id']) is not str
         or type(value['text']) is not str
         or not value['text']
-        or len(value['text'].encode('utf-8')) > MAX_TEXT_BYTES
         or type(source) is not dict
         or set(source) != {'file', 'line'}
         or type(source['file']) is not str
@@ -188,6 +195,13 @@ def _entry(value):
         or type(value['settings']) is not dict
     ):
         raise RuleAdmissionError()
+    # Rule text is quoted in feedback; the id and file name appear in results and evidence.
+    if _encodable(value['text']) > MAX_TEXT_BYTES:
+        raise RuleAdmissionError()
+    _encodable(value['id'])
+    _encodable(source['file'])
+    if type(value['reason']) is str:
+        _encodable(value['reason'])
     if kind == 'prose_only':
         if (value['guard'], value['stage'], value['action'], value['settings']) != (None, None, None, {}) or (
             type(value['reason']) is not str
@@ -244,6 +258,11 @@ def _resolve_paths(guard, settings, project_root):
     return paths, portable
 
 
+def _same_settings(left, right):
+    """Settings equality as JSON sees it: 1, 1.0 and true are different values."""
+    return json.dumps(left['settings'], sort_keys=True) == json.dumps(right['settings'], sort_keys=True)
+
+
 def _effective(entries):
     """Resolve bindings per (guard, stage): different stages are separate checks."""
     effective, order, notices, prose, seen = {}, [], [], [], set()
@@ -260,11 +279,13 @@ def _effective(entries):
         if current is None:
             effective[key] = entry
             order.append(key)
-        elif (current['action'], current['settings']) == (entry['action'], entry['settings']):
+        elif current['action'] == entry['action'] and _same_settings(current, entry):
             continue  # Identical duplicate at this stage: silent.
-        elif current['action'] == entry['action']:
-            raise RuleAdmissionError()  # Same stage and action, different settings: ambiguous.
-        else:
+        elif not _same_settings(current, entry):
+            # Different settings at one stage: keeping either binding would silently drop the
+            # other's check, whatever the actions, so the composition is ambiguous.
+            raise RuleAdmissionError()
+        else:  # Same settings, different actions: the stronger action loses no check.
             stronger = entry if STRENGTH[entry['action']] > STRENGTH[current['action']] else current
             notices.append(
                 {

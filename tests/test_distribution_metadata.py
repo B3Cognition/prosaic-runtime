@@ -90,3 +90,4 @@ def test_clean_archives_ship_index_metadata_and_owned_payloads(
             assert "tests/support/tool_journal.py" in entries
             assert "docs/conversations.md" in entries
             assert "scripts/conversation_wheel_smoke.py" in entries
+            assert "scripts/rule_admission_wheel_smoke.py" in entries

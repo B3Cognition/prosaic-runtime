@@ -53,13 +53,22 @@ class ToolResults(Sequence):
     Each result is encoded once when observed and decoded only when a guard
     reads it, as a copy private to that check, so checks that never read
     results cost nothing and no check re-serializes the turn's history.
+    ``builtin[i]`` is True when result ``i`` came from a built-in tool
+    (``read_file`` and the other path-scoped tools), whose facts have a fixed
+    shape, rather than from a custom or CLI tool, whose shape is arbitrary.
     """
 
-    __slots__ = ('_encoded', '_decoded')
+    __slots__ = ('_encoded', '_decoded', '_builtin')
     __hash__ = None
 
-    def __init__(self, encoded=()):
+    def __init__(self, encoded=(), builtin=()):
         self._encoded, self._decoded = tuple(encoded), {}
+        flags = tuple(bool(flag) for flag in builtin)[: len(self._encoded)]
+        self._builtin = flags + (False,) * (len(self._encoded) - len(flags))
+
+    @property
+    def builtin(self):
+        return self._builtin
 
     def __len__(self):
         return len(self._encoded)

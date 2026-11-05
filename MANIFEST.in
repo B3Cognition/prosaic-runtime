@@ -28,3 +28,4 @@ include docs/native-execution.md
 include docs/live-reasoning-2026-11-02.md
 include docs/evidence/live-thinking-2026-11-02.json
 include scripts/native_wheel_smoke.py
+include scripts/rule_admission_wheel_smoke.py

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sys
 import time
-from prosaic_runtime.events import print
+from prosaic_runtime.events import print, text_withheld
 from collections.abc import Mapping
 
 _LLM_PREFIX = "  llm | "
@@ -16,6 +16,8 @@ def _progress(message: str) -> None:
 
 
 def _progress_llm_preview(text: str, *, limit: int = 600) -> bool:
+    if text_withheld():
+        return False  # A draft awaiting answer-stage rule checks is never shown.
     preview = text.replace("\r\n", "\n").replace("\r", "\n")
     if not preview.strip():
         return False
@@ -62,7 +64,7 @@ class OpenAIStreamPreview:
         return self._truncated
 
     def append(self, text: str) -> None:
-        if not self._enabled or self._truncated:
+        if not self._enabled or self._truncated or text_withheld():
             return
         self._buffer += text.replace("\r\n", "\n").replace("\r", "\n")
         self._flush_complete_lines()

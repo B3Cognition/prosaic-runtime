@@ -105,9 +105,12 @@
    ]
   },
   {
-   "name": "truncation also matches",
+   "name": "truncation does not match (rounding only)",
    "answer": "A grant of EUR 2.34M.",
-   "ok": true
+   "ok": false,
+   "refused": [
+    "EUR 2.34M"
+   ]
   },
   {
    "name": "rounding also matches",

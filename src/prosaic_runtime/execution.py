@@ -5,7 +5,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from .types import Invocation as CliRunRequest, Result as CliRunResult
 from .events import print, emit
-from .events import Cancelled, emit_tool_completion
+from .events import Cancelled, emit_tool_completion, released_text, text_withheld
 from .tools import ToolDeadlineExceeded
 from .terminal import binding
 from .terminal import content_digest
@@ -532,7 +532,25 @@ class ExecutionBackend:
                     continue  # Draft and unprivileged feedback were appended; budgets still apply.
             if turn_capture is not None:
                 turn_capture.assistant(turn)
-            if turn.text and not operator_previewed:
+            if text_withheld():
+                # Every answer-stage rule accepted this text. Deliver it as an untagged turn would:
+                # streamed text as deltas, each small enough for one event, then the console preview
+                # the provider's own preview would have shown (or the plain print when there is none).
+                with released_text():
+                    if turn.text and turn.streamed:
+                        limit = turn_capture.limits.max_event_bytes if turn_capture is not None else 65_536
+                        size = max(1, (limit - 128) // 6)  # A character encodes to at most 6 JSON bytes.
+                        for start in range(0, len(turn.text), size):
+                            emit('text_delta', text=turn.text[start:start + size])
+                    from .openai_compatible import _feature_enabled
+
+                    # OpenAI streams preview only with stream_preview on; without it the answer is printed.
+                    previews = not turn.streamed or _feature_enabled(llm.features, 'stream_preview', default=True)
+                    operator_previewed = turn.previewed or (
+                        previews and bool(turn.text) and _progress_llm_preview(turn.text))
+                    if turn.text and not operator_previewed:
+                        print(turn.text, flush=True)
+            elif turn.text and not operator_previewed:
                 print(turn.text, flush=True)
             _progress(
                 "final: "

@@ -10,14 +10,26 @@
   otherwise unless `allow_unbound_guards=True`), rule issues, invalid settings,
   unsupported stages, `fix` bindings on guards not declaring `fixes=True`, path
   settings outside the project and ambiguous multi-file bindings (resolved per
-  guard and stage). Turn identity records project-relative paths, so it is
+  guard and stage; different settings at one stage are refused whatever the
+  actions, so composition never drops a check). Turn identity records project-relative paths, so it is
   portable across machines. Add `RuntimeConfig.required_guards`: minimum actions,
   optionally with host-authoritative pinned settings and stage.
 - Run guards at `before_tool`, `after_tool`, `before_answer` and `final` inside
   the existing loop with `fix` (bounded, rechecked), one `retry` per turn within
   existing budgets (feedback quotes the rule and refused values as unprivileged
-  data) and `fail` (new failure code `ruleViolation`; Harness needs a matching
-  `_FAILURES` update).
+  data) and `fail` (new failure code `ruleViolation`). Guarded Harness
+  conversations are unsupported until a companion Harness release preserves
+  `required_guards`, inspection rules and guard registrations, and admits
+  `ruleViolation`.
+- Guards see successful custom, CLI and built-in tool results as facts without
+  envelope bookkeeping, so data read with `read_file` and other built-ins counts.
+  Undeliverable feedback values (oversized integers, unencodable text) are guard
+  faults, reported in `rules_faulted` before any further provider request;
+  feedback stays within 16 KB so a retry always fits. In turns with bound rules,
+  tool arguments with a lone surrogate are `invalidToolRequest` on both wires.
+- While answer-stage rules are bound, draft text is held back from observers
+  and console previews until accepted, then delivered as an untagged turn would
+  deliver it; a refused draft is never delivered.
 - Add `TurnResult.rules_evaluated`, `rules_violated`, `rules_fixed`,
   `rules_faulted` (ids only) and `rules_fingerprint`; send the model Core's
   `strip_tags` text. Add `ProsaicRuntime.rule_coverage()` and
@@ -29,8 +41,21 @@
   `run()` also refuses while `required_guards` is configured.
 - Ship four generic guards, inert until registered and bound:
   `no_wrapped_links`, `value_in_tool_output`, `args_reference_seen_ids`,
-  `strict_json`. Requires Core with `parse_rules` (9d5a02f+); older Core
-  refuses tagged artifacts and leaves untagged ones unchanged.
+  `strict_json`. `args_reference_seen_ids` checks ids of any length, refuses
+  empty ones, finds pattern ids inside text and object keys, accepts numeric
+  ids only from id fields or an id cue in the message (never counts or page
+  numbers), and takes whole-word evidence only from the message and built-in
+  file reads.
+  `value_in_tool_output` reads common formats (signs, accounting parentheses,
+  scales such as `m`/`bn`/`million`/`crore`, space and apostrophe grouping,
+  European decimals, prefixed dollars, trailing symbols), refuses ranges and
+  unreadable figures, never reads a bullet as a minus, matches by rounding only, and
+  requires the sign to agree unless `sign=magnitude`; marked figures it cannot
+  parse are refused. `no_wrapped_links` never rewrites code and handles link
+  titles and parenthesised targets. Requires Core with `parse_rules` (9d5a02f+); older
+  Core refuses tagged artifacts and leaves untagged ones unchanged, and the new
+  `scripts/rule_admission_wheel_smoke.py` release gate fails until the declared
+  Core dependency provides it.
 
 ## 0.9.12 — 2026-11-02
 

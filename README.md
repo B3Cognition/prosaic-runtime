@@ -592,7 +592,8 @@ weaken. Bound guards run before tools, after
 tools, on the draft and on the final answer, to `fix`, `retry` once within existing
 budgets, or `fail` with `ruleViolation`. `run()` refuses enforce-tagged prose
 rather than running it unchecked. Without tags nothing changes, byte for byte. See
-[rule admission](docs/rules-admission.md), including Harness compatibility.
+[rule admission](docs/rules-admission.md); guarded Harness conversations need a
+companion Harness release.
 
 ## Limits and events
 

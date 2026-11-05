@@ -91,16 +91,27 @@ def test_binding_at_an_unsupported_stage_is_refused():
         refused(fx, tagged(body), guards=[recorder('shelf_check', stages=('final',)).guard])
 
 
-def test_two_files_keep_the_stronger_binding_with_its_own_settings_and_warn_with_both_sources():
+def test_two_files_with_the_same_settings_keep_the_stronger_action_and_warn_with_both_sources():
     guard = recorder('shelf_check', settings_schema=LIMIT_SCHEMA).guard
     a = entries('- Short. <!-- enforce: shelf_check(limit=10, on_violation=retry) -->\n', 'a.md')
-    b = entries('- Shorter. <!-- enforce: shelf_check(limit=8, on_violation=fail) -->\n', 'b.md')
+    b = entries('- Short too. <!-- enforce: shelf_check(limit=10, on_violation=fail) -->\n', 'b.md')
     with pytest.warns(RuleBindingWarning) as caught:
         ruleset = compile_rules(a + b, [guard])
     assert 'a.md' in str(caught[0].message) and 'b.md' in str(caught[0].message)
     (binding,) = ruleset.bindings
-    assert (binding.action, binding.settings, binding.file) == ('fail', {'limit': 8}, 'b.md')
+    assert (binding.action, binding.settings, binding.file) == ('fail', {'limit': 10}, 'b.md')
     assert ruleset.warnings[0]['sources'] == ['a.md', 'b.md']
+
+
+@pytest.mark.parametrize('actions', [('retry', 'fail'), ('fail', 'retry'), ('fix', 'fail')])
+def test_two_files_with_different_settings_at_one_stage_are_refused_whatever_the_actions(actions):
+    """Keeping either binding would silently drop the other's check (keys=[a] vs keys=[b])."""
+    guard = recorder('shelf_check', settings_schema=LIMIT_SCHEMA).guard
+    a = entries(f'- Short. <!-- enforce: shelf_check(limit=10, on_violation={actions[0]}) -->\n', 'a.md')
+    b = entries(f'- Shorter. <!-- enforce: shelf_check(limit=8, on_violation={actions[1]}) -->\n', 'b.md')
+    with pytest.raises(RuleAdmissionError) as caught:
+        compile_rules(a + b, [guard])
+    assert caught.value.code == 'invalidArtifact'
 
 
 def test_identical_duplicates_dedupe_silently_and_ambiguous_ones_are_refused():

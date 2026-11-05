@@ -125,9 +125,12 @@ together. Each `(guard, stage)` pair is one binding, so the same guard bound at
 same stage across files:
 
 - identical bindings (same action and settings) dedupe silently;
-- different actions keep the stronger action's binding with its own settings,
-  and emit `RuleBindingWarning` naming the stage and both sources;
-- the same action with different settings is refused as ambiguous.
+- the same settings with different actions keep the stronger action, and emit
+  `RuleBindingWarning` naming the stage and both sources; no check is lost;
+- different settings are refused as ambiguous, whatever the actions: keeping
+  either binding would silently drop the other's check (`keys=[a]` with
+  `retry` in one file, `keys=[b]` with `fail` in another, would never check
+  `a`).
 
 `compile_rules(entries, guards, ...)` exposes the same compilation to hosts.
 
@@ -171,12 +174,47 @@ does, and is evidenced as `not_granted`.
 
 Only the accepted answer enters `CompletedTurn`. A rejected draft and its
 feedback stay out of history; `providerAttempts` records the extra request.
-Streamed text of a rejected or not-yet-repaired draft was already delivered as
-provisional events; `TurnResult` carries the authoritative answer.
+
+**Drafts are held back.** While any `before_answer` or `final` rule is bound,
+model text is not streamed to observers (`text_delta`/`text` events) or
+previewed on the operator console until every answer-stage rule has accepted
+it. The accepted (possibly repaired) answer is then delivered as an untagged
+turn would deliver it: streamed turns get `text_delta` events (in chunks that
+fit `TurnLimits.max_event_bytes`) and the console its usual preview; a refused
+or failed draft is never delivered,
+so a rule such as "share no contact details" also keeps the draft out of
+observers and logs. Text that accompanies tool calls in such a turn is not
+streamed either; it stays in `CompletedTurn`. Turns without answer-stage rules
+stream as before.
+
+In a turn with bound rules, tool arguments that are not strictly encodable (a
+lone surrogate) are a malformed model request on both wires
+(`invalidToolRequest`), never a guard fault.
 
 Guards see as `tool_results` only what the model saw: a result replaced by retry
 feedback is absent, and a repaired result appears in its repaired form. The
-result under check at `after_tool` is `tool_result`, not yet in `tool_results`.
+result under check at `after_tool` is `tool_result` (the raw payload), not yet
+in `tool_results`.
+
+Each successful result enters `tool_results` as a fact without envelope
+bookkeeping, so status fields, offsets, counts, sizes and line numbers never
+pass as business facts. Errors, refusals, skipped files and unknown shapes
+contribute nothing; effect evidence is unchanged.
+
+| Tool | Fact |
+| --- | --- |
+| Custom and CLI tools | the `result` value |
+| `read_file` | `{"path", "lines"}`: content lines without their `N: ` prefixes |
+| `read_many_files` | `{"files": [{"path", "lines"}]}` for files read successfully |
+| `grep_files` | `{"matches": [{"path", "text"}]}` |
+| `grep_context` | `{"matches": [{"path", "lines"}]}` |
+| `list_files` | `{"paths": [path, ...]}` |
+| `list_tree_with_sizes` | `{"paths": [path, ...]}` |
+| `sha256_file` | `{"path", "sha256"}` |
+| `write_file`, `edit_file` | none: their only data is the model's own input |
+
+A line without its `N: ` prefix is a fragment and is dropped, as is the last
+line of a `read_many_files` file whose content a character budget may have cut.
 
 ### Retry feedback
 
@@ -197,16 +235,33 @@ when a guard's values cannot carry instructions: `value_in_tool_output` opts in,
 because its values are regex-constrained figures such as `EUR 650`. Tool-stage
 feedback returns as a tool result and always carries the values.
 
-Guard reasons and tag settings are never included. At most 64 refused values are
-sent, and a string value longer than 2,048 characters is cut short with `…`; a
-long value never turns a fixable or retryable violation into a failure.
+Guard reasons and tag settings are never included. The whole envelope stays
+within 16 KB, so a retry always fits the turn's limits: at most 64 refused
+values per rule, a string value longer than 2,048 characters is cut short with
+`…`, rule text is quoted up to 512 characters (halved, down to 16, when many
+rules are refused together; the full rule is in the instructions), and values
+fill the remaining budget in order. An entry that could not carry every value
+also states `"refusedCount": n`; if even the shortened rules do not fit, the
+last ones are left out and `"omittedViolations": n` counts them. Long or numerous values never turn a fixable or
+retryable violation into a failure.
+
+Refused values are validated in the exact form feedback delivers, while the
+check is still inside the guard-fault boundary. A value that could not be
+delivered is a guard fault: a type other than string, integer or finite float;
+an integer of more than 2,048 digits (or past the interpreter's conversion
+limit); or
+text that is not strictly encodable, such as a lone surrogate. The turn stops
+with `ruleViolation` and the rule in `rules_faulted`, before any further
+provider request; an `after_tool` fault keeps the executed call's effect
+evidence. Admission likewise refuses rule text, ids or file names that are not
+strictly encodable, since they appear in feedback and results.
 
 ## Turn results
 
 `TurnResult` gains `rules_evaluated`, `rules_violated`, `rules_fixed` and
 `rules_faulted` (rule ids only; never rule text, settings or values) and
-`rules_fingerprint`. A guard fault (a raise, an invalid verdict or an unusable
-repair) fails the turn with `ruleViolation`, like a violation, and its rule id
+`rules_fingerprint`. A guard fault (a raise, an invalid verdict, undeliverable
+feedback values or an unusable repair) fails the turn with `ruleViolation`, like a violation, and its rule id
 is also listed in `rules_faulted`, so a guard bug can be told apart from a rule
 the model broke.
 `rules_violated` lists rules whose violation decided an outcome: a repair, a
@@ -296,35 +351,92 @@ default; each is inert until a host registers it and prose binds it.
 
 - `no_wrapped_links` (`before_answer`, `final`; `fixes=True`): a complete
   `[text](target)` enclosed in `**`, `__`, `*`, `_` or backtick markers, which
-  Markdown-subset renderers show as raw text. The repair removes one wrapping
-  layer per pass, so `***[a](/b)***` unwraps within the fix bound. Bare URLs,
-  `<autolinks>`, reference-style links and target form are out of scope.
+  Markdown-subset renderers show as raw text. A link may carry a title
+  (`[a](/b "Title")`) and its target may hold balanced parentheses
+  (`/wiki/Shelf_(north)`) or be written `<...>`. The repair removes one
+  wrapping layer per pass, so `***[a](/b)***` unwraps within the fix bound.
+  Code is never rewritten: fenced code blocks and inline code spans are left
+  alone, except a single-backtick span that is exactly one link, the wrapped
+  form itself. Bare URLs, `<autolinks>`, reference-style links and target form
+  are out of scope.
 - `value_in_tool_output` (`before_answer`, `final`; no repair): stated figures
-  must come from this turn's tool results. In the answer it checks only
-  currency-marked amounts and multiples written with `x`; bare numbers are not
-  checked (a documented false negative). Sources are numeric fields, text fields
-  that are wholly a formatted number, and currency- or x-marked amounts inside
-  longer text. Keys whose last word is `id`, `ids`, `reference`, `date` or `year`
-  are never read, in any case style (`id`, `homes_id`, `playerId`, `recordIDs`,
-  `startDate`, `fiscal_year`); words that merely contain those letters (`paid`,
-  `valid`, `identity`) are read. A figure matches when a source rounds or
-  truncates to it at its written precision, ignoring sign. A currency named by the
-  data (a `currency`/`currencyCode` key on the object or an ancestor, or a text
-  amount's marker) must equal the stated one. Markers default to a vendored
-  common subset of ISO 4217 codes (`DEFAULT_CODES`, not the full list) plus
-  `€ £ $` (read as EUR, GBP, USD), written before the number; the `currencies`
-  setting extends them. So `ISO 9001`, `TOP 5` or `API 3` is never read as an
-  amount. The subset omits codes that collide with ordinary words (`PHP`, `ALL`,
-  `TOP`); add them through `currencies` when the data uses them. Known limit: `$`
-  always means USD.
-- `args_reference_seen_ids` (`before_tool`; no repair): settings `keys` (required)
-  name argument keys that hold ids, at any depth; optional `pattern` (a glob such
-  as `REC-*`) marks id-shaped values under any key. Each id must have been seen in
-  this turn's tool results, the user message (as a delimited token) or host input
-  data. Conversation history never counts. Numbers are read canonically on both
-  sides: a whole-number float is its integer text (`4242.0` is `4242`, which JSON
-  Schema also accepts as an integer); a bool or a non-whole float under an id key
-  is refused.
+  must come from this turn's tool results. In the answer it checks
+  currency-marked figures and multiples written with `x`; bare numbers are not
+  checked (a documented false negative), nor is a code written after its number
+  (`5M EUR`).
+  - **Markers.** The ISO codes of `DEFAULT_CODES` (a vendored common subset,
+    not the full list) in upper case, or in lower or title case except the
+    codes that are ordinary words (`TRY`, `MAD`, `PEN`, `COP`, `RON`, `CAD`,
+    `RUB`), so `try 5 times` is never an amount; codes added through the
+    `currencies` setting, as written; `€ £ $` (read as EUR, GBP, USD; `$`
+    always means USD) before or after the number (`€12`, `12 €`); and the
+    prefixed dollars `US$ A$ AU$ C$ CA$ HK$ NZ$ S$ R$ MX$`. The subset omits
+    codes that collide with ordinary words (`PHP`, `ALL`, `TOP`); add them
+    through `currencies` when the data uses them. `ISO 9001`, `TOP 5` or
+    `API 3` is never read as an amount.
+  - **Figures.** Up to 32 characters of spacing, Markdown emphasis, code
+    ticks or `~`/`≈` may stand between marker and number (`EUR **5M**`); a
+    line break only when the digits follow directly (`EUR` then `999M` on the
+    next line), so a bullet on the next line is never part of the figure. Digits may group thousands with `,`
+    `.` `'` `’` or spaces (`EUR 1 000 000`, `CHF 1'000`) and use `.` or `,`
+    for decimals (`EUR 1.234,56`); `1,500` is tried both ways, and a leading
+    point is a decimal (`$.75`). Scales: `k`, `m`/`M`/`mm`/`mn`/`mln`/`mio`/
+    `million`/`Millionen`, `b`/`B`/`bn`/`bln`/`mrd`/`billion`/`Milliarde(n)`,
+    `T`/`tn`/`trillion`, `hundred`, `thousand`, `lakh` and `crore`; a letter
+    touches the digits (`€5m`) or, in upper case, follows one space (`€5 M`);
+    a word may follow spacing, emphasis or a hyphen (`€1.4 million`,
+    `**€1.4** million`, `$5-million`). A marked figure this grammar cannot read
+    (`EUR 1.2.3`, `EUR 12abc`, `$5_000`) or a range (`$3-5m`, `$3 to 5m`) is
+    refused, never skipped or read as a prefix.
+  - **Signs.** A sign may stand before the number, or before the marker when
+    it touches the marker (`-$5`, `-**$5**`) and follows no word character, so
+    a Markdown bullet (`- $5m`) or a range (`$10-$20`) is never a minus (ASCII
+    plus and minus, the Unicode minus, en and em dashes, hyphens);
+    accounting parentheses after the marker (`$(12)`) are negative, while
+    parentheses around the whole amount (`(EUR 12)`) are prose. By default the
+    sign must agree with the source, so a loss of −12M does not support a
+    stated `EUR 12M`; the setting `sign=magnitude` compares magnitudes instead.
+    A hyphenated code such as `EUR-2024` reads as a negative amount.
+  - **Sources.** Numeric fields, text fields that are wholly a figure, and
+    marked figures or x-multiples inside longer text. Keys whose last word is
+    `id`, `ids`, `reference`, `date`, `year`, `path`, `paths`, `url` or `urls`,
+    and `sha256`, are never read, in any case style (`id`, `homes_id`,
+    `playerId`, `recordIDs`, `startDate`, `fiscal_year`); words that merely
+    contain those letters (`paid`, `valid`, `identity`) are read. A currency
+    named by the data (a `currency`/`currencyCode` key on the object or an
+    ancestor, or a text figure's marker) must equal the stated one.
+  - **Matching.** A figure matches a source that rounds to it, half up or half
+    even, at its written precision and scale; truncation does not count, so
+    `EUR 1M` is not supported by 1.9M.
+- `args_reference_seen_ids` (`before_tool`; no repair): settings `keys`
+  (required) name argument keys that hold ids, at any depth; optional `pattern`
+  (a glob such as `REC-*`) marks id-shaped values under any key: a whole value
+  without whitespace, a word inside longer text (`"id REC-999"`,
+  `"close INV.2024.77"`, `"(ORD/12)"`), or an object key
+  (`{"REC-9": {...}}`).
+  Every referenced value is checked, whatever its length. An empty or
+  whitespace-only string is never an id and is refused, whatever the inputs
+  contain; so is a bool or a non-whole float under an id key. A whole-number
+  float is its integer text (`4242.0` is `4242`, which JSON Schema also accepts
+  as an integer). An id is seen this turn when:
+  - a text id equals any value in the tool results (as guards see them, above)
+    or host input data;
+  - a numeric id equals a value under an id key there: a key named in `keys`,
+    or whose last word is `id`, `ids`, `ref`, `refs`, `reference` or
+    `references`. A count, page number or price is never evidence of a numeric
+    id;
+  - a text id appears as a whole word (delimited by anything other than a
+    letter, digit, `_`, `-` or combining mark, in any script, after NFC
+    normalization) in the user message or in file lines read by built-in tools
+    (`ToolResults.builtin`); a custom result's `text` or `lines` field is not
+    file text. Ids without a letter or digit never match this way;
+  - a numeric id appears in the user message right after an id cue: `#12`,
+    `id 12`, `ID: 12`, or a word of an id key (`record 12` or `records 12` for
+    `recordId`). `Page 1` is not a reference to id 1.
+
+  Object keys of results or input data, prose inside custom tool results and
+  conversation history never count. Each text is searched separately and the
+  work per check is bounded; a search past the bound fails closed.
 - `strict_json` (`before_answer`, `final`; no repair): the answer is one strict
   JSON document; duplicate keys, NaN/Infinity, code fences and prose fail.
 
@@ -345,14 +457,38 @@ usable repair on a violation fails the turn.
   move `publish.yml` and the release scripts off the curated 0.4.1 wheel. CI
   installs Core from git, so it would not catch a range that excludes the
   release.
-- **Harness.** Harness 0.9.7 and earlier validate receipt failure codes against a
-  closed `_FAILURES` set (`session_contracts.py`). `make_receipt` raises
-  `StoreCorrupt('invalid conversation receipt')` **after provider spend** for any
-  code outside it, including `ruleViolation`. Hosts binding `fail` or `retry` rules
-  under Harness need a Harness release that adds `ruleViolation` to `_FAILURES`, a
-  one-line companion change. `fix` rules that succeed and untagged agents never
-  produce the code. The new `TurnResult` fields have defaults; Harness constructs
-  and checks `TurnResult` by type and existing fields only, so they are safe.
+- **Release gate.** `scripts/rule_admission_wheel_smoke.py` runs a tagged agent
+  from the installed wheels: coverage, an enforced retry, tag stripping and an
+  unregistered `fail` guard refused. It fails unless the installed Core provides
+  `parse_rules`. Release qualification (`publish.yml`, isolated-wheel and
+  dependency-floor environments) installs Core from the curated upstream wheel
+  that satisfies the declared dependency, so it cannot pass until the Core
+  release and the steps above land. PR CI runs the same script against the
+  pinned Core candidate.
+- **Harness: guarded conversations are unsupported** until a companion Harness
+  release. Against Harness main `797d03c` (0.9.7), its conversation path drops
+  enforcement requirements before Runtime sees them:
+  - `factory._config_payload` and `_config_from_json` do not carry
+    `required_guards`, so a rebuilt `RuntimeConfig` has none and an untagged
+    agent is admitted;
+  - `factory._artifact_data` drops `rules` and `ruleIssues`, so rules supplied
+    by inspection from composed files are lost when the primary body is
+    untagged;
+  - conversation bindings build `ProsaicRuntime(config, custom_tools=...)`
+    without `guards`, so a tagged agent is refused rather than enforced;
+  - receipt failure codes are a closed `_FAILURES` set
+    (`session_contracts.py`), so `make_receipt` raises
+    `StoreCorrupt('invalid conversation receipt')` for `ruleViolation` **after
+    provider spend**.
+
+  The companion change must preserve the effective `required_guards` and the
+  complete inspection data (`rules`, `ruleIssues`) through snapshots, admission
+  and readmission; carry host guard registrations into every Runtime it builds,
+  binding guard identity and version wherever execution identity needs it
+  (`rules_fingerprint` is available for this); and admit and persist
+  `ruleViolation`. Untagged agents are unaffected. The new `TurnResult` fields
+  have defaults; Harness constructs and checks `TurnResult` by type and existing
+  fields only, so they are safe.
 - `ProsaicRuntime.capabilities` includes `rule_admission_v1`.
 
 ## Notes for Core maintainers

@@ -857,15 +857,20 @@ class ProsaicRuntime:
                     backend.turn_capture = _turn_capture
                     _turn_capture.backend = backend
                     ruleset = _turn_prepared.get('_ruleSet')
+                    answer_rules = False
                     if ruleset is not None and any(binding.bound for binding in ruleset.bindings):
                         from .rule_hooks import RuleHooks
                         backend.rule_hooks = _turn_prepared['_ruleHooks'] = RuleHooks(
                             ruleset, message=_turn_prepared['message'], input_data=_turn_prepared['inputData'],
                             budget=_budget, check_boundary=backend.check_boundary)
-                    result = backend._run_prompt_with_tools(request, metadata,
-                        _feature_enabled(endpoint.features, 'streaming', default=True),
-                        initial_messages=_turn_prepared['messages'],
-                        execution_options={'compact_tool_results': False}, turn_capture=_turn_capture)
+                        answer_rules = any(b.bound for b in ruleset.at('before_answer') + ruleset.at('final'))
+                    from .events import withheld_text
+                    # A draft that answer-stage rules may refuse is never previewed or streamed early.
+                    with withheld_text(answer_rules):
+                        result = backend._run_prompt_with_tools(request, metadata,
+                            _feature_enabled(endpoint.features, 'streaming', default=True),
+                            initial_messages=_turn_prepared['messages'],
+                            execution_options={'compact_tool_results': False}, turn_capture=_turn_capture)
                 # The OpenAI text-only path returns Result directly and bypasses
                 # _post_chat_turn. Account its terminal usage once, after Capture
                 # has persisted the response context, preserving the returned text.
