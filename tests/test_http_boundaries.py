@@ -98,7 +98,11 @@ def test_dispatch_timeout_is_refreshed_after_callback(monkeypatch, boundary):
 
 
 @pytest.fixture
-def drip_server(request):
+def drip_server(request, monkeypatch):
+    # Synthetic loopback traffic must not consult host/system proxy discovery.
+    # On macOS that work can consume the invocation deadline before dispatch.
+    monkeypatch.setenv('no_proxy', '*')
+    monkeypatch.setenv('NO_PROXY', '*')
     requests, stop, sent = [], Event(), Event()
     status = getattr(request, 'param', 200)
 
@@ -155,6 +159,7 @@ def test_partial_openai_body_obeys_boundary(drip_server, streaming, accounted, s
     url, requests, sent = drip_server
     recorder = MemoryRecorder() if accounted else None
     runner = runtime(EndpointConfig(url, 'small', features={'streaming': streaming}), accounting=recorder)
+
     def observer(event):
         if event['event'] == 'provider_request_started' and startup_delay:
             time.sleep(startup_delay)  # Reproduce dispatch startup on a loaded runner.
