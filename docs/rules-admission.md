@@ -362,15 +362,18 @@ default; each is inert until a host registers it and prose binds it.
 - `value_in_tool_output` (`before_answer`, `final`; no repair): stated figures
   must come from this turn's tool results. In the answer it checks
   currency-marked figures and multiples written with `x`; bare numbers are not
-  checked (a documented false negative), nor is a code written after its number
-  (`5M EUR`).
+  checked (a documented false negative). Codes may also follow their number
+  (`5M EUR`); suffix `euro`/`euros` denotes EUR and `cent`/`cents` denotes
+  hundredths without inventing a currency code. These fixed words are
+  case-insensitive whole words, so `centipedes` and `European` are not markers.
   - **Markers.** The ISO codes of `DEFAULT_CODES` (a vendored common subset,
     not the full list) in upper case, or in lower or title case except the
     codes that are ordinary words (`TRY`, `MAD`, `PEN`, `COP`, `RON`, `CAD`,
     `RUB`), so `try 5 times` is never an amount; codes added through the
     `currencies` setting, as written; `€ £ $` (read as EUR, GBP, USD; `$`
     always means USD) before or after the number (`€12`, `12 €`); and the
-    prefixed dollars `US$ A$ AU$ C$ CA$ HK$ NZ$ S$ R$ MX$`. The subset omits
+    prefixed dollars `US$ A$ AU$ C$ CA$ HK$ NZ$ S$ R$ MX$` (also accepted as
+    suffixes). The subset omits
     codes that collide with ordinary words (`PHP`, `ALL`, `TOP`); add them
     through `currencies` when the data uses them. `ISO 9001`, `TOP 5` or
     `API 3` is never read as an amount.
@@ -388,6 +391,10 @@ default; each is inert until a host registers it and prose binds it.
     `**€1.4** million`, `$5-million`). A marked figure this grammar cannot read
     (`EUR 1.2.3`, `EUR 12abc`, `$5_000`) or a range (`$3-5m`, `$3 to 5m`) is
     refused, never skipped or read as a prefix.
+    A shared marker cannot hide a preceding suffix amount (`1.20 EUR` followed
+    by a newline and `30 days`). Conflicting units on one number and unsupported
+    compounds such as `120 cents USD` are refused and give no source evidence;
+    use a supported single-marker spelling or trusted currency metadata.
   - **Signs.** A sign may stand before the number, or before the marker when
     it touches the marker (`-$5`, `-**$5**`) and follows no word character, so
     a Markdown bullet (`- $5m`) or a range (`$10-$20`) is never a minus (ASCII
@@ -397,6 +404,8 @@ default; each is inert until a host registers it and prose binds it.
     sign must agree with the source, so a loss of −12M does not support a
     stated `EUR 12M`; the setting `sign=magnitude` compares magnitudes instead.
     A hyphenated code such as `EUR-2024` reads as a negative amount.
+    A line-start Markdown `- ` bullet before a suffixed amount is positive;
+    a touching sign (`-120 cents`) is negative.
   - **Sources.** Numeric fields, text fields that are wholly a figure, and
     marked figures or x-multiples inside longer text. Keys whose last word is
     `id`, `ids`, `reference`, `date`, `year`, `path`, `paths`, `url` or `urls`,
@@ -404,10 +413,16 @@ default; each is inert until a host registers it and prose binds it.
     `playerId`, `recordIDs`, `startDate`, `fiscal_year`); words that merely
     contain those letters (`paid`, `valid`, `identity`) are read. A currency
     named by the data (a `currency`/`currencyCode` key on the object or an
-    ancestor, or a text figure's marker) must equal the stated one.
+    ancestor, or a text figure's marker) must equal the stated one. A cent text
+    source inherits an enclosing currency field when present. Money text does
+    not prove an x-multiple, and an x-multiple does not prove a monetary amount.
   - **Matching.** A figure matches a source that rounds to it, half up or half
     even, at its written precision and scale; truncation does not count, so
     `EUR 1M` is not supported by 1.9M.
+  - **Upgrade identity.** Runtime 0.9.15 advances this guard's version to
+    `value-in-tool-output-v2`. Its rules fingerprint changes; hosts must
+    explicitly readmit affected bindings rather than silently resume under a
+    different scanner. Other guards and untagged execution are unchanged.
 - `args_reference_seen_ids` (`before_tool`; no repair): settings `keys`
   (required) name argument keys that hold ids, at any depth; optional `pattern`
   (a glob such as `REC-*`) marks id-shaped values under any key: a whole value

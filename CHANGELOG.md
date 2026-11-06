@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.9.15 — 2026-11-06
+
+- Enforce suffix currency codes, euro/euros and cent/cents in
+  `value_in_tool_output`; cent(s) is a hundredth, not a major unit or x-multiple.
+- Use the same bounded answer/source scanner, preserving strict signs,
+  currency identity, precision and malformed-source refusal. Overlapping markers
+  cannot hide an unsupported amount; ambiguous compound units give no evidence.
+- Keep whole-word and Markdown-bullet controls. Add unit and both-wire fee retry
+  regressions and run them against the transported wheel in every release cell.
+- Advance the value guard to `value-in-tool-output-v2`, so affected bindings
+  require explicit readmission. Other guards and untagged behavior stay unchanged.
+- Keep Core 0.5.0 and PostgreSQL recorder 0.3.0; publish only qualified Runtime
+  bytes. See [release scope](docs/release-0.9.15.md).
+
 ## 0.9.14 — 2026-11-06
 
 - Add opt-in rule admission for conversation turns, consuming Prosaic Core's
