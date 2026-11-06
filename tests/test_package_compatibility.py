@@ -17,7 +17,7 @@ def test_wheel_metadata():
 
     for package, name, version in (
             (prosaic, "b3-prosaic", "0.5.0"),
-            (prosaic_runtime, "b3-prosaic-runtime", "0.9.13"),
+            (prosaic_runtime, "b3-prosaic-runtime", "0.9.14"),
             (prosaic_runtime_postgres, "b3-prosaic-runtime-postgres", "0.3.0")):
         owner = metadata.distribution(name)
         assert owner.version == package.__version__ == version
@@ -34,7 +34,7 @@ def test_wheel_metadata():
     adapter = {Requirement(raw).name: Requirement(raw)
                for raw in metadata.requires("b3-prosaic-runtime-postgres")}
     assert "0.9.2" in adapter["b3-prosaic-runtime"].specifier
-    assert "0.9.13" in adapter["b3-prosaic-runtime"].specifier
+    assert "0.9.14" in adapter["b3-prosaic-runtime"].specifier
     assert "0.10.0" not in adapter["b3-prosaic-runtime"].specifier
     assert "3.2.1" in adapter["psycopg"].specifier
     assert "3.2.0" not in adapter["psycopg"].specifier
