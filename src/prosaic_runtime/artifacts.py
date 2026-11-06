@@ -14,6 +14,10 @@ class ProsaicArtifact:
     frontmatter: dict
     body: str
     resources: tuple[dict, ...] = ()
+    # Inspection's inert enforcement entries (Core 0.5.0+), kept only when
+    # inspection supplied them. Never part of the digest: tags live in body.
+    rules: tuple[dict, ...] | None = None
+    rule_issues: tuple[dict, ...] | None = None
 
     @classmethod
     def from_inspection(cls, data: Mapping):
@@ -32,12 +36,34 @@ class ProsaicArtifact:
             path = Path(item["relPath"])
             if path.is_absolute() or ".." in path.parts:
                 raise ValueError("resource path escapes bundle")
-        return cls(data["id"], data["type"], dict(data["frontmatter"]), data["body"], tuple(resources))
+        rules = issues = None
+        if "rules" in data or "ruleIssues" in data:
+            rules, issues = data.get("rules", []), data.get("ruleIssues", [])
+            if not isinstance(rules, list) or not isinstance(issues, list):
+                raise ValueError("inspection rules and ruleIssues must be lists")
+            try:  # Private JSON copies; shapes are validated at rule admission.
+                rules, issues = tuple(json.loads(json.dumps(rules))), tuple(json.loads(json.dumps(issues)))
+            except (TypeError, ValueError, RecursionError) as exc:
+                raise ValueError("inspection rules must be JSON data") from exc
+        return cls(data["id"], data["type"], dict(data["frontmatter"]), data["body"], tuple(resources),
+                   rules, issues)
+
+    def inspection(self) -> dict:
+        """Owned inspection-shaped document; rule keys only when inspection had rules."""
+        document = {"id": self.id, "type": self.type, "frontmatter": self.frontmatter, "body": self.body,
+                    "resources": list(self.resources)}
+        if self.rules or self.rule_issues:
+            document.update(rules=list(self.rules or ()), ruleIssues=list(self.rule_issues or ()))
+        return document
 
     def render(self, arguments: str = "") -> str:
-        body = self.body.replace("{{args}}", arguments) if "{{args}}" in self.body else self.body + ("\n\n## Arguments\n" + arguments if arguments else "")
+        # Core's strip_tags returns an untagged text as the same object.
+        from .rules import strip_for_model
+        text = strip_for_model(self.body)
+        body = text.replace("{{args}}", arguments) if "{{args}}" in text else text + ("\n\n## Arguments\n" + arguments if arguments else "")
         for resource in self.resources:
-            body += f"\n\n## Bundled resource: {resource['relPath']}\n{resource['content']}"
+            content = strip_for_model(resource['content']) if resource['relPath'].lower().endswith('.md') else resource['content']
+            body += f"\n\n## Bundled resource: {resource['relPath']}\n{content}"
         return body
 
     @property

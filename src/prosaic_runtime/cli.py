@@ -184,7 +184,9 @@ def main(argv=None):
         with Progress(args.quiet or args.events) as progress:
             sink = emit if args.events else progress
             if mode == 'preflight':
-                runtime = ProsaicRuntime(config, source=args.source)
+                # Preflight checks tool availability only and never runs prose; host-only
+                # required_guards (enforced by Python hosts that register guards) do not apply.
+                runtime = ProsaicRuntime(replace(config, required_guards={}), source=args.source)
                 report = runtime.preflight(args.agent, all_tools=args.all_tools, cwd=args.cwd, policy=policy)
                 if args.output == 'text':
                     print(f"preflight: {'passed' if report['ok'] else 'failed'}")

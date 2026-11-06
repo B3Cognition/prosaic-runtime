@@ -85,8 +85,8 @@ class BoundedToolRegistry:
             raise InvalidToolRequest() from None
         return tuple(admitted)
 
-    def execute_message(self, tool_call):
-        self.last_outcome = ToolOutcome('unclassified')
+    def _admit_attempt(self, tool_call):
+        """Shared preamble: boundary, attempt budget and the call's execution index."""
         self.check_boundary()
         if self.before_tool is not None:
             self.before_tool()
@@ -94,6 +94,22 @@ class BoundedToolRegistry:
         name = function.get('name') if isinstance(function, dict) else None
         options = (self.execution_options() if self.execution_options is not None and
                    (self.index_all_calls or name in self.custom) else {})
+        return name, options
+
+    def refuse_message(self, tool_call, payload):
+        """A host rule refused this call: it counts and is indexed like a denied call, but never runs."""
+        self.last_outcome = ToolOutcome('not_granted')
+        _, options = self._admit_attempt(tool_call)
+        message = {'role': 'tool', 'tool_call_id': str(tool_call.get('id') or ''),
+                   'content': json.dumps(payload, ensure_ascii=False, allow_nan=False)}
+        if self.index_all_calls and callable(options.get('on_completion')):
+            options['on_completion'](json.loads(message['content']))
+        return message
+
+    def execute_message(self, tool_call):
+        self.last_outcome = ToolOutcome('unclassified')
+        name, options = self._admit_attempt(tool_call)
+        function = tool_call.get('function')
         if isinstance(name, str) and name not in self.custom:
             message = self.builtin.execute_message(tool_call)
             self.last_outcome = ToolOutcome('not_granted' if name not in self.allowed else

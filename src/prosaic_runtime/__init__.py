@@ -59,6 +59,12 @@ __all__ += ["NativeProfile", "ProfilePool", "NativePolicy", "NativeRuntimeConfig
 from .native import NativeRuntime
 __all__ += ["NativeRuntime"]
 
+from .rules import (Guard, GuardContext, RuleAdmissionError, RuleBindingWarning, RuleSet, Verdict,
+                    compile_rules, rules_fingerprint)
+from .guards import generic_guards
+__all__ += ["Guard", "GuardContext", "RuleAdmissionError", "RuleBindingWarning", "RuleSet", "Verdict",
+            "compile_rules", "rules_fingerprint", "generic_guards"]
+
 from .unified_config import PoolPolicy, UnifiedRuntimeConfig
 from .unified import UnifiedRuntime
 __all__ += ["PoolPolicy", "UnifiedRuntimeConfig", "UnifiedRuntime"]

@@ -92,8 +92,16 @@ class RuntimeConfig:
     limits: RunLimits = field(default_factory=RunLimits)
     tool_directories: tuple[str, ...] = ()
     cli_sandbox: CliSandboxConfig = field(default_factory=CliSandboxConfig)
+    # Host policy: guard name -> minimum action, or {action, settings?, stage?} with
+    # host-authoritative pins. Prose can tighten the action, never weaken or change a pin.
+    required_guards: dict[str, object] = field(default_factory=dict)
 
     def __post_init__(self):
+        import copy
+        from .rules import required_guard_specs
+        required = {} if self.required_guards is None else self.required_guards  # YAML null means none.
+        required_guard_specs(required)  # Raises ValueError on any invalid entry.
+        object.__setattr__(self, 'required_guards', copy.deepcopy(dict(required)))
         if self.default_profile not in self.profiles:
             raise ValueError("default_profile does not name a configured profile")
         if any(profile not in self.profiles for profile in self.routes.values()):
@@ -116,7 +124,8 @@ class RuntimeConfig:
             raw = yaml.safe_load(path.read_text(encoding="utf-8"))
             if not isinstance(raw, dict):
                 raise ValueError("expected a mapping")
-            if set(raw) - {"profiles", "routes", "default_profile", "allowed_tools", "limits", "tool_directories", "cli_sandbox"}:
+            if set(raw) - {"profiles", "routes", "default_profile", "allowed_tools", "limits", "tool_directories",
+                           "cli_sandbox", "required_guards"}:
                 raise ValueError("unknown configuration keys")
             if not isinstance(raw.get("profiles"), dict) or not isinstance(raw.get("routes", {}), dict):
                 raise ValueError("profiles and routes must be mappings")
@@ -141,6 +150,7 @@ class RuntimeConfig:
                 tool_directories=tuple(str((path.resolve().parent / p).resolve()) for p in directories),
                 cli_sandbox=CliSandboxConfig(sandbox.get('mode', 'off'),
                     tuple(str((path.resolve().parent / p).resolve()) for p in roots)),
+                required_guards=raw.get('required_guards', {}),
             )
         except (yaml.YAMLError, KeyError, TypeError, ValueError, AttributeError) as exc:
             raise ValueError(f"Invalid runtime configuration {path}: {exc}") from exc

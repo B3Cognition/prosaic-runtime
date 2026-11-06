@@ -48,6 +48,9 @@ Limits can leave only a digest breadcrumb with artifactIncluded=false. Preserve
 actual incurred accounting; neither a breadcrumb nor successful tool status is
 an accepted result.
 
+[Rule admission](rules-admission.md#terminal-completion) shares this boundary;
+a final-stage guard could only fail, never retry or fix, a host-owned terminal output.
+
 Runtime owns execution; hosts own result persistence and admission. Use Harness
 0.9.6's receipt-before-validation contract for durable workflows. See the
 [Harness integration guide](https://github.com/B3Cognition/prosaic-harness/blob/v0.9.6/docs/terminal-completion.md)

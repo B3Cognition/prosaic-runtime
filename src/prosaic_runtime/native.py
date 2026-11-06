@@ -95,6 +95,8 @@ class NativeRuntime:
                       or self.config.profiles[name].permission_mode == 'workspace-write')
         if not names:
             raise ValueError('no profile can grant the requested native permission')
+        from .rules import refuse_unenforced
+        refuse_unenforced(artifact)  # Native CLIs have no rule hooks: fail closed.
         prompt = artifact.render(arguments)
         if len(prompt.encode('utf-8')) > policy.max_input_bytes:
             raise ValueError('artifact and arguments exceed max_input_bytes')

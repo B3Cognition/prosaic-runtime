@@ -6,6 +6,32 @@ from .telemetry import observe, critical_hook_failed
 
 _sink = ContextVar("prosaic_event_sink", default=None)
 _cancel = ContextVar("prosaic_cancel", default=None)
+# Set while answer-stage rules are bound: draft text is not shown until a rule check accepts it.
+_withheld = ContextVar("prosaic_withheld_text", default=False)
+
+
+@contextmanager
+def withheld_text(active=True):
+    """Hold model text back from text events and operator previews (no-op unless active)."""
+    token = _withheld.set(bool(active))
+    try:
+        yield
+    finally:
+        _withheld.reset(token)
+
+
+def text_withheld():
+    return _withheld.get()
+
+
+@contextmanager
+def released_text():
+    """Deliver accepted text: events and previews inside this block are not withheld."""
+    token = _withheld.set(False)
+    try:
+        yield
+    finally:
+        _withheld.reset(token)
 
 
 class Cancelled(RuntimeError):
@@ -20,6 +46,8 @@ def check_cancelled():
 
 def emit(event: str, **data):
     check_cancelled()
+    if event in {'text', 'text_delta'} and _withheld.get():
+        return
     if event in {'tool_started', 'tool_completed'}:
         observe(event, **data)
     sink = _sink.get()
@@ -47,6 +75,8 @@ def emit_tool_completion(**data):
 def print(*values, **kwargs):
     """Compatibility console when no sink is bound; structured output otherwise."""
     check_cancelled()
+    if not kwargs.get("file") and _withheld.get():
+        return  # Model text awaiting answer-stage rule checks.
     sink = _sink.get()
     if sink is None:
         builtins.print(*values, **kwargs)
