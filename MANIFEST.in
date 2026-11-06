@@ -29,3 +29,5 @@ include docs/live-reasoning-2026-11-02.md
 include docs/evidence/live-thinking-2026-11-02.json
 include scripts/native_wheel_smoke.py
 include scripts/rule_admission_wheel_smoke.py
+include docs/release-0.9.15.md
+include tests/test_fee_formats.py

@@ -7,8 +7,10 @@ A marker is an ISO code from ``DEFAULT_CODES`` (upper case, or lower or title
 case except codes that are ordinary words: TRY, MAD, PEN, COP, RON, CAD, RUB),
 a code added through the ``currencies`` setting (as written), a symbol
 (€ £ $, read as EUR, GBP, USD) or a prefixed dollar (US$, A$, C$, HK$, ...).
-Codes and prefixed dollars come before the number; symbols come before or after
-it (``€12``, ``12 €``). Between marker and number up to 32 characters of
+Codes and prefixed dollars come before or after the number; symbols also do
+(``€12``, ``12 €``, ``12 EUR``). Suffix euro/euros denotes EUR; cent/cents
+denotes hundredths of an unspecified currency. These words are case-insensitive
+whole words, never prefixes of ordinary words. Between marker and number up to 32 characters of
 spacing, Markdown emphasis, code ticks or ``~``/``≈`` may stand, crossing a line
 break only straight into the digits. A sign (ASCII plus or minus, Unicode
 minus, dashes, hyphens) may stand before the number, or before the marker when
@@ -26,6 +28,10 @@ crore``). A marked figure this grammar cannot read (``EUR 1.2.3``,
 skipped or read as a prefix. A sign touching an x-multiple (``-4.7x``) is part
 of it; a bullet (``- 4.7x``) is not.
 
+Overlapping markers never hide a different number. Conflicting units on one
+number or unsupported compounds (``120 cents USD``) are refused; the same text
+gives no source evidence. Separate complete prefixed amounts remain separate.
+
 Sources, from this turn's tool results only: numeric fields; text fields that
 are wholly a figure; and marked figures or x-multiples inside longer text, read
 by the same scan and boundary checks as the answer, so a figure the answer
@@ -38,7 +44,6 @@ currency (a ``currency``/``currencyCode`` key on the object or an ancestor, or
 a text figure's marker), a different stated currency is unmatched. No repair.
 """
 
-from bisect import bisect_left
 from decimal import ROUND_HALF_EVEN, ROUND_HALF_UP, Decimal, InvalidOperation
 import math
 import re
@@ -94,6 +99,7 @@ _CURRENCY_KEY = re.compile(r'(?i)currency(?:_?code)?')
 _ISO = re.compile(r'[A-Z]{3}')
 _MAX_REPORTED = 64
 _MAX_WRITTEN = 64
+_SUFFIX_WORDS = {'euro': 'EUR', 'euros': 'EUR', 'cent': None, 'cents': None}
 _SCHEMA = {
     'type': 'object',
     'additionalProperties': False,
@@ -125,14 +131,19 @@ def _markers(extra):
     return markers | SYMBOLS | PREFIXED
 
 
-def _alternatives(markers):
-    """Longest first; a marker starting with a letter must not continue a word, a symbol may."""
+def _alternatives(markers, *, suffix=False):
+    """Longest first, with word boundaries on the marker's exposed side."""
     ordered = sorted(markers, key=lambda m: (-len(m), m))
-    return '|'.join(('(?<![A-Za-z0-9])' if m[0].isalpha() else '') + re.escape(m) for m in ordered)
+    return '|'.join(
+        ('(?<![A-Za-z0-9])' if m[0].isalpha() and not suffix else '')
+        + ('(?i:' + re.escape(m) + ')' if suffix and m.lower() in _SUFFIX_WORDS else re.escape(m))
+        + ('(?![A-Za-z])' if suffix and m[-1].isalpha() else '')
+        for m in ordered
+    )
 
 
 def _patterns(extra):
-    """(prefixed, suffixed, markers): marked figures before and after their number.
+    """Prefix/suffix scanners, marker identities, and unsupported trailing units.
 
     A sign before the marker must touch it (``-$5``, ``-**$5**``) and not follow
     a word character, so a Markdown bullet (``- $5m``) or a range (``$10-$20``)
@@ -144,9 +155,11 @@ def _patterns(extra):
     prefix = r'(?:(?<!\w)(?P<pre>' + _SIGN + r')[*_`]{0,3})?(?P<cur>' + _alternatives(markers) + ')'
     gap = r'(?:[\s*_~≈`]{0,32}(?=\(?[\d.])|' + _GAP + '{0,32})'
     prefixed = re.compile(prefix + gap + _FIGURE)
-    symbols = _alternatives(SYMBOLS)
-    suffixed = re.compile(r'(?<![\w.,])' + _FIGURE + _SPACE + '{0,2}(?P<cur>' + symbols + r')')
-    return prefixed, suffixed, markers
+    markers.update(_SUFFIX_WORDS)
+    suffixes = _alternatives(markers, suffix=True)
+    suffixed = re.compile(r'(?<![\w.,])' + _FIGURE + _GAP + '{0,32}(?P<cur>' + suffixes + r')')
+    following = re.compile(r'[\s*_~≈`]{1,32}(?:' + suffixes + r')(?!' + gap + _FIGURE + ')')
+    return prefixed, suffixed, markers, following
 
 
 def _readings(body):
@@ -177,7 +190,13 @@ def _figure(match):
     if unit.endswith('s') and unit[:-1] in _SCALES:
         unit = unit[:-1]  # millions, lakhs, crores
     pre = match['pre'] if 'pre' in match.re.groupindex else None
-    negative = bool(match['open']) or (match['sign'] or '+') != '+' or (pre or '+') != '+'
+    sign = match['sign']
+    if sign == '-' and 'cur' in match.re.groupindex and 'pre' not in match.re.groupindex:
+        end = match.end('sign')
+        line_start = match.string.rfind('\n', 0, match.start('sign')) + 1
+        if match.string[end:end + 1].isspace() and not match.string[line_start:match.start('sign')].strip():
+            sign = None  # A Markdown list bullet, not a negative suffixed amount.
+    negative = bool(match['open']) or (sign or '+') != '+' or (pre or '+') != '+'
     return readings, Decimal(10) ** _SCALES.get(unit, 0), negative
 
 
@@ -194,22 +213,41 @@ def _marked(text, patterns):
 
     The answer and the sources share this scan, so a figure either side cannot
     read is None on both: refused in the answer, no evidence in a source, and
-    never salvaged as a numeric prefix (``EUR 12abc`` is not ``EUR 12``). Where a
-    suffixed match overlaps a prefixed one, the prefixed reading stands.
+    never salvaged as a numeric prefix (``EUR 12abc`` is not ``EUR 12``).
+    The leftmost complete amount owns its marker. A shared marker cannot turn
+    ``1.20 EUR\n30 days`` into only ``EUR 30``. Conflicting units on the same
+    number, and unsupported trailing qualifications, give no source evidence.
     """
-    prefixed, suffixed, markers = patterns
-    marked, starts, ends = [], [], []
-    for match in prefixed.finditer(text):
-        starts.append(match.start())
-        ends.append(match.end())
-        marked.append(match)
-    for match in suffixed.finditer(text):
-        before = bisect_left(starts, match.end()) - 1  # Prefixed spans never overlap, so ends ascend too.
-        if before < 0 or ends[before] <= match.start():
-            marked.append(match)
-    for match in marked:
+    prefixed, suffixed, markers, following = patterns
+    prefixes = list(prefixed.finditer(text))
+    prefix_at_marker = {match.start('cur'): match for match in prefixes}
+    candidates = prefixes + list(suffixed.finditer(text))
+    selected = []
+    for match in sorted(candidates, key=lambda item: item.start()):
+        number = match.span('num')
+        marker = match['cur']
+        currency = _SUFFIX_WORDS[marker.lower()] if marker.lower() in _SUFFIX_WORDS else markers[marker]
+        minor = marker.lower() in ('cent', 'cents')
+        if selected and match.start() < selected[-1]['end']:
+            previous = selected[-1]
+            if number == previous['number']:
+                next_prefix = prefix_at_marker.get(match.start('cur'))
+                if match.re is suffixed and next_prefix is not None and next_prefix.span('num') != number:
+                    continue  # EUR 1.20 USD 0.40: USD belongs to the next prefixed amount.
+                if (currency, minor) != previous['unit']:
+                    previous['figure'] = None
+                    previous['end'] = max(previous['end'], match.end())
+            continue
         figure = _figure(match) if _readable(text, match) else None
-        yield match.start(), match.group(0).strip()[:_MAX_WRITTEN], markers[match['cur']], figure
+        if following.match(text, match.end()) is not None:
+            figure = None  # e.g. 120 cents USD: never silently discard the explicit currency.
+        if figure is not None and minor:
+            readings, scale, negative = figure
+            figure = readings, scale * Decimal('0.01'), negative
+        selected.append(dict(start=match.start(), end=match.end(), number=number,
+                             currency=currency, unit=(currency, minor), figure=figure))
+    for item in selected:
+        yield item['start'], text[item['start']:item['end']].strip()[:_MAX_WRITTEN], item['currency'], item['figure']
 
 
 def _multiples(text):
@@ -238,7 +276,7 @@ def _sources(results, patterns):
             add(_figure(whole), currency, 'number')
             return
         for _, _, marker, figure in _marked(value, patterns):
-            add(figure, marker, 'currency')
+            add(figure, marker or currency, 'currency')
         for _, _, figure in _multiples(value):
             add(figure, None, 'x')
 
@@ -276,8 +314,9 @@ def _matches(value, decimals, scale, source):
 
 def _stated(draft, patterns):
     """(position, written, currency, figure or None) for every marked figure and multiple."""
-    stated = list(_marked(draft, patterns))
-    stated.extend((start, written, None, figure) for start, written, figure in _multiples(draft))
+    stated = [(start, written, currency, figure, 'currency')
+              for start, written, currency, figure in _marked(draft, patterns)]
+    stated.extend((start, written, None, figure, 'x') for start, written, figure in _multiples(draft))
     return sorted(stated, key=lambda item: item[0])
 
 
@@ -286,12 +325,12 @@ def _check(stage, context):
     magnitude = context.settings.get('sign') == 'magnitude'
     sources = _sources(context.tool_results, patterns)
     refused = []
-    for _, written, currency, figure in _stated(context.draft, patterns):
+    for _, written, currency, figure, kind in _stated(context.draft, patterns):
         if figure is None:
             refused.append(written)  # A marked figure in a format this guard cannot read.
             continue
         readings, scale, negative = figure
-        kinds = ('number', 'x') if currency is None else ('number', 'currency')
+        kinds = ('number', kind)
         pool = [s for s, c, kind in sources if kind in kinds and (currency is None or c in (None, currency))]
         if magnitude:
             pool, negative = [abs(s) for s in pool], False
@@ -317,7 +356,7 @@ def value_in_tool_output():
     # instructions, so this guard opts in to echoing them in answer-stage retry feedback.
     return Guard(
         'value_in_tool_output',
-        'value-in-tool-output-v1',
+        'value-in-tool-output-v2',
         ('before_answer', 'final'),
         _check,
         echo_values=True,
