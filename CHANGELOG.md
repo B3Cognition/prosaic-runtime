@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.9.14 — 2026-11-06
 
 - Add opt-in rule admission for conversation turns, consuming Prosaic Core's
   inert enforcement tags (`rules`). Hosts register `Guard`s in Python; prose
