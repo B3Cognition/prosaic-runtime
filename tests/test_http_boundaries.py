@@ -109,6 +109,10 @@ def drip_server(request):
             value = json.dumps({'model': 'small', 'choices': [
                 {'message': {'content': 'done'}, 'finish_reason': 'stop'}],
                 'usage': {'prompt_tokens': 2, 'completion_tokens': 3, 'total_tokens': 5}})
+            if status == 200:
+                # Valid leading JSON whitespace keeps usage out of reach for 3s,
+                # allowing startup headroom without hiding an unbounded read.
+                value = ' ' * 1000 + value
             if status != 200:
                 # Keep the error body incomplete well beyond the test's
                 # scheduling allowance; an unbounded read must still fail.
@@ -146,18 +150,24 @@ def drip_server(request):
 
 @pytest.mark.parametrize('streaming', [False, True])
 @pytest.mark.parametrize('accounted', [False, True])
-@pytest.mark.parametrize('stop', ['deadline', 'cancel'])
-def test_partial_openai_body_obeys_boundary(drip_server, streaming, accounted, stop):
+@pytest.mark.parametrize('stop,startup_delay', [('deadline', 0), ('deadline', 0.2), ('cancel', 0)])
+def test_partial_openai_body_obeys_boundary(drip_server, streaming, accounted, stop, startup_delay):
     url, requests, sent = drip_server
     recorder = MemoryRecorder() if accounted else None
     runner = runtime(EndpointConfig(url, 'small', features={'streaming': streaming}), accounting=recorder)
+    def observer(event):
+        if event['event'] == 'provider_request_started' and startup_delay:
+            time.sleep(startup_delay)  # Reproduce dispatch startup on a loaded runner.
+
     started = time.monotonic()
-    result = runner.run(artifact(), policy=RunPolicy(timeout_s=0.1 if stop == 'deadline' else 2),
+    result = runner.run(artifact(), observer=observer,
+        policy=RunPolicy(timeout_s=1 if stop == 'deadline' else 2),
         cancelled=lambda: stop == 'cancel' and sent.is_set() and time.monotonic() - started >= 0.08)
     elapsed = time.monotonic() - started
     assert result.exit_code == 130 if stop == 'cancel' else result.exit_code != 0
     assert result.timed_out == (stop == 'deadline')
-    assert elapsed < 0.35  # Reading the complete drip-fed body takes over 0.6s.
+    assert elapsed < (1.5 if stop == 'deadline' else 0.35)
+    assert sent.is_set()  # Every case must reach an actual partial response body.
     assert len(requests) == 1
     if accounted:
         assert len(recorder.observations) == 1
