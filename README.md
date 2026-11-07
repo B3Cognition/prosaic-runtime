@@ -11,7 +11,11 @@ Runtime 0.9.15 fixed suffix fees (`1.20 EUR`, `1.20 euros`, `120 cents`)
 and advanced the value guard to `value-in-tool-output-v2`. Explicitly readmit
 affected bindings when upgrading from 0.9.14. Headers in 0.9.16 introduce no
 further guard-version or identity change. [Rule admission](docs/rules-admission.md)
-applies to conversation turns; workflow-step enforcement tags remain future work.
+applies to conversation turns. Harness 0.9.12 now uses those public turn hooks
+for workflow-step enforcement tags with declared fresh accepted earlier outputs.
+See the [Harness contract](https://github.com/B3Cognition/prosaic-harness/blob/v0.9.12/docs/workflow-rules.md)
+and [Lab V2 blueprint](https://github.com/B3Cognition/prosaic-integration-lab/blob/v0.9.9/docs/workflow-enforcement.md).
+This bridge requires no new Runtime version or changed Runtime release bytes.
 
 
 Runtime supports Prosaic **0.5.0**, including its native output contracts.
