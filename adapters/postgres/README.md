@@ -1,7 +1,9 @@
 # Prosaic Runtime PostgreSQL metering
 
+Current published adapter release: **0.3.0**. See [release notes and compatible SDK versions](https://github.com/B3Cognition/prosaic-runtime/blob/main/docs/releases.md).
+
 The published `b3-prosaic-runtime-postgres` **0.3.0** package selects Runtime
-0.9.x, including Runtime 0.9.12. Its accounting schema/data are unchanged.
+0.9.x, qualified with Runtime 0.9.16. Its accounting schema/data are unchanged.
 Runtime accounting off needs no database or psycopg dependency. The historical
 0.2.1 adapter selects Runtime 0.8.x and retains its original release artifacts.
 
@@ -12,7 +14,7 @@ record the packaging correction. The Harness PostgreSQL store has a separate
 libpq 17 requirement and therefore a higher binary-package floor.
 
 Use a fresh virtual environment/image: legacy and renamed packages share imports.
-Install with `python -m pip install 'b3-prosaic-runtime==0.9.12' 'b3-prosaic-runtime-postgres==0.3.0'`.
+Install with `python -m pip install 'b3-prosaic-runtime==0.9.16' 'b3-prosaic-runtime-postgres==0.3.0'`.
 For reproducible deployments, use a complete checksum-pinned manifest. The Python import
 remains `prosaic_runtime_postgres`; no stored accounting format changes are required.
 
@@ -125,7 +127,7 @@ uv build --directory adapters/postgres
 Without `METERING_TEST_DSN`, database tests skip explicitly; that is not release proof.
 # Readiness contract
 
-The 0.1.1 candidate validates the actual resolved metering tables using read-only
+Readiness validation introduced in 0.1.1 and retained in 0.3.0 checks the actual resolved metering tables using read-only
 catalog queries. It requires permanent logged tables, compatible columns and
 nullability, scoped primary/foreign keys, the measurement-state check constraint,
 and the SELECT/INSERT/intent-UPDATE privileges required by recorder operations.

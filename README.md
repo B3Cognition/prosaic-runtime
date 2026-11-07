@@ -1,9 +1,17 @@
 # Prosaic Runtime
 
+Current published release: **0.9.16**. See [release notes and compatible SDK versions](docs/releases.md).
+
 Runtime **0.9.16** adds host-supplied per-invocation HTTP headers for OpenAI-compatible
 calls, including `x-tokenproxy-no-cache: 1`, without changing prompt/artifact identity.
 See [headers and compatibility](docs/release-0.9.16.md) and the
 [Cerebro follow-up requests](docs/cerebro-requests.md).
+
+Runtime 0.9.15 fixed suffix fees (`1.20 EUR`, `1.20 euros`, `120 cents`)
+and advanced the value guard to `value-in-tool-output-v2`. Explicitly readmit
+affected bindings when upgrading from 0.9.14. Headers in 0.9.16 introduce no
+further guard-version or identity change. [Rule admission](docs/rules-admission.md)
+applies to conversation turns; workflow-step enforcement tags remain future work.
 
 
 Runtime supports Prosaic **0.5.0**, including its native output contracts.

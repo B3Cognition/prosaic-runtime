@@ -1,5 +1,7 @@
 # Changelog
 
+See [published release notes and compatibility](docs/releases.md), including backfilled historical release notes. Documentation refreshed on 2026-11-07; package versions and release archives are unchanged.
+
 ## 0.9.16
 
 - Add bounded host-only `request_headers` to OpenAI-compatible `run` and `turn`, including prepared turns, tool continuations and rule retries.

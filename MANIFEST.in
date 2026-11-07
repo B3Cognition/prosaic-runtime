@@ -34,3 +34,5 @@ include tests/test_fee_formats.py
 
 include docs/release-0.9.16.md docs/cerebro-requests.md
 include tests/test_request_headers.py
+include docs/releases.md
+recursive-include docs/release-history *.md
