@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.16
+
+- Add bounded host-only `request_headers` to OpenAI-compatible `run` and `turn`, including prepared turns, tool continuations and rule retries.
+- Snapshot headers before callbacks; preserve credentials/framing/correlation ownership, redirect refusal and per-invocation isolation. Raw custom headers are not recorded or inserted into prompts.
+- Identity impact: no new artifact, workflow, prepared-turn or rule identity fields; omitted/empty options preserve prior behavior. Existing guard versions are unchanged.
+- Document the approved validator V1 and remaining Cerebro requests. New version-specific release notes accompany publication.
+
 ## 0.9.15 — 2026-11-06
 
 - Enforce suffix currency codes, euro/euros and cent/cents in
