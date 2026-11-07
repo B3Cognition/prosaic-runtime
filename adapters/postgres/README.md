@@ -1,6 +1,6 @@
 # Prosaic Runtime PostgreSQL metering
 
-Current published adapter release: **0.3.0**. See [release notes and compatible SDK versions](../../docs/releases.md).
+Current published adapter release: **0.3.0**. See [release notes and compatible SDK versions](https://github.com/B3Cognition/prosaic-runtime/blob/main/docs/releases.md).
 
 The published `b3-prosaic-runtime-postgres` **0.3.0** package selects Runtime
 0.9.x, qualified with Runtime 0.9.16. Its accounting schema/data are unchanged.
@@ -127,7 +127,7 @@ uv build --directory adapters/postgres
 Without `METERING_TEST_DSN`, database tests skip explicitly; that is not release proof.
 # Readiness contract
 
-The 0.1.1 candidate validates the actual resolved metering tables using read-only
+Readiness validation introduced in 0.1.1 and retained in 0.3.0 checks the actual resolved metering tables using read-only
 catalog queries. It requires permanent logged tables, compatible columns and
 nullability, scoped primary/foreign keys, the measurement-state check constraint,
 and the SELECT/INSERT/intent-UPDATE privileges required by recorder operations.
