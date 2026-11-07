@@ -7,8 +7,8 @@ every provider request in that invocation (including tool continuations and rule
 repair) uses it. Concurrent and later invocations do not inherit headers.
 
 Headers are transport options owned by the host, never model input. Names must
-be ASCII HTTP tokens (up to128 characters), case-insensitive unique; values must
-be printable ASCII (up to2048 characters). At most32 headers and8192 encoded
+be ASCII HTTP tokens (up to 128 characters), case-insensitive unique; values must
+be printable ASCII (up to 2048 characters). At most 32 headers and 8192 encoded
 name/value/framing bytes are accepted. Runtime-owned credentials, cookies,
 framing/proxy and correlation headers are refused. Invalid options raise a fixed
 ValueError without echoing values before callbacks or HTTP. Nonempty options
@@ -27,12 +27,22 @@ identity and rule fingerprints gain no fields. Guard versions are unchanged;
 existing compatible bindings do not need header-specific readmission. Hosts must
 supply desired headers afresh on every invocation/resume; they are not persisted.
 
-Core remains0.5.0; PostgreSQL recorder0.3.0 is an unchanged compatibility witness,
+Core remains 0.5.0; PostgreSQL recorder 0.3.0 is an unchanged compatibility witness,
 not republished. Qualification covers source and installed wheels, real synthetic
-loopback transport, LinuxAMD64/ARM64, macOS, PostgreSQL16/18 and dependency floors.
+loopback transport, Linux AMD64/ARM64, macOS, PostgreSQL 16/18 and dependency floors.
 No live provider certification or inference is implied. Publish only original
 qualified merged-source bytes and verify public downloads and fresh consumers.
 
 See [Cerebro requests](cerebro-requests.md) for the separate Harness validator V1
 and deferred work, including workflow enforcement tags, accounting labels,
 per-request effort evidence, explicit repair allowance and identity documentation.
+
+## Published release
+
+Published on PyPI and [GitHub](https://github.com/B3Cognition/prosaic-runtime/releases/tag/v0.9.16) from source `f108405aea29ec894e0892222a00461b938a2e98`.
+The [immutable candidate qualification](https://github.com/B3Cognition/prosaic-runtime/actions/runs/42368949049) passed before promotion. Public wheel/source hashes and isolated installed
+consumer checks were verified after publication. These are synthetic SDK
+checks, not live-provider certification.
+
+See [all releases and compatibility](releases.md) for dependency floors,
+qualified trains, identity/readmission notes and independently versioned adapters.

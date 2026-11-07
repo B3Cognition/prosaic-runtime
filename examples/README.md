@@ -1,5 +1,17 @@
 # Run Prosaic prose with and without tools
 
+Current published release: **0.9.16**. See [release notes and compatible SDK versions](../docs/releases.md).
+
+## Per-call headers and fee guards (Runtime 0.9.16)
+
+Use `runtime.run(agent, request_headers={"x-tokenproxy-no-cache": "1"})`
+or `runtime.turn(..., request_headers=...)` for host-owned OpenAI-compatible
+request headers. Supply them on each invocation; native/unified entry points do
+not accept this option. Headers are not prompt text or persisted identity.
+See [limits, reserved names and compatibility](../docs/release-0.9.16.md).
+The [rule-admission guide](../docs/rules-admission.md) covers turn guards;
+0.9.15 fee parsing requires explicit readmission of the v2 value guard.
+
 ## Local thinking controls (Runtime 0.9.12)
 
 The [local Qwen/Gemma guide](LOCAL_REASONING.md) uses one Markdown `effort` field,
