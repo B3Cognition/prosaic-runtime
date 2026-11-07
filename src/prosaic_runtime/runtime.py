@@ -53,9 +53,10 @@ def _reported_usage(details):
 
 class _BoundedMixin:
     def __init__(self, endpoint, max_input_bytes, custom_tools, deadline, capture=None, budget=None,
-                 scope=None, tool_journal=None, cancelled=None, terminal_capture=None):
+                 scope=None, tool_journal=None, cancelled=None, terminal_capture=None, request_headers=()):
         super().__init__(endpoint)
         self.max_input_bytes = max_input_bytes
+        self.request_headers = request_headers
         self.reported_token_usage = None
         self.usage_complete = True
         self.turns = 0
@@ -217,6 +218,8 @@ class _BoundedMixin:
     @contextmanager
     def open_http(self, request, *, timeout):
         self._prework_capacity_failure = None
+        for name, value in self.request_headers:
+            request.add_header(name, value)
         self.check_boundary()
         if any(b._token_counter is not None for b in self.execution_budgets):
             try: native=strict_json(request.data)
@@ -442,8 +445,10 @@ class ProsaicRuntime:
              policy=None, limits=None, workspace=None, on_event=None, cancelled=None,
              env=None, context=None, accounting=None, observer=None,
              operation_context=None, tool_journal=None, context_policy=None,
-             token_counters=None, context_work=None, context_checkpoint=None, on_admitted=None):
+             token_counters=None, context_work=None, context_checkpoint=None, on_admitted=None, request_headers=None):
         """Execute one bounded role-aware turn; streamed events are provisional."""
+        from .request_headers import snapshot_headers
+        owned_headers = snapshot_headers(request_headers)
         from .conversation import PreparedTurn, ConversationMessage, TurnLimits, TurnAdmissionError
         from .conversation_preparation import policy_from_document, execution_snapshot
         from .turn_capture import TurnCapture
@@ -503,6 +508,10 @@ class ProsaicRuntime:
                 return replace(turn_result, rules_fingerprint=ruleset.rules_fingerprint())
             return turn_result
         snapshot = execution_snapshot(self, owned)
+        if owned_headers:
+            from .conversation_preparation import turn_endpoint
+            if turn_endpoint(self, approved, policy)[1].provider != 'openai-compatible':
+                raise ValueError('request_headers require an OpenAI-compatible endpoint')
         scope = InvocationScope(str(uuid4())) if operation_context is None else operation_context
         # Static effect admission precedes callbacks/observation as well as I/O.
         try:
@@ -559,7 +568,7 @@ class ProsaicRuntime:
                     on_event=lambda event: capture.event(event, on_event), cancelled=cancelled, env=env, context=context, accounting=accounting,
                     operation_context=scope, tool_journal=tool_journal,
                     _turn_prepared=owned, _turn_capture=capture, _budget=budget, _turn_snapshot=snapshot,
-                    _turn_accounting=frozen_accounting)
+                    _turn_accounting=frozen_accounting, _request_headers=owned_headers)
             except TurnAdmissionError:
                 raise
             except Exception:
@@ -640,7 +649,9 @@ class ProsaicRuntime:
             cwd: str | Path = '.', policy: RunPolicy | None = None,
             on_event=None, cancelled=None, env=None,
             acquisition: str | ProsaicArtifact | None = None, context=None, accounting=None,
-            observer=None, operation_context: InvocationScope | None = None, tool_journal=None) -> Result:
+            observer=None, operation_context: InvocationScope | None = None, tool_journal=None, request_headers=None) -> Result:
+        from .request_headers import snapshot_headers
+        owned_headers = snapshot_headers(request_headers)
         scope = InvocationScope(str(uuid4())) if operation_context is None else operation_context
         emitter = ObserverEmitter(observer, source='runtime', scope=scope)
         started = time.monotonic()
@@ -651,7 +662,8 @@ class ProsaicRuntime:
                 emitter.emit('invocation_started')
                 result = self._run_accounted(artifact, arguments, cwd=cwd, policy=policy,
                     on_event=on_event, cancelled=cancelled, env=env, acquisition=acquisition,
-                    context=context, accounting=accounting, operation_context=scope, tool_journal=tool_journal)
+                    context=context, accounting=accounting, operation_context=scope, tool_journal=tool_journal,
+                    _request_headers=owned_headers)
                 if result.metadata.get('failure_reason') == 'cancelled':
                     outcome = 'cancelled'
                 elif result.timed_out:
@@ -679,7 +691,7 @@ class ProsaicRuntime:
             on_event=None, cancelled=None, env=None,
             acquisition: str | ProsaicArtifact | None = None, context=None, accounting=None,
             operation_context=None, tool_journal=None, _turn_prepared=None, _turn_capture=None, _budget=None,
-            _turn_snapshot=None, _turn_accounting=None) -> Result:
+            _turn_snapshot=None, _turn_accounting=None, _request_headers=()) -> Result:
         policy = policy or RunPolicy(timeout_s=self.config.limits.timeout_s,
                                      max_tool_rounds=self.config.limits.max_tool_rounds)
         budget = _budget if _budget is not None else InvocationBudget(policy)
@@ -700,7 +712,7 @@ class ProsaicRuntime:
                                cancelled=cancelled, env=env, acquisition=acquisition,
                                _operation_context=operation_context, _tool_journal=tool_journal,
                                _turn_prepared=_turn_prepared, _turn_capture=_turn_capture, _turn_snapshot=_turn_snapshot,
-                               _terminal_capture=terminal)
+                               _terminal_capture=terminal, _request_headers=_request_headers)
         except AccountingError:
             result = Result(1, '', 'accounting persistence failed; do not retry the provider automatically',
                             token_usage=budget.reported_tokens if budget.usage_complete and budget.provider_requests else None,
@@ -740,7 +752,7 @@ class ProsaicRuntime:
             on_event=None, cancelled=None, env=None,
             acquisition: str | ProsaicArtifact | None = None, _recorder=None, _context=None, _capture_ref=None,
             _budget=None, _operation_context=None, _tool_journal=None,
-            _turn_prepared=None, _turn_capture=None, _turn_snapshot=None, _terminal_capture=None) -> Result:
+            _turn_prepared=None, _turn_capture=None, _turn_snapshot=None, _terminal_capture=None, _request_headers=()) -> Result:
         config, custom, cli = _turn_snapshot if _turn_snapshot is not None else (self.config, self._custom_tools, self._cli_tools)
         policy = policy or RunPolicy(timeout_s=self.config.limits.timeout_s,
                                      max_tool_rounds=self.config.limits.max_tool_rounds)
@@ -801,6 +813,8 @@ class ProsaicRuntime:
                 tier = artifact.frontmatter.get("model_tier")
                 profile = config.routes[tier] if tier is not None else config.default_profile
                 endpoint = config.profiles[profile]
+                if _request_headers and endpoint.provider != 'openai-compatible':
+                    raise ValueError('request_headers require an OpenAI-compatible endpoint')
                 if _recorder is not None and _recorder.provider_id != endpoint.provider:
                     raise ValueError('accounting provider_id must match endpoint provider')
                 features = {**endpoint.features, "tool_calls": bool(tools), "max_tool_rounds": policy.max_tool_rounds,
@@ -844,7 +858,7 @@ class ProsaicRuntime:
                 backend = backend_type(endpoint, policy.max_input_bytes, custom,
                                        started + policy.timeout_s, capture, _budget,
                                        _operation_context, _tool_journal, cancelled,
-                                       terminal_capture=_terminal_capture)
+                                       terminal_capture=_terminal_capture, request_headers=_request_headers)
                 backend.accounting_context = _context
                 request = Invocation(str(Path(cwd).resolve()) if cwd is not None else None,
                                      prompt, invocation_env, remaining, {"prompt_metadata": metadata})

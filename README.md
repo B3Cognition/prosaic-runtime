@@ -1,8 +1,10 @@
 # Prosaic Runtime
 
-Runtime **0.9.15** checks suffix currency codes, euro/euros and cent/cents in
-`value_in_tool_output`, closing three fee-format gaps. See the
-[fix and qualification scope](docs/release-0.9.15.md).
+Runtime **0.9.16** adds host-supplied per-invocation HTTP headers for OpenAI-compatible
+calls, including `x-tokenproxy-no-cache: 1`, without changing prompt/artifact identity.
+See [headers and compatibility](docs/release-0.9.16.md) and the
+[Cerebro follow-up requests](docs/cerebro-requests.md).
+
 
 Runtime supports Prosaic **0.5.0**, including its native output contracts.
 Providers consume canonical inspection, so Claude Code, Codex and
@@ -40,7 +42,7 @@ Runtime is distributed as `b3-prosaic-runtime` and requires
 `b3-prosaic>=0.5.0,<0.6` from the package index. Python imports (`prosaic_runtime`)
 and the `prosaic-runtime` CLI remain unchanged. The separately installed recorder
 is `b3-prosaic-runtime-postgres` **0.3.0**, selecting Runtime 0.9.x.
-Install the release with `python -m pip install 'b3-prosaic-runtime==0.9.15'`.
+Install the release with `python -m pip install 'b3-prosaic-runtime==0.9.16'`.
 
 ### Opt-in final-answer phase
 
@@ -205,7 +207,7 @@ an isolated Python environment; no sudo or global Python installation is needed:
 ```sh
 git clone https://github.com/B3Cognition/prosaic-runtime.git
 cd prosaic-runtime
-git checkout v0.9.15
+git checkout v0.9.16
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install .
@@ -215,7 +217,7 @@ The package installs compatible `b3-prosaic` 0.5.x into the same environment.
 Use the release tag after publication; older release tags retain historical docs.
 
 For public-index installation, create a fresh virtual environment or
-container image and run `python -m pip install 'b3-prosaic-runtime==0.9.15'`.
+container image and run `python -m pip install 'b3-prosaic-runtime==0.9.16'`.
 Install the optional recorder with
 `python -m pip install 'b3-prosaic-runtime-postgres==0.3.0'`. Never add renamed
 packages to an environment containing legacy `prosaic`, `prosaic-runtime` or
