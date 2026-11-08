@@ -282,3 +282,14 @@ def test_tiny_turn_cap_does_not_fail_accepted_output(wire,size):
     out=runner(fx).turn(agent(fx),message='Review',limits=TurnLimits(max_metadata_bytes=size),policy=fx.policy)
     assert out.result.exit_code==0 and out.completed_turn is not None
     assert len(json.dumps(out.result.metadata,separators=(',',':')).encode())<=size if size>=2 else out.result.metadata=={}
+
+
+def test_native_facade_default_annotation_remains_owned_and_byte_bounded():
+    from prosaic_runtime.effort_evidence import EffortTrace,http_attempt
+    source=EffortTrace()
+    row=http_attempt(json.dumps({'model':'m'*256,'reasoning_effort':'high'}).encode(),backend='openai-compatible',profile='p'*256,call_id='a'*32,requested='high',configured=None)
+    for _ in range(64):source.add(row)
+    original=source.to_dict();aggregate=EffortTrace();aggregate.merge(original,_configured_effort='ultra');out=aggregate.to_dict()
+    assert out['attempt_count']==64 and len(json.dumps(out,sort_keys=True,ensure_ascii=False,separators=(',',':')).encode())<=32768
+    assert all(r['configured_effort']=='ultra' and r['sent']=={'reasoning_effort':'high'} for r in out['attempts'])
+    assert all(r['configured_effort'] is None for r in original['attempts'])

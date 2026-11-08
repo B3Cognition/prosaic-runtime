@@ -20,7 +20,9 @@ per-attempt correlation IDs intentionally differ across invocations.
 successful delivery, provider acceptance or compliance. Native inner calls and
 vendor settings remain opaque. No new effort support, retry allowance or live
 provider certification is introduced. Trace rows/bytes and caller metadata caps
-bound evidence without changing execution authority. No raw prompts/headers,
+bound evidence without changing execution authority. In incomplete aggregates, indices order retained observations; truncated child
+gaps may precede later rows, so they are not absolute request ordinals.
+No raw prompts/headers,
 credentials, workspace paths or unrelated argv are copied into the extension.
 
 **Validation and publication:** Required qualification covers fresh exact source,

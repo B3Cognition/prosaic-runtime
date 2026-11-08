@@ -60,7 +60,9 @@ rows. A hook cannot replace the collector's evidence with fabricated metadata.
 The extension has at most 64 rows and 32,768 canonical JSON bytes. Truncation sets
 `complete: false` and an explicit omitted count; unknown total/omission counts are
 null. Caller turn metadata/depth/node limits may trim rows further, or omit the
-extension if its minimal envelope cannot fit. Absence means unavailable, never
+extension if its minimal envelope cannot fit. Indices order retained observations,
+not absolute provider-call ordinals; a truncated child may leave a gap before a
+later retained aggregate row. Absence means unavailable, never
 zero or an invented historical setting. Limits bound observation, not execution.
 
 CompletedTurn and TurnEvidence schemas, artifact/rule/prepared/workflow/bundle

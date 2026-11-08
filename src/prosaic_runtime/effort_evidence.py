@@ -13,6 +13,7 @@ ROW_KEYS = frozenset({'index', 'transport', 'backend', 'profile', 'model', 'prov
     'requested_effort', 'configured_effort', 'format', 'sent', 'provider_confirmation'})
 DOC_KEYS = frozenset({'version', 'attempt_count', 'complete', 'omitted_attempts', 'attempts'})
 MAX_ROWS, MAX_BYTES = 64, 32768
+_UNSET = object()
 
 
 def _label(value):
@@ -185,7 +186,7 @@ class EffortTrace:
             owned['index'] = len(self._rows) + 1
             self._rows.append(owned)
 
-    def merge(self, document, *, unknown_if_absent=True):
+    def merge(self, document, *, unknown_if_absent=True, _configured_effort=_UNSET):
         if document is None and not unknown_if_absent:
             return
         try:
@@ -212,6 +213,12 @@ class EffortTrace:
         self._complete = self._complete and complete
         for row in rows[:MAX_ROWS - len(self._rows)]:
             owned = deepcopy(row)
+            if _configured_effort is not _UNSET:
+                # A facade may have selected a profile copy for admission. Its
+                # original default is an annotation, never a new constraint or
+                # a substitute for observed controls. Final serialization still
+                # bounds the larger annotation after this owned copy.
+                owned['configured_effort'] = _effort(_configured_effort)
             owned['index'] = len(self._rows) + 1
             self._rows.append(owned)
 

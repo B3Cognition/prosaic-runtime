@@ -171,7 +171,7 @@ class UnifiedRuntime:
                 effective_effort = resolve_effort(effort, default,
                     provider=provider, model=endpoint.model, supported=declared)
                 if is_native:
-                    native[name] = replace(endpoint, supported_efforts=declared)
+                    native[name] = replace(endpoint, effort=effective_effort, supported_efforts=declared)
             except MetadataCancelled:
                 return finish(Result(130, '', 'invocation cancelled', metadata={'failure_reason': 'cancelled'}))
             except EffortUnavailableError:
@@ -231,7 +231,10 @@ class UnifiedRuntime:
                 entry.update(exit_code=1, failure_reason='execution_uncertain', safe_to_fallback=False)
                 return finish(Result(1, '', 'delegate execution uncertain',
                     metadata={'failure_reason': 'execution_uncertain', 'recovery_required': True}))
-            trace.merge(result.metadata.get(EFFORT_KEY))
+            if is_native:
+                trace.merge(result.metadata.get(EFFORT_KEY), _configured_effort=default)
+            else:
+                trace.merge(result.metadata.get(EFFORT_KEY))
             known_tokens += partial
             usage_complete &= result.token_usage is not None
             proof = result.metadata.get('prework_failure_v1', {})

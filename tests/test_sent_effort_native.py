@@ -159,3 +159,25 @@ def test_api_prework_failure_joins_next_api_or_native_attempt(rejection_server,t
     rows=evidence(out,2)
     assert [r['transport'] for r in rows]==['http','http' if second=='api' else 'process']
     assert len(requests)==(2 if second=='api' else 1)
+
+
+@pytest.mark.parametrize('discovered',[False,True])
+def test_unified_artifact_override_does_not_revalidate_unused_native_default(tmp_path,discovered):
+    from prosaic_runtime import UnifiedRuntime,UnifiedRuntimeConfig,PoolPolicy
+    if discovered:
+        from test_effort_discovery import metadata_fixture
+        profile,_=metadata_fixture(tmp_path,'codex-cli',['high','ultra'])
+        native=NativeRuntimeConfig({'native':replace(profile,effort='max')},default_profile='native')
+        requested,default='ultra','max'
+    else:
+        native=native_fixture(tmp_path,'codex-cli',default='ultra').config
+        requested,default='high','ultra'
+    direct=NativeRuntime(native).run(artifact(requested),cwd=tmp_path,policy=NativePolicy())
+    assert direct.exit_code==0
+    config=UnifiedRuntimeConfig(native,None,{'pool':ProfilePool(('native',))},'pool',{})
+    result=UnifiedRuntime(config).run(artifact(requested),cwd=tmp_path,
+        policy=PoolPolicy(timeout_s=5,max_attempts=1,max_native_attempts=1,native_policy=NativePolicy()))
+    assert result.exit_code==0,result.stderr
+    row=evidence(result,1)[0]
+    assert row['requested_effort']==requested and row['configured_effort']==default
+    assert row['sent']=={'argv':['-c','model_reasoning_effort='+json.dumps(requested)]}
