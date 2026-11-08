@@ -4,12 +4,12 @@ Compatibility checkpoint: 2026-11-08. Runtime 0.9.17 adds accounting request met
 publication must pass its [release gates](release-0.9.17.md).
 The latest SDKs and the Lab's qualified dependency train are separate selections.
 Harness 0.9.12 uses Runtime 0.9.16 and Core 0.5.0, with declared Runtime floor
-`>=0.9.16,<0.10`. Lab 0.9.9 qualifies that exact public train and retains the
+`>=0.9.16,<0.10`. Lab0.9.10 qualifies Core0.5.0/Runtime0.9.17/Harness0.9.12 and retains the
 original recorder 0.3.0/store 0.4.1 bytes. Earlier Lab profiles keep their own
 archived manifests; newer SDK availability never certifies a partial mixture.
-Lab 0.9.10 will qualify Runtime 0.9.17 with a copyable accounting metadata blueprint
-after actual SDK publication. Historical Lab 0.9.9 continues to select Runtime
-0.9.16; do not silently upgrade only one wheel in that frozen profile.
+Lab0.9.10 supplies a [copyable accounting metadata host](https://github.com/B3Cognition/prosaic-integration-lab/blob/v0.9.10/docs/accounting-request-metadata.md).
+Its release page is the authority for final publication/qualification. Historical
+Lab0.9.9 continues to select Runtime0.9.16; do not silently upgrade only one wheel in that frozen profile.
 
 | Component | Latest published version | Scope |
 | --- | --- | --- |
@@ -18,7 +18,7 @@ after actual SDK publication. Historical Lab 0.9.9 continues to select Runtime
 | Harness (`b3-prosaic-harness`) | 0.9.12 | Workflow enforcement over accepted earlier outputs; Validator V1 retained |
 | Runtime PostgreSQL recorder | 0.3.0 | Optional usage persistence; unchanged adapter release |
 | Harness PostgreSQL store | 0.4.1 | Optional workflow/session persistence; unchanged adapter release |
-| Integration Lab | 0.9.9 | Qualified Core 0.5.0 / Runtime 0.9.16 / Harness 0.9.12 and a V2 blueprint |
+| Integration Lab | 0.9.10 | Complete public train and copyable accounting-metadata host; prior profiles retained |
 
 Install current SDKs in a fresh environment; pin versions and archive hashes for reproducible deployments. Optional PostgreSQL adapters require explicit provisioning and operator readiness checks. Never co-install legacy and renamed distributions that own the same imports.
 
@@ -42,7 +42,7 @@ Every published version is linked below. Backfilled notes explain changes using 
 
 | Release | Published (UTC) | Notes |
 | --- | --- | --- |
-| [v0.9.17](https://github.com/B3Cognition/prosaic-runtime/releases/tag/v0.9.17) | Qualification/publication required | [Release scope](release-0.9.17.md) |
+| [v0.9.17](https://github.com/B3Cognition/prosaic-runtime/releases/tag/v0.9.17) | See release page | [Release notes](release-0.9.17.md) |
 | [v0.9.16](https://github.com/B3Cognition/prosaic-runtime/releases/tag/v0.9.16) | 2026-11-07 | Published notes |
 | [v0.9.15](https://github.com/B3Cognition/prosaic-runtime/releases/tag/v0.9.15) | 2026-11-06 | [backfilled notes](release-history/v0.9.15.md) |
 | [v0.9.14](https://github.com/B3Cognition/prosaic-runtime/releases/tag/v0.9.14) | 2026-11-06 | [backfilled notes](release-history/v0.9.14.md) |

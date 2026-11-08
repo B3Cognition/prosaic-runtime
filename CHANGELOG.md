@@ -1,6 +1,6 @@
 # Changelog
 
-See [published release notes and compatibility](docs/releases.md), including backfilled historical release notes. Documentation refreshed on 2026-11-07; package versions and release archives are unchanged.
+See [published release notes and compatibility](docs/releases.md), including backfilled historical release notes. The documentation-only refresh on 2026-11-07 preserved the packages and archives published at that time. Versioned changes below describe later releases; old artifacts remain immutable.
 
 ## 0.9.17
 
