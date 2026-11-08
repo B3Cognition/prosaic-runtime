@@ -89,10 +89,14 @@ def encode_history_messages(history, *, provider):
     return messages
 
 
+def current_user_text(message,input_data):
+    return message if input_data is None else json.dumps(
+        {'message': message, 'inputData': input_data}, ensure_ascii=False, allow_nan=False)
+
+
 def initial_projection(artifact, history, message, input_data, endpoint):
     instructions = artifact.render()
-    current = message if input_data is None else json.dumps(
-        {'message': message, 'inputData': input_data}, ensure_ascii=False, allow_nan=False)
+    current = current_user_text(message,input_data)
     return [{'role': 'system', 'content': instructions},
             *encode_history_messages(history, provider=endpoint.provider),
             {'role': 'user', 'content': current}]
@@ -142,7 +146,8 @@ def prepare_turn(runtime, artifact, *, message, history=(), input_data=None, pol
                  limits=None, workspace=None, context_policy=None, token_counters=None,
                  context_selection=None, context_report=None, context_work=None, _warn_rules=True,
                  input_profile=None, authoritative_input_data=None, authoritative_input_profile=None,
-                 authoritative_input_limits=None, _frozen_input=None, _input_variant_selection=None):
+                 authoritative_input_limits=None, _frozen_input=None, _input_variant_selection=None,
+                 _input_data_variants=None):
     limits = limits if limits is not None else TurnLimits()
     if type(limits) is not TurnLimits:
         raise TurnAdmissionError('invalidPolicy')
@@ -222,6 +227,7 @@ def prepare_turn(runtime, artifact, *, message, history=(), input_data=None, pol
             raise TurnAdmissionError('inputLimit','maxEvidenceBytes')
     try:
         selected_history = owned_history
+        variant_payload=None
         report, selection, work = None, None, None
         if context_policy is None:
             if any(value is not None for value in (token_counters, context_selection, context_report, context_work)):
@@ -240,11 +246,25 @@ def prepare_turn(runtime, artifact, *, message, history=(), input_data=None, pol
             else:
                 if context_report is not None or context_work is not None:
                     raise TurnAdmissionError('invalidPolicy')
-                selected_history, report, selection, work = assemble_context(owned_history,
-                    candidate, context_policy, registration,
-                    replace(limits, max_input_bytes=policy.max_input_bytes))
+                if views is not None:
+                    from .input_variants import fit_variants
+                    selected_history,report,selection,work,data,variant_payload,variant_size,variant_native_digest,_input_variant_selection=fit_variants(
+                        runtime,owned_agent,policy,limits,owned_history,message,
+                        _input_data_variants if _input_data_variants is not None else [data],
+                        context_policy,registration,input_profile)
+                    views=bind_views(ruleset,data,input_profile=input_profile,
+                        authoritative_input_data=authoritative_input_data,authoritative_input_profile=authoritative_input_profile,
+                        authoritative_input_limits=authoritative_input_limits)
+                else:
+                    selected_history, report, selection, work = assemble_context(owned_history,
+                        candidate, context_policy, registration,
+                        replace(limits, max_input_bytes=policy.max_input_bytes))
         from .context_assembly import context_digest
-        if _frozen_input is None:
+        if variant_payload is not None:
+            profile,endpoint,metadata,messages,native=variant_payload
+            input_bytes=variant_size
+            native_digest=variant_native_digest
+        elif _frozen_input is None:
             profile, endpoint, metadata, messages, native = initial_payload(
                 runtime, owned_agent, policy, selected_history, message, data,
                 context_policy=context_policy,canonical_messages=views is not None)

@@ -389,6 +389,7 @@ class ProsaicRuntime:
     capabilities |= frozenset({'accounting_request_metadata_v1'})
     capabilities |= frozenset({'guard_input_views_v1'})
     capabilities |= frozenset({'frozen_turn_inputs_v1'})
+    capabilities |= frozenset({'context_input_variants_v1'})
     def __init__(self, config: RuntimeConfig, *, source=".prosaic", executable="prosaic", custom_tools=None,
                  accounting=None, context_defaults=None, lifecycle=None, guards=None, allow_unbound_guards=False):
         self.lifecycle = lifecycle if lifecycle is not None else ExecutionLifecycle()
@@ -626,6 +627,15 @@ class ProsaicRuntime:
         return restore_turn(self,artifact,history=history,frozen_input=frozen_input,policy=policy,limits=limits,
             context_policy=context_policy,token_counters=token_counters,workspace=workspace,
             context_work=context_work,fresh_attempt=fresh_attempt)
+
+    def prepare_turn_variants(self,artifact,*,message,history=(),input_data_variants,policy=None,
+                              limits=None,workspace=None,context_policy,token_counters,input_profile=None,
+                              authoritative_input_data=None,authoritative_input_profile=None,authoritative_input_limits=None):
+        from .input_variants import prepare_turn_variants
+        return prepare_turn_variants(self,artifact,message=message,history=history,input_data_variants=input_data_variants,
+            policy=policy,limits=limits,workspace=workspace,context_policy=context_policy,token_counters=token_counters,
+            input_profile=input_profile,authoritative_input_data=authoritative_input_data,
+            authoritative_input_profile=authoritative_input_profile,authoritative_input_limits=authoritative_input_limits)
 
     def _preflight_names(self, names, cwd, policy, env, deadline, *, _snapshot=None):
         config, custom, cli = _snapshot if _snapshot is not None else (self.config, self._custom_tools, self._cli_tools)
