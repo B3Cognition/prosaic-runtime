@@ -76,6 +76,12 @@ jobs:
       - run: prosaic --version
       - run: pytest
       - run: python -m build
+      - name: Require installed context-pack APIs
+        run: |
+          python -m venv "$RUNNER_TEMP/runtime-context-packs"
+          "$RUNNER_TEMP/runtime-context-packs/bin/python" -m pip install dist/b3_prosaic_runtime-0.9.17-py3-none-any.whl 'b3-prosaic-runtime-postgres==0.3.0'
+          "$RUNNER_TEMP/runtime-context-packs/bin/python" -m pip check
+          "$RUNNER_TEMP/runtime-context-packs/bin/python" -I scripts/context_pack_wheel_smoke.py
 
   metering-postgres:
     runs-on: '${{ matrix.os }}'
