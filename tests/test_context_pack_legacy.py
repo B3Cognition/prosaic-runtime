@@ -34,3 +34,16 @@ def test_released_legacy_fixtures_load_unchanged():
         policy=RunPolicy(max_provider_requests=2, max_tool_calls=0), context_policy=context, token_counters=registry)
     assert second.context_identity == fixture['preparations']['2']['contextIdentity']
     assert json.loads(second._encoded) == fixture['preparations']['2']['document']
+
+
+def test_released_rule_fingerprint_is_unchanged():
+    import prosaic_runtime as api
+    content=(FIXTURE.parent/'rules.json').read_bytes()
+    assert hashlib.sha256(content).hexdigest()=='c1f803dbef9880f10d1b37b378d60a96f56adfeacbbdeaf74f085ad24241f9bf'
+    expected=json.loads(content)
+    runtime=api.ProsaicRuntime(api.RuntimeConfig({'local':api.EndpointConfig(
+        'http://127.0.0.1:9/v1','synthetic',features={'streaming':False})},{},'local',frozenset()),guards=api.generic_guards())
+    agent=api.ProsaicArtifact('approved','subagent',{},'- ALWAYS use plain links. <!-- enforce: no_wrapped_links(stage=final, on_violation=fix) -->')
+    prepared=runtime.prepare_turn(agent,message='Hello')
+    assert prepared.context_identity==expected['contextIdentity']
+    assert json.loads(prepared._encoded)['rules']==expected['rules']
