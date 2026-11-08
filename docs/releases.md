@@ -1,7 +1,7 @@
 # Releases and compatibility
 
-Compatibility checkpoint: 2026-11-08. Runtime 0.9.17 adds accounting request metadata V1;
-publication must pass its [release gates](release-0.9.17.md).
+Compatibility checkpoint: 2026-11-08. Runtime 0.9.18 adds sent reasoning-effort evidence V1;
+publication must pass its [release gates](release-0.9.18.md).
 The latest SDKs and the Lab's qualified dependency train are separate selections.
 Harness 0.9.12 uses Runtime 0.9.16 and Core 0.5.0, with declared Runtime floor
 `>=0.9.16,<0.10`. Lab0.9.10 qualifies Core0.5.0/Runtime0.9.17/Harness0.9.12 and retains the
@@ -14,7 +14,7 @@ Lab0.9.9 continues to select Runtime0.9.16; do not silently upgrade only one whe
 | Component | Latest published version | Scope |
 | --- | --- | --- |
 | Core (`b3-prosaic`) | 0.5.0 | Canonical Markdown, native outputs and inert rule tags |
-| Runtime (`b3-prosaic-runtime`) | 0.9.17 | Trusted accounting request labels; includes per-call headers and fee enforcement |
+| Runtime (`b3-prosaic-runtime`) | 0.9.18 | Actual sent effort controls/format; labels, headers and fee enforcement retained |
 | Harness (`b3-prosaic-harness`) | 0.9.12 | Workflow enforcement over accepted earlier outputs; Validator V1 retained |
 | Runtime PostgreSQL recorder | 0.3.0 | Optional usage persistence; unchanged adapter release |
 | Harness PostgreSQL store | 0.4.1 | Optional workflow/session persistence; unchanged adapter release |
@@ -42,6 +42,7 @@ Every published version is linked below. Backfilled notes explain changes using 
 
 | Release | Published (UTC) | Notes |
 | --- | --- | --- |
+| [v0.9.18](https://github.com/B3Cognition/prosaic-runtime/releases/tag/v0.9.18) | See release page | [Release notes](release-0.9.18.md) |
 | [v0.9.17](https://github.com/B3Cognition/prosaic-runtime/releases/tag/v0.9.17) | See release page | [Release notes](release-0.9.17.md) |
 | [v0.9.16](https://github.com/B3Cognition/prosaic-runtime/releases/tag/v0.9.16) | 2026-11-07 | Published notes |
 | [v0.9.15](https://github.com/B3Cognition/prosaic-runtime/releases/tag/v0.9.15) | 2026-11-06 | [backfilled notes](release-history/v0.9.15.md) |

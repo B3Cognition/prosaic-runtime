@@ -234,6 +234,14 @@ def test_zero_tool_allowance_permits_text_and_disabled_caps_preserve_metadata(se
     bounded = runner.run(artifact(), policy=RunPolicy(max_tool_calls=0))
     counts = bounded.metadata.pop('invocation_budgets_v1')
     assert counts == {'provider_requests': 1, 'tool_calls': 0, 'reported_tokens': 7, 'usage_complete': True}
+    # Additive per-dispatch observations have distinct correlation IDs.
+    old_trace = old.metadata.pop('reasoning_effort_v1')
+    bounded_trace = bounded.metadata.pop('reasoning_effort_v1')
+    assert old_trace['attempt_count'] == bounded_trace['attempt_count'] == 1
+    assert old_trace['complete'] is bounded_trace['complete'] is True
+    assert old_trace['attempts'][0]['provider_call_id'] != bounded_trace['attempts'][0]['provider_call_id']
+    old_trace['attempts'][0]['provider_call_id'] = bounded_trace['attempts'][0]['provider_call_id']
+    assert old_trace == bounded_trace
     assert bounded == old and len(requests) == 2
     assert 'invocation_budgets_v1' in runner.capabilities
 
@@ -499,7 +507,13 @@ def test_uncapped_result_and_descriptor_match_immutable_r1_golden(budget_transpo
     result = runtime(EndpointConfig('http://fixture.invalid/v1', 'test', features={'streaming': False})).run(
         artifact(), env={}, policy=RunPolicy())
     assert len(requests) == 1
-    assert asdict(result) == {'exit_code': 0, 'stdout': 'done', 'stderr': '',
+    # Preserve every literal legacy field; only the versioned observation is additive.
+    actual = asdict(result)
+    trace = actual['metadata'].pop('reasoning_effort_v1')
+    assert trace['attempt_count'] == 1 and trace['complete'] is True and trace['omitted_attempts'] == 0
+    assert len(trace['attempts']) == 1 and trace['attempts'][0]['sent'] == {}
+    assert trace['attempts'][0]['format'] == 'omitted'
+    assert actual == {'exit_code': 0, 'stdout': 'done', 'stderr': '',
         'token_usage': 7, 'cost_usd': 0.0, 'timed_out': False, 'metadata': {
             'provider': 'openai-compatible', 'request_model': 'test', 'streamed': False,
             'http_status': 200, 'raw_response_headers': {'content-type': 'application/json'},

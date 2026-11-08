@@ -124,3 +124,7 @@ installed ownership, pure preparation and a two-turn synthetic exchange. These
 versions are available on PyPI; reproducible deployments should verify the exact
 release hashes. Recorder schema/data remain
 unchanged; the adapter now selects the Runtime 0.9.x family.
+
+## Sent effort evidence
+
+Runtime0.9.18 returns bounded [`reasoning_effort_v1`](sent-reasoning-effort.md) observations. Exact sent controls are separate from requested/default annotations; provider compliance remains unobserved. HTTP call IDs join existing recorder evidence without schema changes. Private durable Result receipts retain this additive metadata.

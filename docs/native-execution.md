@@ -318,3 +318,7 @@ Critical callback failures stop execution and clean up the owned process group.
 - [Claude programmatic execution](https://code.claude.com/docs/en/headless)
 - [Codex non-interactive execution](https://learn.chatgpt.com/docs/non-interactive-mode)
 - [Codex CLI reference](https://learn.chatgpt.com/docs/cli/reference)
+
+## Sent effort evidence
+
+Runtime0.9.18 returns bounded [`reasoning_effort_v1`](sent-reasoning-effort.md) observations. Exact sent controls are separate from requested/default annotations; provider compliance remains unobserved. HTTP call IDs join existing recorder evidence without schema changes. Private durable Result receipts retain this additive metadata.
