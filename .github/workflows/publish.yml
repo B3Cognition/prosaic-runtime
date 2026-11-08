@@ -123,7 +123,7 @@ jobs:
       matrix:
         # ARM macOS hosted capacity currently cancels unassigned jobs. Keep
         # all macOS security/source/wheel checks on the available Intel pool.
-        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15-intel]
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15-intel, macos-latest]
         python: ['3.11', '3.12', '3.13']
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -320,7 +320,7 @@ jobs:
           release = importlib.util.module_from_spec(spec); spec.loader.exec_module(release)
           release.verify_upstream(Path('release/artifacts'), Path('release/upstream-wheels'))
           labels = [f'native-{os_name}-{version}-{kind}'
-                    for os_name in ('ubuntu-24.04', 'ubuntu-24.04-arm', 'macos-15-intel')
+                    for os_name in ('ubuntu-24.04', 'ubuntu-24.04-arm', 'macos-15-intel', 'macos-latest')
                     for version in ('3.11', '3.12', '3.13') for kind in ('source', 'wheel')]
           labels += [f'postgres-{os_name}-{version}' for os_name in ('ubuntu-24.04', 'ubuntu-24.04-arm') for version in ('16', '18')]
           labels += [f'floor-{os_name}' for os_name in ('ubuntu-24.04', 'ubuntu-24.04-arm')]
