@@ -16,6 +16,7 @@ from .tool_effects import ToolEffectFailure, admit_tool_effects
 from .tool_outcomes import ToolOutcome
 from .tools import ToolDeadlineExceeded, depth, execute_custom_tool, parse_arguments
 from .types import Result
+from .effort_evidence import EffortTrace, KEY as EFFORT_KEY
 
 
 def run_tool(runtime, name, arguments, *, policy=None, cwd='.', on_event=None,
@@ -41,7 +42,7 @@ def run_tool(runtime, name, arguments, *, policy=None, cwd='.', on_event=None,
         return Result(130 if reason == 'cancelled' else 1 if reason else 0,
                       '' if reason else json.dumps(value, ensure_ascii=False, allow_nan=False),
                       reason or '', token_usage=0, cost_usd=0, timed_out=timed_out,
-                      metadata={'direct_tool_v1': {'model_free': True, 'provider_requests': 0},
+                      metadata={EFFORT_KEY: EffortTrace().to_dict(), 'direct_tool_v1': {'model_free': True, 'provider_requests': 0},
                                 **({'failure_reason': reason} if reason else {})})
 
     def boundary():

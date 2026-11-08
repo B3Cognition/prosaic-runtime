@@ -237,6 +237,27 @@ class TurnCapture:
                 max_depth=self.limits.max_json_depth, max_nodes=self.limits.max_json_nodes))
         except (ValueError, TypeError, UnicodeError):
             metadata = {'failure_reason': code} if code else {}
+        # Independently validate observation-only metadata. Tight caller limits
+        # trim this extension, never accepted output or execution semantics.
+        from .effort_evidence import EffortTrace, KEY as EFFORT_KEY
+        trace = getattr(self, 'effort_trace', None)
+        if trace is None:
+            trace = EffortTrace()
+            trace.merge(result.metadata.get(EFFORT_KEY))
+        doc = trace.to_dict()
+        while doc is not None:
+            candidate = {**metadata, EFFORT_KEY: doc}
+            try:
+                metadata = json.loads(encode_owned(candidate, max_bytes=self.limits.max_metadata_bytes,
+                    max_depth=self.limits.max_json_depth, max_nodes=self.limits.max_json_nodes))
+                break
+            except (ValueError, TypeError, UnicodeError):
+                if not doc['attempts']:
+                    break
+                # Keep explicit count/omission even when no row fits.
+                doc['attempts'].pop()
+                doc['complete'] = False
+                doc['omitted_attempts'] = None if doc['attempt_count'] is None else doc['attempt_count'] - len(doc['attempts'])
         # Durable conversation receipts use unsigned exit statuses. The legacy
         # OpenAI-compatible transport reports socket/deadline timeouts as -1.
         exit_code = 124 if result.exit_code < 0 and result.timed_out else result.exit_code
