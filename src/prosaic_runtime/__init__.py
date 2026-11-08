@@ -61,6 +61,8 @@ __all__ += ["NativeRuntime"]
 
 from .input_views import AuthoritativeInputLimits
 __all__ += ['AuthoritativeInputLimits']
+from .frozen_turns import FrozenTurnInput, InputVariantSelection
+__all__ += ['FrozenTurnInput', 'InputVariantSelection']
 
 from .rules import (Guard, GuardContext, RuleAdmissionError, RuleBindingWarning, RuleSet, Verdict,
                     compile_rules, rules_fingerprint)

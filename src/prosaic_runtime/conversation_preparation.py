@@ -107,15 +107,24 @@ def tool_schemas(runtime, names):
     return builtin + custom
 
 
-def initial_payload(runtime, artifact, policy, history, message, input_data, *, context_policy=None):
+def prepared_endpoint(runtime, artifact, policy, context_policy=None):
     profile, endpoint, metadata = turn_endpoint(runtime, artifact, policy)
     if context_policy is not None:
         if any(name in endpoint.features for name in ('max_completion_tokens', 'max_output_tokens')):
             raise TurnAdmissionError('unsupportedCapability')
         endpoint = replace(endpoint, max_tokens=min(endpoint.max_tokens, context_policy.reserved_output_tokens)
             if endpoint.max_tokens is not None else context_policy.reserved_output_tokens)
+    return profile, endpoint, metadata
+
+
+def initial_payload(runtime, artifact, policy, history, message, input_data, *, context_policy=None, canonical_messages=False):
+    profile,endpoint,metadata=prepared_endpoint(runtime,artifact,policy,context_policy)
     backend = AnthropicBackend(endpoint) if endpoint.provider == 'anthropic' else OpenAICompatibleBackend(endpoint)
     messages = initial_projection(artifact, history, message, input_data, endpoint)
+    if canonical_messages:
+        # Execution uses the owned prepared messages. Match their key order
+        # before hashing/counting the native request for the new v3 profile.
+        messages=json.loads(encode_owned(messages,max_bytes=8388608))
     streaming = _feature_enabled(endpoint.features, 'streaming', default=True)
     payload = backend._chat_payload(messages, metadata, streaming=streaming,
                                     tools=tool_schemas(runtime, metadata['allowed_tools']))
@@ -125,11 +134,15 @@ def initial_payload(runtime, artifact, policy, history, message, input_data, *, 
     return profile, endpoint, metadata, messages, native
 
 
+def native_payload_digest(native):
+    return hashlib.sha256(json.dumps(native,allow_nan=False).encode('utf-8')).hexdigest()
+
+
 def prepare_turn(runtime, artifact, *, message, history=(), input_data=None, policy=None,
                  limits=None, workspace=None, context_policy=None, token_counters=None,
                  context_selection=None, context_report=None, context_work=None, _warn_rules=True,
                  input_profile=None, authoritative_input_data=None, authoritative_input_profile=None,
-                 authoritative_input_limits=None):
+                 authoritative_input_limits=None, _frozen_input=None, _input_variant_selection=None):
     limits = limits if limits is not None else TurnLimits()
     if type(limits) is not TurnLimits:
         raise TurnAdmissionError('invalidPolicy')
@@ -220,7 +233,7 @@ def prepare_turn(runtime, artifact, *, message, history=(), input_data=None, pol
             registration = admit_counter(context_policy, token_counters, endpoint)
             def candidate(history):
                 return initial_payload(runtime, owned_agent, policy, history, message, data,
-                                       context_policy=context_policy)[-1]
+                                       context_policy=context_policy,canonical_messages=views is not None)[-1]
             if context_selection is not None:
                 selected_history, report, selection, work = restore_selection(owned_history,
                     context_policy, registration, context_selection, context_report, context_work)
@@ -230,11 +243,20 @@ def prepare_turn(runtime, artifact, *, message, history=(), input_data=None, pol
                 selected_history, report, selection, work = assemble_context(owned_history,
                     candidate, context_policy, registration,
                     replace(limits, max_input_bytes=policy.max_input_bytes))
-        profile, endpoint, metadata, messages, native = initial_payload(
-            runtime, owned_agent, policy, selected_history, message, data,
-            context_policy=context_policy)
-        # This is the exact byte encoding used by both existing transports.
-        input_bytes = len(json.dumps(native, allow_nan=False).encode('utf-8'))
+        from .context_assembly import context_digest
+        if _frozen_input is None:
+            profile, endpoint, metadata, messages, native = initial_payload(
+                runtime, owned_agent, policy, selected_history, message, data,
+                context_policy=context_policy,canonical_messages=views is not None)
+            # This is the exact byte encoding used by both existing transports.
+            input_bytes = len(json.dumps(native, allow_nan=False).encode('utf-8'))
+            native_digest=native_payload_digest(native) if views is not None else None
+        else:
+            if views is None: raise TurnAdmissionError('bindingMismatch')
+            profile,endpoint,metadata=prepared_endpoint(runtime,owned_agent,policy,context_policy)
+            messages=initial_projection(owned_agent,selected_history,message,data,endpoint)
+            input_bytes=_frozen_input['inputBytes']
+            native_digest=_frozen_input['nativePayloadDigest']
         if input_bytes > policy.max_input_bytes:
             raise TurnAdmissionError('contextLimit', 'maxInputBytes')
         # Validate before copying; dataclasses.asdict recursively expands
@@ -256,6 +278,17 @@ def prepare_turn(runtime, artifact, *, message, history=(), input_data=None, pol
             material['rules'] = ruleset.material()
         if views is not None:
             material.update(views)
+            from .frozen_turns import InputVariantSelection
+            variant_selection=_input_variant_selection
+            if variant_selection is None:
+                data_digest=context_digest(data)
+                variant_selection=InputVariantSelection.from_dict(dict(version=1,inputProfile=input_profile,
+                    candidateDigests=[data_digest],selectedIndex=0,selectedDigest=data_digest,selectionWorkLimited=False))
+            if (type(variant_selection) is not InputVariantSelection or
+                    variant_selection.to_dict()['selectedDigest']!=context_digest(data) or
+                    variant_selection.to_dict()['inputProfile']!=input_profile):
+                raise TurnAdmissionError('bindingMismatch')
+            material.update(inputVariantSelection=variant_selection.to_dict(),nativePayloadDigest=native_digest)
         if context_policy is not None:
             if input_bytes != report.encoded_input_bytes:
                 raise TurnAdmissionError('bindingMismatch')
@@ -277,6 +310,11 @@ def prepare_turn(runtime, artifact, *, message, history=(), input_data=None, pol
             context_work=work)
         # Private compiled rules, reused by execution; never serialized or compared.
         object.__setattr__(prepared, '_rules', ruleset)
+        if views is not None:
+            object.__setattr__(prepared,'_initial_context_work',work.to_dict() if work is not None else None)
+            # Freezeability is an admission requirement, including combined
+            # ownership/field bounds; it must not fail after an effect.
+            prepared.export_frozen_input()
         return prepared
     except TurnAdmissionError:
         raise

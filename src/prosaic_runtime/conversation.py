@@ -361,3 +361,17 @@ class PreparedTurn:
     def context_work(self):
         from .context_contracts import ContextWorkState
         return ContextWorkState.from_dict(self._context_work.to_dict()) if self._context_work is not None else None
+
+    @property
+    def selected_input_data(self):
+        return json.loads(self._encoded)['inputData']
+
+    @property
+    def input_variant_selection(self):
+        from .frozen_turns import InputVariantSelection
+        value=json.loads(self._encoded).get('inputVariantSelection')
+        return InputVariantSelection.from_dict(value) if value is not None else None
+
+    def export_frozen_input(self):
+        from .frozen_turns import export_frozen
+        return export_frozen(self)
