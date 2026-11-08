@@ -1,5 +1,10 @@
 # Rule admission
 
+The context-pack candidate adds explicit guard input roles. When supplying
+private authoritative facts, audit shared guards and bind each to `model` or
+`authoritativeAndModel`. Private checks are fail-only and cannot echo or repair
+values. See [separate input views](context-packs.md).
+
 Prosaic Core lets prose declare which rules a host may check mechanically, with
 inert enforcement tags (see Core's `docs/rules.md`). Core parses, validates and
 strips them; it never runs anything. Runtime consumes Core's `rules` output for

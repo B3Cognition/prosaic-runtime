@@ -1,5 +1,10 @@
 # Prosaic Runtime
 
+The **0.9.19.dev0** context-pack candidate adds explicit model/private input
+views, one-budget evidence fitting and frozen restoration. See
+[profiled context inputs](docs/context-packs.md). It is not yet published or
+qualified by hosted CI. Harness owns named packs and per-node selection.
+
 Current release: **0.9.17**. See [release notes and compatible SDK versions](docs/releases.md).
 
 Runtime **0.9.17** adds bounded trusted-host `ExecutionContext(request_metadata={'run': 'benchmark-42', 'variant': 'baseline'})` labels. Recorder `prepare(intent)` sees the frozen labels before dispatch; they never enter provider prompts, bodies or headers. Empty labels preserve legacy accounting bytes. Existing Harness 0.9.12 retains saved labels across resume, and recorder 0.3.0 uses its existing schema. See [the context and migration contract](docs/accounting.md#request-metadata-v1) and [0.9.17 release notes](docs/release-0.9.17.md).

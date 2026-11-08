@@ -1,5 +1,9 @@
 # Stateless conversation turns
 
+For explicit model/private views, evidence variants sharing the history budget,
+and frozen restoration, see [profiled context inputs](context-packs.md).
+Default callers retain existing payloads and identities.
+
 ## Optional token-aware context admission
 
 `context_assembly_v1` adds optional `ContextPolicy` and host-supplied

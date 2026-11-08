@@ -39,4 +39,7 @@ recursive-include docs/release-history *.md
 
 include docs/release-0.9.17.md
 include tests/test_accounting_request_metadata.py
+include docs/context-packs.md docs/release-0.9.19.dev0.md
+include scripts/context_pack_wheel_smoke.py
+include tests/test_context_pack_installed.py
 recursive-include adapters/postgres/tests *.py

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.19.dev0 — candidate, unpublished
+
+- Add explicit input profiles and independent private guard facts with fail-only feedback.
+- Fit evidence variants and retained history within one bounded context-work budget.
+- Restore frozen v3 turns without recapture, recomposition or counting; preserve legacy payloads and identities by default.
+- Export `guard_input_views_v1`, `frozen_turn_inputs_v1` and `context_input_variants_v1`.
+- Core and the published PostgreSQL recorder remain unchanged. See [candidate qualification](docs/release-0.9.19.dev0.md).
+
 See [published release notes and compatibility](docs/releases.md), including backfilled historical release notes. The documentation-only refresh on 2026-11-07 preserved the packages and archives published at that time. Versioned changes below describe later releases; old artifacts remain immutable.
 
 ## 0.9.17
