@@ -6,9 +6,9 @@ Runtime **0.9.18** reports the reasoning-effort controls and format actually sen
 
 Runtime **0.9.17** adds bounded trusted-host `ExecutionContext(request_metadata={'run': 'benchmark-42', 'variant': 'baseline'})` labels. Recorder `prepare(intent)` sees the frozen labels before dispatch; they never enter provider prompts, bodies or headers. Empty labels preserve legacy accounting bytes. Existing Harness 0.9.12 retains saved labels across resume, and recorder 0.3.0 uses its existing schema. See [the context and migration contract](docs/accounting.md#request-metadata-v1) and [0.9.17 release notes](docs/release-0.9.17.md).
 
-[Lab0.9.10](https://github.com/B3Cognition/prosaic-integration-lab/releases/tag/v0.9.10)
-qualifies the complete Core0.5.0/Runtime0.9.17/Harness0.9.12 train and supplies a
-[copyable accounting host](https://github.com/B3Cognition/prosaic-integration-lab/blob/v0.9.10/docs/accounting-request-metadata.md).
+[Lab0.9.11](https://github.com/B3Cognition/prosaic-integration-lab/releases/tag/v0.9.11)
+qualifies the complete Core0.5.0/Runtime0.9.18/Harness0.9.12 train and supplies a
+[copyable sent-effort host](https://github.com/B3Cognition/prosaic-integration-lab/blob/v0.9.11/docs/sent-reasoning-effort.md).
 Its release page carries publication and public-consumer evidence; earlier
 manifests remain unchanged and partial mixtures are not qualified.
 

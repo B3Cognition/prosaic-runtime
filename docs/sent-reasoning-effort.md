@@ -70,3 +70,9 @@ input identities and accounting hashes are unchanged. Private saved Result
 receipts gain additive metadata; published Harness 0.9.12 retains it without a
 new store schema. Old receipts remain readable without invented traces. Hosts
 must filter operator/private receipts before publishing application views.
+
+[Lab0.9.11](https://github.com/B3Cognition/prosaic-integration-lab/releases/tag/v0.9.11)
+provides the [copyable sent-effort blueprint](https://github.com/B3Cognition/prosaic-integration-lab/blob/v0.9.11/docs/sent-reasoning-effort.md)
+and complete Core0.5.0/Runtime0.9.18/Harness0.9.12 qualification, including actual
+old-receipt recovery. Its release evidence distinguishes synthetic controls,
+real PostgreSQL persistence and public distribution checks from live providers.

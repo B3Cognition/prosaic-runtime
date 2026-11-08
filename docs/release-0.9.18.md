@@ -32,3 +32,8 @@ real PostgreSQL16/18 gates. Only original successful CI-qualified bytes with
 Core0.5.0 lineage may be promoted. The release page supplies actual qualification
 and public-download evidence; a planned command is not a passing test. The Lab
 blueprint is qualified and released separately against actual public SDK bytes.
+
+The matching consumer is now [Lab0.9.11](https://github.com/B3Cognition/prosaic-integration-lab/releases/tag/v0.9.11),
+with a [copyable sent-effort host](https://github.com/B3Cognition/prosaic-integration-lab/blob/v0.9.11/docs/sent-reasoning-effort.md)
+and complete released-train qualification. This documentation update changes no
+published Runtime package, tag, adapter or receipt bytes.
