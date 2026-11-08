@@ -126,7 +126,7 @@ def restore_turn(runtime,artifact,*,history=(),frozen_input,policy,limits,contex
         if context_digest(owned_history)!=frozen['sourceHistoryDigest']: raise ValueError('source history binding')
         from .context_contracts import ContextSelection,ContextAssemblyReport,ContextWorkState
         if frozen['contextWork'] is None:
-            if context_work is not None or fresh_attempt: raise ValueError('no execution work')
+            if context_work is not None: raise ValueError('no execution work')
             work=None
         else:
             current=frozen['contextWork']; initial=frozen['initialContextWork']

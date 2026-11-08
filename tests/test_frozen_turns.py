@@ -130,3 +130,16 @@ def test_restore_readmits_actual_tool_and_guard_registrations(damage):
         else: frozen['inputProfile']='different'
         with pytest.raises(api.TurnAdmissionError): runtime_for(fx,guards=[guard]).restore_turn(agent,frozen_input=frozen,policy=fx.policy,limits=api.TurnLimits())
         assert not fx.raw_requests
+
+
+@pytest.mark.parametrize('provider',['openai-compatible','anthropic'])
+def test_explicit_fresh_byte_only_attempt_advances_epoch_without_inventing_work(provider):
+    with ConversationFixture(provider) as fx:
+        runtime=runtime_for(fx);agent=tagged('Review captured facts.')
+        prepared=runtime.prepare_turn(agent,message='Exact current message',input_data={'selected':'captured'},input_profile='pack-v1',policy=fx.policy)
+        frozen=prepared.export_frozen_input()
+        restored=runtime.restore_turn(agent,frozen_input=frozen,policy=fx.policy,limits=api.TurnLimits(),fresh_attempt=True)
+        value=restored.export_frozen_input().to_dict()
+        assert value['executionAttempt']==2 and value['contextWork'] is None
+        assert restored.context_identity==prepared.context_identity and value['selectedInputData']==frozen.to_dict()['selectedInputData']
+        assert fx.raw_requests==[]
