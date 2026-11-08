@@ -269,10 +269,13 @@ class TurnEvidence(_OwnedRecord):
     def from_dict(cls, document):
         encoded = encode_owned(document)
         value = json.loads(encoded)
-        _closed(value, {'version', 'providerAttempts', 'toolAttempts', 'knownUsage',
-                        'usageComplete', 'toolOutcomes', 'failureCode', 'accounting'})
-        if type(value['version']) is not int or value['version'] != 1:
+        if type(value.get('version')) is not int or value['version'] not in (1,2):
             raise ValueError('invalid evidence version')
+        _closed(value, {'version', 'providerAttempts', 'toolAttempts', 'knownUsage',
+                        'usageComplete', 'toolOutcomes', 'failureCode', 'accounting'} | ({'inputViews'} if value['version']==2 else set()))
+        if value['version']==2:
+            from .input_views import validate_views
+            validate_views(value['inputViews'])
         for key in ('providerAttempts', 'toolAttempts'):
             if type(value[key]) is not int or value[key] < 0:
                 raise ValueError('invalid attempt count')

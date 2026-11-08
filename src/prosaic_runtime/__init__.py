@@ -59,6 +59,9 @@ __all__ += ["NativeProfile", "ProfilePool", "NativePolicy", "NativeRuntimeConfig
 from .native import NativeRuntime
 __all__ += ["NativeRuntime"]
 
+from .input_views import AuthoritativeInputLimits
+__all__ += ['AuthoritativeInputLimits']
+
 from .rules import (Guard, GuardContext, RuleAdmissionError, RuleBindingWarning, RuleSet, Verdict,
                     compile_rules, rules_fingerprint)
 from .guards import generic_guards

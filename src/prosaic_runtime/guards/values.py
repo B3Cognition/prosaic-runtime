@@ -350,7 +350,7 @@ def _check(stage, context):
     )
 
 
-def value_in_tool_output():
+def value_in_tool_output(*, input_access='shared'):
     # Refused values are regex-constrained figures ("EUR 650", "3x", "EUR 1.2.3"): a marker,
     # sign, spacing or emphasis, digits, separators and a scale only, which cannot carry
     # instructions, so this guard opts in to echoing them in answer-stage retry feedback.
@@ -361,4 +361,5 @@ def value_in_tool_output():
         _check,
         echo_values=True,
         settings_schema=_SCHEMA,
+        input_access=input_access,
     )

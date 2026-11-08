@@ -13,6 +13,7 @@ from .values import value_in_tool_output
 __all__ = ['generic_guards', 'no_wrapped_links', 'value_in_tool_output', 'args_reference_seen_ids', 'strict_json']
 
 
-def generic_guards():
+def generic_guards(*, input_access='shared'):
     """Fresh registrations of the four generic guards, for an explicit host opt-in."""
-    return (no_wrapped_links(), value_in_tool_output(), args_reference_seen_ids(), strict_json())
+    return (no_wrapped_links(input_access=input_access), value_in_tool_output(input_access=input_access),
+            args_reference_seen_ids(input_access=input_access), strict_json(input_access=input_access))

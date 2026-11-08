@@ -387,6 +387,7 @@ class ProsaicRuntime:
     capabilities |= frozenset({'terminal_tool_v1'})
     capabilities |= frozenset({'rule_admission_v1'})
     capabilities |= frozenset({'accounting_request_metadata_v1'})
+    capabilities |= frozenset({'guard_input_views_v1'})
     def __init__(self, config: RuntimeConfig, *, source=".prosaic", executable="prosaic", custom_tools=None,
                  accounting=None, context_defaults=None, lifecycle=None, guards=None, allow_unbound_guards=False):
         self.lifecycle = lifecycle if lifecycle is not None else ExecutionLifecycle()
@@ -432,21 +433,25 @@ class ProsaicRuntime:
     def prepare_turn(self, artifact, *, message, history=(), input_data=None,
                      policy=None, limits=None, workspace=None, context_policy=None,
                      token_counters=None, context_selection=None, context_report=None, context_work=None,
-                     _warn_rules=True):
+                     _warn_rules=True, input_profile=None, authoritative_input_data=None,
+                     authoritative_input_profile=None, authoritative_input_limits=None):
         """Purely admit and own one role-aware conversational input."""
         from .conversation_preparation import prepare_turn
         return prepare_turn(self, artifact, message=message, history=history,
                             input_data=input_data, policy=policy, limits=limits, workspace=workspace,
                             context_policy=context_policy, token_counters=token_counters,
                             context_selection=context_selection, context_report=context_report,
-                            context_work=context_work, _warn_rules=_warn_rules)
+                            context_work=context_work, _warn_rules=_warn_rules,input_profile=input_profile,
+                            authoritative_input_data=authoritative_input_data,
+                            authoritative_input_profile=authoritative_input_profile,authoritative_input_limits=authoritative_input_limits)
 
     @tracked
     def turn(self, artifact, *, message=None, history=(), input_data=None,
              policy=None, limits=None, workspace=None, on_event=None, cancelled=None,
              env=None, context=None, accounting=None, observer=None,
              operation_context=None, tool_journal=None, context_policy=None,
-             token_counters=None, context_work=None, context_checkpoint=None, on_admitted=None, request_headers=None):
+             token_counters=None, context_work=None, context_checkpoint=None, on_admitted=None, request_headers=None,
+             input_profile=None, authoritative_input_data=None, authoritative_input_profile=None, authoritative_input_limits=None):
         """Execute one bounded role-aware turn; streamed events are provisional."""
         from .request_headers import snapshot_headers
         owned_headers = snapshot_headers(request_headers)
@@ -455,13 +460,13 @@ class ProsaicRuntime:
         from .turn_capture import TurnCapture
         guard = None
         if type(artifact) is PreparedTurn:
-            if message is not None or history or input_data is not None or policy is not None or limits is not None or workspace is not None or context_policy is not None:
+            if message is not None or history or input_data is not None or policy is not None or limits is not None or workspace is not None or context_policy is not None or any(v is not None for v in (input_profile,authoritative_input_data,authoritative_input_profile,authoritative_input_limits)):
                 raise TurnAdmissionError('invalidPolicy')
             try:
                 owned = json.loads(artifact._encoded)
                 approved = ProsaicArtifact.from_inspection(owned['agent'])
                 context_args = {}
-                if artifact.encoding_version == 'conversation-turn-v2':
+                if 'contextPolicy' in owned:
                     from .context_contracts import ContextPolicy
                     if context_work is not None:
                         original = artifact.context_work
@@ -475,6 +480,12 @@ class ProsaicRuntime:
                         context_work=context_work if context_work is not None else artifact.context_work)
                 elif token_counters is not None or context_work is not None:
                     raise TurnAdmissionError('invalidPolicy')
+                if artifact.encoding_version=='conversation-turn-v3':
+                    from .input_views import AuthoritativeInputLimits
+                    context_args.update(input_profile=owned['inputProfile'],
+                        authoritative_input_data=owned['authoritativeInputData'],
+                        authoritative_input_profile=owned['authoritativeInputProfile'],
+                        authoritative_input_limits=AuthoritativeInputLimits(**owned['authoritativeInputLimits']) if owned['authoritativeInputLimits'] is not None else None)
                 # Readmission repeats admission silently; warnings were raised at preparation.
                 prepared = self.prepare_turn(approved, message=owned['message'],
                     history=tuple(ConversationMessage.from_dict(m) for m in owned['history']),
@@ -490,7 +501,9 @@ class ProsaicRuntime:
         else:
             prepared = self.prepare_turn(artifact, message=message, history=history,
                 input_data=input_data, policy=policy, limits=limits, workspace=workspace,
-                context_policy=context_policy, token_counters=token_counters)
+                context_policy=context_policy, token_counters=token_counters,input_profile=input_profile,
+                authoritative_input_data=authoritative_input_data,authoritative_input_profile=authoritative_input_profile,
+                authoritative_input_limits=authoritative_input_limits)
             if context_work is not None:
                 raise TurnAdmissionError('invalidPolicy')
             owned = json.loads(prepared._encoded)
@@ -520,6 +533,8 @@ class ProsaicRuntime:
         except (ValueError, TypeError, AttributeError) as exc:
             raise TurnAdmissionError('invalidPolicy') from exc
         capture, budget = TurnCapture(owned['message'], scope, limits), InvocationBudget(policy)
+        if 'inputViews' in owned:
+            capture.bind_input_views(owned['inputViews'])
         # Freeze attribution and the destination before any host observation.
         recorder = accounting if accounting is not None else self.accounting
         enabled = recorder is not None or context is not None or self.context_defaults is not None
@@ -531,7 +546,7 @@ class ProsaicRuntime:
         except (ValueError, TypeError, AttributeError):
             raise TurnAdmissionError('invalidPolicy') from None
         frozen_accounting = (recorder, resolved, enabled)
-        if prepared.encoding_version == 'conversation-turn-v2':
+        if 'contextPolicy' in owned:
             if enabled:
                 # Freeze evidence attribution/headroom before readmission or the
                 # host marker. This creates no accounting intent or model effect.
@@ -877,6 +892,7 @@ class ProsaicRuntime:
                         from .rule_hooks import RuleHooks
                         backend.rule_hooks = _turn_prepared['_ruleHooks'] = RuleHooks(
                             ruleset, message=_turn_prepared['message'], input_data=_turn_prepared['inputData'],
+                            authoritative_input_data=_turn_prepared.get('authoritativeInputData'),
                             budget=_budget, check_boundary=backend.check_boundary)
                         answer_rules = any(b.bound for b in ruleset.at('before_answer') + ruleset.at('final'))
                     from .events import withheld_text

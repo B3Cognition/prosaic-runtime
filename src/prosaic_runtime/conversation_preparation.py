@@ -127,7 +127,9 @@ def initial_payload(runtime, artifact, policy, history, message, input_data, *, 
 
 def prepare_turn(runtime, artifact, *, message, history=(), input_data=None, policy=None,
                  limits=None, workspace=None, context_policy=None, token_counters=None,
-                 context_selection=None, context_report=None, context_work=None, _warn_rules=True):
+                 context_selection=None, context_report=None, context_work=None, _warn_rules=True,
+                 input_profile=None, authoritative_input_data=None, authoritative_input_profile=None,
+                 authoritative_input_limits=None):
     limits = limits if limits is not None else TurnLimits()
     if type(limits) is not TurnLimits:
         raise TurnAdmissionError('invalidPolicy')
@@ -196,6 +198,15 @@ def prepare_turn(runtime, artifact, *, message, history=(), input_data=None, pol
         raise
     except (TypeError, ValueError, UnicodeError) as exc:
         raise TurnAdmissionError('inputLimit', 'inputData') from exc
+    from .input_views import bind_views
+    views=bind_views(ruleset,data,input_profile=input_profile,
+        authoritative_input_data=authoritative_input_data,authoritative_input_profile=authoritative_input_profile,
+        authoritative_input_limits=authoritative_input_limits)
+    if views is not None:
+        # Reserve the receipt's additional identity data before any provider/tool work.
+        overhead=len(encode_owned(views['inputViews']))
+        if overhead+1024+(policy.max_tool_calls*1536 if names else 0)>limits.max_evidence_bytes:
+            raise TurnAdmissionError('inputLimit','maxEvidenceBytes')
     try:
         selected_history = owned_history
         report, selection, work = None, None, None
@@ -243,6 +254,8 @@ def prepare_turn(runtime, artifact, *, message, history=(), input_data=None, pol
         if not ruleset.empty:
             # Guard versions and effective bindings: readmission detects drift.
             material['rules'] = ruleset.material()
+        if views is not None:
+            material.update(views)
         if context_policy is not None:
             if input_bytes != report.encoded_input_bytes:
                 raise TurnAdmissionError('bindingMismatch')
@@ -250,14 +263,17 @@ def prepare_turn(runtime, artifact, *, message, history=(), input_data=None, pol
                 'contextPolicy': context_policy.to_dict(),
                 'counterDescriptor': registration.descriptor.to_dict(),
                 'contextSelection': selection.to_dict(), 'contextReport': report.to_dict()})
-        encoded = encode_owned(material, max_bytes=limits.max_history_bytes + limits.max_input_bytes * 2,
+        ownership_cap=limits.max_history_bytes+limits.max_input_bytes*2
+        if views is not None and views['authoritativeInputLimits'] is not None:
+            ownership_cap+=views['authoritativeInputLimits']['max_bytes']
+        encoded = encode_owned(material, max_bytes=ownership_cap,
             max_depth=limits.max_json_depth, max_nodes=limits.max_json_nodes)
         identity_material = {k: v for k, v in material.items() if k != 'workspace'}
         identity = hashlib.sha256(encode_owned(identity_material,
-            max_bytes=limits.max_history_bytes + limits.max_input_bytes * 2,
+            max_bytes=ownership_cap,
             max_depth=limits.max_json_depth, max_nodes=limits.max_json_nodes)).hexdigest()
         prepared = PreparedTurn._create(encoded, identity, input_bytes,
-            encoding_version='conversation-turn-v2' if context_policy is not None else 'conversation-turn-v1',
+            encoding_version='conversation-turn-v3' if views is not None else ('conversation-turn-v2' if context_policy is not None else 'conversation-turn-v1'),
             context_work=work)
         # Private compiled rules, reused by execution; never serialized or compared.
         object.__setattr__(prepared, '_rules', ruleset)
