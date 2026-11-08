@@ -14,7 +14,7 @@ Lab0.9.9 continues to select Runtime0.9.16; do not silently upgrade only one whe
 | Component | Latest published version | Scope |
 | --- | --- | --- |
 | Core (`b3-prosaic`) | 0.5.0 | Canonical Markdown, native outputs and inert rule tags |
-| Runtime (`b3-prosaic-runtime`) | 0.9.17 | Trusted accounting request labels; includes per-call headers and fee enforcement |
+| Runtime (`b3-prosaic-runtime`) | 0.9.18 | Actual sent effort controls/format; labels, headers and fee enforcement retained |
 | Harness (`b3-prosaic-harness`) | 0.9.12 | Workflow enforcement over accepted earlier outputs; Validator V1 retained |
 | Runtime PostgreSQL recorder | 0.3.0 | Optional usage persistence; unchanged adapter release |
 | Harness PostgreSQL store | 0.4.1 | Optional workflow/session persistence; unchanged adapter release |
