@@ -50,7 +50,7 @@ Core0.5.0/Harness0.9.12; PostgreSQL16/18; exact qualified CI artifact promotion.
 5. Actual published recorder and Harness compatibility, old SDK family selection,
    installed wheel/source ownership and required PG cleanup must be proved.
 
-## Task1: Context contract and common capture behavior
+## Task 1: Context contract and common capture behavior
 
 **Files:** create src/prosaic_runtime/accounting_metadata.py and
  tests/test_accounting_request_metadata.py; modify src/prosaic_runtime/accounting.py
@@ -83,7 +83,7 @@ Core0.5.0/Harness0.9.12; PostgreSQL16/18; exact qualified CI artifact promotion.
   compare failures against implementation/spec, not weakened saved expectations.
 - [ ] Commit the independently testable context/capture feature.
 
-## Task2: Durable recorder and Harness compatibility
+## Task 2: Durable recorder and Harness compatibility
 
 **Files:** add adapters/postgres/tests/test_request_metadata.py and public installed
  compatibility probes under review/ (untracked private probes may be copied into
@@ -111,7 +111,7 @@ Core0.5.0/Harness0.9.12; PostgreSQL16/18; exact qualified CI artifact promotion.
   tests; actual PG16/18 remains required hosted if local engine unavailable.
 - [ ] Commit coverage/qualification changes. Do not republish unchanged adapters.
 
-## Task3: Runtime qualification, merge and immutable publication
+## Task 3: Runtime qualification, merge and immutable publication
 
 **Files:** pyproject.toml, src/prosaic_runtime/__init__.py, version assertions,
  .github/workflows/test.yml/publish.yml filenames, README.md, docs/accounting.md,
@@ -137,7 +137,7 @@ Core0.5.0/Harness0.9.12; PostgreSQL16/18; exact qualified CI artifact promotion.
   failed-job recovery. Verify PyPI/GitHub anonymous bytes/fresh ordinary resolver,
   installed feature gates and all post-merge checks.
 
-## Task4: Lab blueprint, actual released train and publication
+## Task 4: Lab blueprint, actual released train and publication
 
 **Files:** create lab_runner/blueprints/accounting_metadata/, installed feature
  tests, required PG recovery tests and docs/accounting-request-metadata.md;
