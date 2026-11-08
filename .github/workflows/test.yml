@@ -25,6 +25,7 @@ jobs:
         run: |
           python -m pip install ./.ci-prosaic
           python -m pip install -e '.[test]'
+          python -m pip install --force-reinstall --no-deps 'https://files.pythonhosted.org/packages/0d/a8/8b926410b806448dd7762c8b04f7c4c6b0b86d2837b8a5c30d374aa892c0/b3_prosaic_harness-0.9.12-py3-none-any.whl#sha256=fb07797c3e42ab2e7e8f0a727b7bd25229e9b223cf15309716f10ff9d1f1147b'
       - name: Install Linux CLI sandbox backend
         if: runner.os == 'Linux'
         run: |
@@ -118,7 +119,7 @@ jobs:
           python -m build adapters/postgres
       - name: Install release wheels
         run: |
-          python -m pip install dist/b3_prosaic_runtime-0.9.17-py3-none-any.whl
+          python -m pip install dist/b3_prosaic_runtime-0.9.18-py3-none-any.whl
           python -m pip install adapters/postgres/dist/b3_prosaic_runtime_postgres-0.3.0-py3-none-any.whl
       - name: Use the immutable published recorder 0.3.0 for PostgreSQL compatibility
         run: python -m pip install --force-reinstall --no-deps 'https://files.pythonhosted.org/packages/4f/95/39d4602749df2e83a8d7afc4f9f68819e0dea48c2f688d824f8a07ed1aae/b3_prosaic_runtime_postgres-0.3.0-py3-none-any.whl#sha256=5f29ce5b0a1cb3ce4ee41f44c50e322b5b1af73cbe186ecadc428f81ccc7b5ca'

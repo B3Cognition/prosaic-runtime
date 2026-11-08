@@ -169,3 +169,7 @@ remain explicit operational requirements.
 
 See [PostgreSQL installation, privileges and recovery](../adapters/postgres/README.md)
 and the companion Harness `docs/accounting.md` for frozen attribution across resume.
+
+## Sent effort evidence
+
+Runtime0.9.18 returns bounded [`reasoning_effort_v1`](sent-reasoning-effort.md) observations. Exact sent controls are separate from requested/default annotations; provider compliance remains unobserved. HTTP call IDs join existing recorder evidence without schema changes. Private durable Result receipts retain this additive metadata.

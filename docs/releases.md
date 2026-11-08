@@ -1,7 +1,7 @@
 # Releases and compatibility
 
-Compatibility checkpoint: 2026-11-08. Runtime 0.9.17 adds accounting request metadata V1;
-publication must pass its [release gates](release-0.9.17.md).
+Compatibility checkpoint: 2026-11-08. Runtime 0.9.18 adds sent reasoning-effort evidence V1;
+publication must pass its [release gates](release-0.9.18.md).
 The latest SDKs and the Lab's qualified dependency train are separate selections.
 Harness 0.9.12 uses Runtime 0.9.16 and Core 0.5.0, with declared Runtime floor
 `>=0.9.16,<0.10`. Lab0.9.10 qualifies Core0.5.0/Runtime0.9.17/Harness0.9.12 and retains the
@@ -42,6 +42,7 @@ Every published version is linked below. Backfilled notes explain changes using 
 
 | Release | Published (UTC) | Notes |
 | --- | --- | --- |
+| [v0.9.18](https://github.com/B3Cognition/prosaic-runtime/releases/tag/v0.9.18) | See release page | [Release notes](release-0.9.18.md) |
 | [v0.9.17](https://github.com/B3Cognition/prosaic-runtime/releases/tag/v0.9.17) | See release page | [Release notes](release-0.9.17.md) |
 | [v0.9.16](https://github.com/B3Cognition/prosaic-runtime/releases/tag/v0.9.16) | 2026-11-07 | Published notes |
 | [v0.9.15](https://github.com/B3Cognition/prosaic-runtime/releases/tag/v0.9.15) | 2026-11-06 | [backfilled notes](release-history/v0.9.15.md) |
