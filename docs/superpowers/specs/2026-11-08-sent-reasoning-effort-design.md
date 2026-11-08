@@ -11,8 +11,9 @@ reached the transport. A request proves neither provider receipt nor compliance.
 Report the actual allowlisted controls at the dispatch boundary, including
 defaults, omission, tools, guard repair, failures and safe pool fallback.
 
-This extends the exported ProsaicRuntime run/turn/execute_prepared,
+This extends the exported ProsaicRuntime run/turn (including turn(PreparedTurn)),
 NativeRuntime and UnifiedRuntime result contracts and RuntimeAdapter aggregation.
+The model-free run_tool result explicitly reports zero transport attempts.
 Low-level raw transport/constrained helpers are internal, not a second public
 result contract. Native evidence describes process arguments; inner CLI model
 requests and local vendor settings are unobserved. Anthropic effort remains
