@@ -2,10 +2,13 @@
 from dataclasses import dataclass, replace, fields
 from datetime import datetime, timezone
 from decimal import Decimal, localcontext, ROUND_HALF_EVEN, InvalidOperation
+from collections.abc import Mapping
 import hashlib
 import json
 import re
 import uuid
+
+from .accounting_metadata import snapshot_metadata, encode_metadata, decode_metadata
 
 
 class AccountingError(RuntimeError):
@@ -46,11 +49,13 @@ class ExecutionContext:
     invocation_id: str | None = None
     parent_invocation_id: str | None = None
     step_id: str | None = None
+    request_metadata: Mapping[str, str] | None = None
 
     def __post_init__(self):
+        object.__setattr__(self, 'request_metadata', snapshot_metadata(self.request_metadata))
         for f in fields(self):
             value = getattr(self, f.name)
-            if value is not None:
+            if f.name != 'request_metadata' and value is not None:
                 identifier(value)
 
     def resolve(self, defaults=None):
@@ -70,6 +75,7 @@ class ExecutionContext:
         values.update({name: getattr(self, name) for name in OPTIONAL})
         values['request_id'] = self.request_id or uuid.uuid4().hex
         values['invocation_id'] = self.invocation_id or uuid.uuid4().hex
+        values['request_metadata'] = self.request_metadata
         return ResolvedContext(**values, sources=tuple(sources))
 
 
@@ -86,29 +92,37 @@ class ResolvedContext:
     parent_invocation_id: str | None = None
     step_id: str | None = None
     sources: tuple[str, ...] = ('provided', 'provided', 'provided')
+    request_metadata: Mapping[str, str] | None = None
 
     def __post_init__(self):
+        object.__setattr__(self, 'request_metadata', snapshot_metadata(self.request_metadata))
         for name in (*ATTRIBUTION, 'request_id', 'invocation_id'):
             identifier(getattr(self, name))
         for f in fields(self):
-            if f.name != 'sources' and getattr(self, f.name) is not None:
+            if f.name not in {'sources', 'request_metadata'} and getattr(self, f.name) is not None:
                 identifier(getattr(self, f.name))
         if type(self.sources) is not tuple or len(self.sources) != 3 or any(s not in {'provided', 'configured', 'default'} for s in self.sources):
             raise ValueError('invalid attribution provenance')
 
     def to_dict(self):
-        result = {f.name: getattr(self, f.name) for f in fields(self) if f.name != 'sources'}
+        result = {f.name: getattr(self, f.name) for f in fields(self) if f.name not in {'sources', 'request_metadata'}}
         result['attribution_source'] = dict(zip(ATTRIBUTION, self.sources))
+        if self.request_metadata:
+            result['request_metadata'] = encode_metadata(self.request_metadata)
         return result
 
     @classmethod
     def from_dict(cls, value):
-        if type(value) is not dict or set(value) != {f.name for f in fields(cls)} - {'sources'} | {'attribution_source'}:
+        legacy = {f.name for f in fields(cls)} - {'sources', 'request_metadata'} | {'attribution_source'}
+        if type(value) is not dict or set(value) not in (legacy, legacy | {'request_metadata'}):
             raise ValueError('invalid execution context schema')
         source = value['attribution_source']
         if type(source) is not dict or set(source) != set(ATTRIBUTION):
             raise ValueError('invalid attribution provenance')
-        return cls(**{k: v for k, v in value.items() if k != 'attribution_source'}, sources=tuple(source[n] for n in ATTRIBUTION))
+        values = {k: v for k, v in value.items() if k not in {'attribution_source', 'request_metadata'}}
+        if 'request_metadata' in value:
+            values['request_metadata'] = decode_metadata(value['request_metadata'])
+        return cls(**values, sources=tuple(source[n] for n in ATTRIBUTION))
 
     def child(self, *, invocation_id, run_id=None, step_id=None):
         return replace(self, invocation_id=invocation_id, parent_invocation_id=self.invocation_id,

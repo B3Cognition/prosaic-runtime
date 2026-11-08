@@ -6,13 +6,14 @@ definitions do not contain customer identities.
 
 ## Installation
 
-`b3-prosaic-runtime` 0.8.0 includes `accounting_v1`; the separately installed
-`b3-prosaic-runtime-postgres` recorder is 0.2.0 and selects Runtime 0.8.x.
+`b3-prosaic-runtime` 0.9.17 includes `accounting_v1` and
+`accounting_request_metadata_v1`; the separately installed
+`b3-prosaic-runtime-postgres` recorder stays at its published 0.3.0 bytes.
 Install into a fresh environment/image; legacy distributions share import paths.
 Older unmetered callers remain supported. After publication use:
 
 ```sh
-python -m pip install 'b3-prosaic-runtime==0.8.0' 'b3-prosaic-runtime-postgres==0.2.0'
+python -m pip install 'b3-prosaic-runtime==0.9.17' 'b3-prosaic-runtime-postgres==0.3.0'
 ```
 
 ## Configure a recorder in trusted host code
@@ -63,6 +64,71 @@ cost. Query the recorder for decimal estimates and coverage. An unknown measurem
 is not zero; missing final usage remains unresolved or partial. Conflicting or
 duplicate-key provider evidence is quarantined. Repeated identical streaming usage
 snapshots are not summed; standard null usage chunks are ignored.
+
+## Request metadata V1
+
+Trusted host code may supply small diagnostic labels through the existing context:
+
+```python
+context = ExecutionContext(
+    tenant_id='tenant-42', billing_account_id='account-42', run_id='benchmark-42',
+    request_metadata={'run': 'benchmark-42', 'variant': 'cold-cache'},
+)
+# Use context=context with run(), turn(), a prepared turn, or Harness(context=...).
+# In a custom recorder's prepare(intent), before HTTP dispatch:
+# labels = intent['context'].get('request_metadata', {}).get('labels', {})
+```
+
+`prepare(intent)` already receives requested model, profile, artifact and trusted
+run/step attribution. V1 adds labels, not the raw request. Nonempty labels serialize
+as `context.request_metadata = {'version': 1, 'labels': {...}}`; top-level
+intent/observation versions stay 1. Both supported API wires and each accounted
+acquisition/tool/repair request use the same frozen labels. Native CLI accounting
+keeps its existing unsupported scope; no new CLI label flags are introduced.
+
+Constructors snapshot the mapping immediately. Public `request_metadata` is a
+read-only map; `ResolvedContext.to_dict()` returns a fresh plain JSON copy. Child
+contexts retain labels. Recorder/deployment defaults inherit attribution fields
+only, never metadata. None/empty maps omit the extension entirely.
+
+At most 16 labels are accepted. Keys match `[A-Za-z][A-Za-z0-9_.-]{0,63}`; values
+are nonempty printable Unicode, at most 256 characters and 256 UTF-8 bytes each.
+The map's sorted compact canonical JSON, including escaped Unicode, is at most
+4096 bytes. Invalid input raises a fixed ValueError before recorder or provider
+effects. Nested values, non-string types, duplicate mapping items and custom
+string hooks are refused. Persisted extensions require exactly version 1 and a
+nonempty labels map; unknown versions/keys are refused.
+
+Keys are case-insensitively reserved for existing context identity fields
+(`application_id`, `tenant_id`, `billing_account_id`, `actor_id`, `project_id`,
+`request_id`, `run_id`, `invocation_id`, `parent_invocation_id`, `step_id`), recorder
+scope (`namespace`, `environment`, `provider_id`, `credential_account`) and raw
+request/credentials (`authorization`, `api_key`, `api-key`, `headers`,
+`request_headers`, `prompt`, `messages`, `tools`, `input`, `input_data`). Use `run`
+for a diagnostic label, `run_id` for actual trusted identity. Hosts must avoid
+putting secrets under arbitrary label names; text validation cannot detect them.
+
+Labels never authorize tenants/actors/payers, choose storage scope/rates, grant
+retry consent or make estimates billing-eligible. They are not copied from client
+or model input, and do not reach provider payloads/headers or prompts. Operator
+`calls()` and private checkpoints/receipts contain labels; filter public views as
+before. `report()` filters and assessments are unchanged and do not use labels.
+
+**Identity and resume:** Artifact digests, rule fingerprints, prepared turn and
+workflow/bundle identities gain no fields. Absent/empty metadata preserves legacy
+context/intent serialization and accounting hashes exactly. Present labels
+intentionally enter the accounting payload hash and sealed private checkpoints/
+receipts: identical intent replay is idempotent; changed labels under the same
+call ID conflict. Existing Harness 0.9.12 treats saved accounting context as
+authoritative, even if a new caller supplies different observational labels or
+recorder defaults change. Start a new run to use a new variant.
+
+**Migration:** The published PostgreSQL recorder 0.3.0 delegates context decoding
+to Runtime and stores opaque JSONB; no adapter republish, DDL/role changes or old
+row rewriting is required. Labeled records and saved runs require Runtime >=0.9.17
+when read/resumed; older readers are not promised to understand the new extension.
+Legacy unlabeled records remain readable. Deploy the new reader before producing
+labeled runs. Never infer no-call safety from an unresolved accounting intent.
 
 ## CLI
 

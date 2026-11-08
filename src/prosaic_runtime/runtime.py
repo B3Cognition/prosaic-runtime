@@ -386,6 +386,7 @@ class ProsaicRuntime:
     capabilities |= frozenset({'tool_outcomes_v1', 'bounded_tool_recovery_v1', 'direct_tool_v1'})
     capabilities |= frozenset({'terminal_tool_v1'})
     capabilities |= frozenset({'rule_admission_v1'})
+    capabilities |= frozenset({'accounting_request_metadata_v1'})
     def __init__(self, config: RuntimeConfig, *, source=".prosaic", executable="prosaic", custom_tools=None,
                  accounting=None, context_defaults=None, lifecycle=None, guards=None, allow_unbound_guards=False):
         self.lifecycle = lifecycle if lifecycle is not None else ExecutionLifecycle()
