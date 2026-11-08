@@ -36,3 +36,7 @@ include docs/release-0.9.16.md docs/cerebro-requests.md
 include tests/test_request_headers.py
 include docs/releases.md
 recursive-include docs/release-history *.md
+
+include docs/release-0.9.17.md
+include tests/test_accounting_request_metadata.py
+recursive-include adapters/postgres/tests *.py

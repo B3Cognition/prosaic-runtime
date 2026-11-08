@@ -2,6 +2,13 @@
 
 See [published release notes and compatibility](docs/releases.md), including backfilled historical release notes. Documentation refreshed on 2026-11-07; package versions and release archives are unchanged.
 
+## 0.9.17
+
+- Add bounded immutable trusted-host accounting run/variant labels through `ExecutionContext.request_metadata` and public capability `accounting_request_metadata_v1`.
+- Recorder prepare sees the versioned optional context extension before each request; both supported wires, tool/acquisition/repair paths and saved Harness resume retain labels without provider disclosure.
+- Empty metadata preserves legacy accounting bytes/hashes and all artifact/workflow identities; present labels intentionally change accounting payload hashes. Same-call relabeling conflicts, saved run labels win.
+- Retain published recorder 0.3.0 code/schema/privileges and old rows. Labeled contexts require Runtime >=0.9.17 readers. See [release notes](docs/release-0.9.17.md).
+
 ## 0.9.16
 
 - Add bounded host-only `request_headers` to OpenAI-compatible `run` and `turn`, including prepared turns, tool continuations and rule retries.
