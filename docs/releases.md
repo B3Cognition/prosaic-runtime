@@ -1,24 +1,24 @@
 # Releases and compatibility
 
-Compatibility checkpoint: 2026-11-08. Runtime 0.9.18 is published with sent
-reasoning-effort evidence V1; see its [release notes and gates](release-0.9.18.md).
-The latest SDKs and the Lab's qualified dependency train are separate selections.
-Harness 0.9.12 uses Runtime 0.9.16 and Core 0.5.0, with declared Runtime floor
-`>=0.9.16,<0.10`. Lab0.9.11 qualifies Core0.5.0/Runtime0.9.18/Harness0.9.12 and retains the
-original recorder 0.3.0/store 0.4.1 bytes. Earlier Lab profiles keep their own
-archived manifests; newer SDK availability never certifies a partial mixture.
-Lab0.9.11 supplies a [copyable sent-effort host](https://github.com/B3Cognition/prosaic-integration-lab/blob/v0.9.11/docs/sent-reasoning-effort.md), alongside the earlier accounting metadata blueprint.
-Its release page is the authority for final publication/qualification. Historical
-Lab0.9.10 continues to select Runtime0.9.17; do not silently upgrade only one wheel in that frozen profile.
+Context-pack release train prepared on 2026-11-09. Runtime 0.9.19 adds
+profiled model/private inputs and frozen restoration; Harness 0.9.13 supplies
+named agent defaults and workflow-node context selection. Lab 0.9.12 pins the
+complete public family. Release pages and their original artifacts are the
+publication authority; earlier Lab manifests remain unchanged.
 
-| Component | Latest published version | Scope |
+| Component | Context-pack train | Scope |
 | --- | --- | --- |
-| Core (`b3-prosaic`) | 0.5.0 | Canonical Markdown, native outputs and inert rule tags |
-| Runtime (`b3-prosaic-runtime`) | 0.9.18 | Actual sent effort controls/format; labels, headers and fee enforcement retained |
-| Harness (`b3-prosaic-harness`) | 0.9.12 | Workflow enforcement over accepted earlier outputs; Validator V1 retained |
-| Runtime PostgreSQL recorder | 0.3.0 | Optional usage persistence; unchanged adapter release |
-| Harness PostgreSQL store | 0.4.1 | Optional workflow/session persistence; unchanged adapter release |
-| Integration Lab | 0.9.11 | Complete public train and copyable sent-effort host; prior profiles retained |
+| Core (`b3-prosaic`) | 0.5.0 | Unchanged canonical Markdown and inert rule tags |
+| Runtime (`b3-prosaic-runtime`) | 0.9.19 | Profiled inputs, private guard facts, evidence fitting and frozen v3 turns |
+| Harness (`b3-prosaic-harness`) | 0.9.13 | Reusable context packs with per-agent/node selection |
+| Runtime PostgreSQL recorder | 0.3.0 | Original published bytes and existing schema |
+| Harness PostgreSQL store | 0.4.2 | Explicit context-pack storage migration and fenced renewal |
+| Integration Lab | 0.9.12 | Public context-pack adoption and complete train qualification |
+
+See [Runtime 0.9.19 notes](release-0.9.19.md) and the
+[Lab context-pack guide](https://github.com/B3Cognition/prosaic-integration-lab/blob/v0.9.12/docs/context-packs.md).
+Historical Lab 0.9.11 retains Runtime 0.9.18 / Harness 0.9.12 and its sent-effort
+blueprint. New SDK availability does not certify a partial historical mixture.
 
 Install current SDKs in a fresh environment; pin versions and archive hashes for reproducible deployments. Optional PostgreSQL adapters require explicit provisioning and operator readiness checks. Never co-install legacy and renamed distributions that own the same imports.
 
@@ -33,7 +33,7 @@ contexts require >=0.9.17 readers; old unlabeled records are unchanged. See the
 ## Independently versioned recorder
 
 [PostgreSQL recorder 0.3.0](release-history/postgres-0.3.0.md) is the current
-adapter release. Its version and public bytes are unchanged by Runtime 0.9.18;
+adapter release. Its version and public bytes are unchanged by Runtime 0.9.19;
 attached adapter witnesses do not constitute a new adapter publication.
 
 ## Published history
@@ -42,6 +42,7 @@ Every published version is linked below. Backfilled notes explain changes using 
 
 | Release | Published (UTC) | Notes |
 | --- | --- | --- |
+| [v0.9.19](https://github.com/B3Cognition/prosaic-runtime/releases/tag/v0.9.19) | See release page | [Context-pack notes](release-0.9.19.md) |
 | [v0.9.18](https://github.com/B3Cognition/prosaic-runtime/releases/tag/v0.9.18) | See release page | [Release notes](release-0.9.18.md) |
 | [v0.9.17](https://github.com/B3Cognition/prosaic-runtime/releases/tag/v0.9.17) | See release page | [Release notes](release-0.9.17.md) |
 | [v0.9.16](https://github.com/B3Cognition/prosaic-runtime/releases/tag/v0.9.16) | 2026-11-07 | Published notes |

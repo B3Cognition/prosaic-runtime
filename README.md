@@ -1,11 +1,11 @@
 # Prosaic Runtime
 
-The **0.9.19.dev0** context-pack candidate adds explicit model/private input
-views, one-budget evidence fitting and frozen restoration. See
-[profiled context inputs](docs/context-packs.md). It is not yet published or
-qualified by hosted CI. Harness owns named packs and per-node selection.
-
-Current release: **0.9.18**. See [release notes and compatible SDK versions](docs/releases.md).
+Runtime **0.9.19** supplies [profiled context inputs](docs/context-packs.md) for
+Harness context packs: separate model and private validation views, bounded
+evidence fitting, and frozen turn restoration. Harness **0.9.13** owns named
+agent defaults and workflow-node overrides. Pack-free callers preserve existing
+payloads and identities. See [0.9.19 release notes](docs/release-0.9.19.md) and
+[compatible SDK versions](docs/releases.md).
 
 Runtime **0.9.18** reports the reasoning-effort controls and format actually sent in `Result.metadata['reasoning_effort_v1']`, including defaults, omission, retries and native CLI attempts. Requested/default annotations remain separate; sent does not prove provider compliance. Input identities are unchanged. See the [contract](docs/sent-reasoning-effort.md) and [release notes](docs/release-0.9.18.md).
 
