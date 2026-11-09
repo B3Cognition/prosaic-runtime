@@ -38,14 +38,16 @@ def test_native_serialization_is_charged_before_wire_admission():
     ('openai-compatible', 'encode_payload'), ('anthropic', 'encode_payload'),
     ('anthropic', 'native_payload')])
 def test_slow_continuation_construction_stops_before_dispatch_after_effect(turn_fixture, monkeypatch, provider, stage):
-    from prosaic_runtime.context_execution import ContextExecutionGuard
+    from prosaic_runtime.context_work import ContextWorkBudget
     from prosaic_runtime.runtime import _BoundedBackend, _BoundedAnthropicBackend
     now = [time.monotonic_ns()]
-    original_init = ContextExecutionGuard.__init__
+    original_init = ContextWorkBudget.__init__
     def initialize(self, *args, **kwargs):
+        # Preparation and execution must share the controlled clock; real host
+        # scheduling must not exhaust the allowance before the tool effect.
+        kwargs['clock'] = lambda: now[0]
         original_init(self, *args, **kwargs)
-        self.budget.clock = lambda: now[0]
-    monkeypatch.setattr(ContextExecutionGuard, '__init__', initialize)
+    monkeypatch.setattr(ContextWorkBudget, '__init__', initialize)
     backend = _BoundedAnthropicBackend if provider == 'anthropic' else _BoundedBackend
     original = getattr(backend, stage)
     def slow(self, *args, **kwargs):
