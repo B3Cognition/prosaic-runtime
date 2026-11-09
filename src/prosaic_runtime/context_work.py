@@ -87,3 +87,9 @@ class ContextWorkBudget:
         self._state['readmissionPending'] = True
         self._state['readmissionCandidateBytes'] = encoded_bytes
 
+    def can_trial(self, encoded_bytes, final_bytes):
+        """Keep one eventual execution readmission funded before a trial starts."""
+        self._check()
+        return (self._state['candidateChecks']+2<=self.policy.max_candidate_checks and
+                self._state['candidateBytes']+encoded_bytes+final_bytes<=self.policy.max_assembly_bytes)
+

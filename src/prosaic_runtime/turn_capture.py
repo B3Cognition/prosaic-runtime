@@ -44,13 +44,20 @@ class TurnCapture:
         self.provider_observations = {}
         self.accounting = None
         self.evidence_overflow = False
+        self.input_views = None
+        self.input_views_bytes = 0
+
+    def bind_input_views(self, views):
+        from .input_views import validate_views
+        self.input_views=validate_views(views)
+        self.input_views_bytes=len(encode_owned(self.input_views))+32
 
     def bind_accounting(self, context, recorder, provider_limit, tool_limit):
         self.accounting = {'context': context.to_dict(), 'namespace': getattr(recorder, 'namespace', None),
                            'environment': getattr(recorder, 'environment', None), 'provider_call_ids': []}
         try:
             size = len(encode_owned(self.accounting))
-            if size + 1024 + provider_limit * 80 + tool_limit * 1536 > self.limits.max_evidence_bytes:
+            if size + self.input_views_bytes + 1024 + provider_limit * 80 + tool_limit * 1536 > self.limits.max_evidence_bytes:
                 from .conversation import TurnAdmissionError
                 raise TurnAdmissionError('invalidPolicy')
         except (ValueError, TypeError, UnicodeError) as exc:
@@ -137,7 +144,7 @@ class TurnCapture:
             try:
                 record['outcome'] = json.loads(encode_owned(outcome, max_bytes=self.limits.max_evidence_bytes,
                     max_depth=self.limits.max_json_depth, max_nodes=self.limits.max_json_nodes))
-                encode_owned(self.tool_outcomes + [record], max_bytes=max(1, self.limits.max_evidence_bytes - 1024))
+                encode_owned(self.tool_outcomes + [record], max_bytes=max(1, self.limits.max_evidence_bytes - 1024 - self.input_views_bytes))
             except (ValueError, TypeError, UnicodeError):
                 record.pop('outcome', None)
                 self.evidence_overflow = True
@@ -207,6 +214,8 @@ class TurnCapture:
         document = {'version': 1, 'providerAttempts': budget.provider_requests, 'toolAttempts': budget.tool_calls,
                     'knownUsage': known, 'usageComplete': complete, 'toolOutcomes': self.tool_outcomes,
                     'failureCode': code, 'accounting': attribution if type(attribution) is dict else None}
+        if self.input_views is not None:
+            document.update(version=2,inputViews=self.input_views)
         try:
             encode_owned(document, max_bytes=self.limits.max_evidence_bytes,
                          max_depth=self.limits.max_json_depth, max_nodes=self.limits.max_json_nodes)

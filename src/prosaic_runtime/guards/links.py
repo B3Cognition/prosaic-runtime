@@ -67,5 +67,5 @@ def _check(stage, context):
     )
 
 
-def no_wrapped_links():
-    return Guard('no_wrapped_links', 'no-wrapped-links-v1', ('before_answer', 'final'), _check, fixes=True)
+def no_wrapped_links(*, input_access='shared'):
+    return Guard('no_wrapped_links', 'no-wrapped-links-v1', ('before_answer', 'final'), _check, fixes=True, input_access=input_access)

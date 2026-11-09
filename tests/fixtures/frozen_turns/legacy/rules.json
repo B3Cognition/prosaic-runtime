@@ -1,0 +1,1 @@
+{"contextIdentity":"1f00f4c9aa1a696b03abfd54fbb11d733ac3a21b157c7a000d224e934cb718f1","rules":{"bindings":[{"action":"fix","file":"approved","guard":"no_wrapped_links","id":"approved:1:no_wrapped_links","paths":{},"settings":{},"stage":"final","version":"no-wrapped-links-v1"}],"fingerprint":"95d9d09fcd195a0a9dc226f33a15c26161ab15f7c795d0b0b8638e73e1fc78b0","proseOnly":[]}}

@@ -269,10 +269,13 @@ class TurnEvidence(_OwnedRecord):
     def from_dict(cls, document):
         encoded = encode_owned(document)
         value = json.loads(encoded)
-        _closed(value, {'version', 'providerAttempts', 'toolAttempts', 'knownUsage',
-                        'usageComplete', 'toolOutcomes', 'failureCode', 'accounting'})
-        if type(value['version']) is not int or value['version'] != 1:
+        if type(value.get('version')) is not int or value['version'] not in (1,2):
             raise ValueError('invalid evidence version')
+        _closed(value, {'version', 'providerAttempts', 'toolAttempts', 'knownUsage',
+                        'usageComplete', 'toolOutcomes', 'failureCode', 'accounting'} | ({'inputViews'} if value['version']==2 else set()))
+        if value['version']==2:
+            from .input_views import validate_views
+            validate_views(value['inputViews'])
         for key in ('providerAttempts', 'toolAttempts'):
             if type(value[key]) is not int or value[key] < 0:
                 raise ValueError('invalid attempt count')
@@ -358,3 +361,17 @@ class PreparedTurn:
     def context_work(self):
         from .context_contracts import ContextWorkState
         return ContextWorkState.from_dict(self._context_work.to_dict()) if self._context_work is not None else None
+
+    @property
+    def selected_input_data(self):
+        return json.loads(self._encoded)['inputData']
+
+    @property
+    def input_variant_selection(self):
+        from .frozen_turns import InputVariantSelection
+        value=json.loads(self._encoded).get('inputVariantSelection')
+        return InputVariantSelection.from_dict(value) if value is not None else None
+
+    def export_frozen_input(self):
+        from .frozen_turns import export_frozen
+        return export_frozen(self)

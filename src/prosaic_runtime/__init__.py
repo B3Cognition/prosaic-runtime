@@ -1,5 +1,5 @@
 """Execute neutral Prosaic artifacts with explicitly granted authority."""
-__version__ = '0.9.18'
+__version__ = '0.9.19'
 
 from .artifacts import ProsaicArtifact
 from .config import EndpointConfig, RuntimeConfig, RunLimits, CliSandboxConfig
@@ -58,6 +58,11 @@ __all__ += ["NativeProfile", "ProfilePool", "NativePolicy", "NativeRuntimeConfig
 
 from .native import NativeRuntime
 __all__ += ["NativeRuntime"]
+
+from .input_views import AuthoritativeInputLimits
+__all__ += ['AuthoritativeInputLimits']
+from .frozen_turns import FrozenTurnInput, InputVariantSelection
+__all__ += ['FrozenTurnInput', 'InputVariantSelection']
 
 from .rules import (Guard, GuardContext, RuleAdmissionError, RuleBindingWarning, RuleSet, Verdict,
                     compile_rules, rules_fingerprint)

@@ -17,5 +17,5 @@ def _check(stage, context):
     return Verdict(True)
 
 
-def strict_json():
-    return Guard('strict_json', 'strict-json-v1', ('before_answer', 'final'), _check)
+def strict_json(*, input_access='shared'):
+    return Guard('strict_json', 'strict-json-v1', ('before_answer', 'final'), _check, input_access=input_access)

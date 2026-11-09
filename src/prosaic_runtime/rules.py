@@ -106,6 +106,7 @@ class RuleSet:
                     'id': b.rule_id,
                     'guard': b.guard_name,
                     'version': b.guard.version if b.bound else None,
+                    **({'inputAccess':b.guard.input_access} if b.bound and b.guard.input_access!='shared' else {}),
                     'file': b.file,
                     'stage': b.stage,
                     'action': b.action,
@@ -154,6 +155,7 @@ def rules_fingerprint(bindings):
             {
                 'guard': b.guard_name,
                 'version': b.guard.version if b.bound else None,
+                **({'inputAccess':b.guard.input_access} if b.bound and b.guard.input_access!='shared' else {}),
                 'file': b.file,
                 'stage': b.stage,
                 'action': b.action,
@@ -331,6 +333,8 @@ def compile_rules(
                 raise RuleAdmissionError()
             if entry['action'] == 'fix' and not guard.fixes:
                 raise RuleAdmissionError()  # Misconfiguration fails at startup, not in production.
+            if guard.input_access=='authoritativeAndModel' and entry['action']!='fail':
+                raise RuleAdmissionError()
             validate_settings(guard, settings)
             paths, portable = _resolve_paths(guard, settings, project_root)
         bindings.append(

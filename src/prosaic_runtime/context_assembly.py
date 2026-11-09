@@ -15,8 +15,12 @@ def _boundaries(history):
     return [index for index, message in enumerate(history) if message['role'] == 'user']
 
 
-def assemble_context(source_history, build_candidate, policy, registration, limits, *, work=None):
-    budget = ContextWorkBudget(policy, work=work)
+def assemble_context(source_history, build_candidate, policy, registration, limits, *, work=None,
+                     budget=None, finalize=True):
+    if budget is None:
+        budget = ContextWorkBudget(policy, work=work)
+    elif work is not None:
+        raise TurnAdmissionError('invalidPolicy')
     boundaries = _boundaries(source_history)
     total, omitted = len(boundaries), 0
     while True:
@@ -30,7 +34,8 @@ def assemble_context(source_history, build_candidate, policy, registration, limi
         callback = (lambda: count_owned(registration, native)) if size <= limits.max_input_bytes else None
         count = budget.check_candidate(size, callback)
         if count is not None and count <= policy.input_capacity_tokens:
-            budget.reserve_readmission(size)
+            if finalize:
+                budget.reserve_readmission(size)
             report = ContextAssemblyReport.from_dict({'version': 1, 'mode': policy.mode,
                 'counterIdentity': policy.counter_identity,
                 'sourceHistoryDigest': context_digest(source_history),

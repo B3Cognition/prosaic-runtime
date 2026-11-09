@@ -111,12 +111,16 @@ def test_discovery_failure_is_bounded_and_does_not_guess_unknown_models(tmp_path
     profile, trace = metadata_fixture(tmp_path, 'codex-cli', ['ultra'], mode=mode)
     runtime = NativeRuntime(NativeRuntimeConfig({'native': profile}, default_profile='native'))
     result = None
+    started = time.monotonic()
     try:
-        result = runtime.run(artifact('ultra'), cwd=tmp_path, policy=NativePolicy(timeout_s=.25))
+        # Include interpreter startup on loaded native runners. The hanging
+        # fixture sleeps for ten seconds, so this still exercises cancellation.
+        result = runtime.run(artifact('ultra'), cwd=tmp_path, policy=NativePolicy(timeout_s=2))
     except ValueError as exc:
         assert 'effort' in str(exc)
     if result is not None:
         assert result.exit_code != 0
+    assert time.monotonic() - started < 4
     assert trace.exists()
     assert not (tmp_path / 'inference.calls').exists()
 

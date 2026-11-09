@@ -106,7 +106,7 @@ def encode_fact(value):
     return Encoded(json.dumps(value, ensure_ascii=False, allow_nan=False))
 
 
-_LAZY = ('settings', 'paths', 'input_data', 'arguments', 'tool_result')
+_LAZY = ('settings', 'paths', 'input_data', 'arguments', 'tool_result', 'authoritative_input_data')
 _FIELDS = ('stage', 'rule_id', 'rule_text', 'source_file', 'user_message', 'tool_results', 'tool_name', 'draft')
 
 
@@ -119,7 +119,7 @@ class GuardContext:
     read-only sequence of the results the model has seen this turn.
     """
 
-    __slots__ = (*_FIELDS, *(f'_{name}' for name in _LAZY), '_decoded')
+    __slots__ = (*_FIELDS, *(f'_{name}' for name in _LAZY), '_decoded', '_input_access')
 
     def __init__(
         self,
@@ -136,6 +136,8 @@ class GuardContext:
         arguments=None,
         tool_result=None,
         draft=None,
+        authoritative_input_data=None,
+        input_access='shared',
     ):
         values = dict(
             stage=stage,
@@ -151,6 +153,8 @@ class GuardContext:
             _input_data=input_data,
             _arguments=arguments,
             _tool_result=tool_result,
+            _authoritative_input_data=(authoritative_input_data if input_access=='authoritativeAndModel' else None),
+            _input_access=input_access,
             _decoded={},
         )
         for name, value in values.items():
@@ -168,6 +172,12 @@ class GuardContext:
     input_data = property(lambda self: self._fact('input_data'))
     arguments = property(lambda self: self._fact('arguments'))
     tool_result = property(lambda self: self._fact('tool_result'))
+
+    @property
+    def authoritative_input_data(self):
+        if self._input_access!='authoritativeAndModel':
+            raise AttributeError('authoritative input is not available to this guard')
+        return self._fact('authoritative_input_data')
 
     def __setattr__(self, name, value):
         raise AttributeError('GuardContext is read-only')
@@ -188,9 +198,10 @@ class Guard:
     path_settings: tuple
     fixes: bool
     echo_values: bool
+    input_access: str
 
     def __init__(
-        self, name, version, stages, check, *, fixes=False, echo_values=False, settings_schema=None, path_settings=()
+        self, name, version, stages, check, *, fixes=False, echo_values=False, settings_schema=None, path_settings=(), input_access='shared'
     ):
         from .tools import _reject_refs
 
@@ -214,6 +225,11 @@ class Guard:
         # instructions (for example, regex-constrained figures). Tool-stage feedback is tool-role.
         if type(echo_values) is not bool:
             raise ValueError('guard echo_values must be boolean')
+        from .input_views import INPUT_ACCESS
+        if type(input_access) is not str or input_access not in INPUT_ACCESS:
+            raise ValueError('invalid guard input access')
+        if input_access=='authoritativeAndModel' and (fixes or echo_values):
+            raise ValueError('private guards must be fail-only')
         schema = {'type': 'object', 'additionalProperties': False} if settings_schema is None else settings_schema
         try:
             if type(schema) is not dict or schema.get('type') != 'object' or 'additionalProperties' not in schema:
@@ -236,6 +252,7 @@ class Guard:
             path_settings=tuple(path_settings),
             fixes=fixes,
             echo_values=echo_values,
+            input_access=input_access,
         ).items():
             object.__setattr__(self, key, value)
 

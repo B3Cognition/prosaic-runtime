@@ -216,7 +216,7 @@ def _check(stage, context):
     return Verdict(False, reason='tool arguments reference ids not seen this turn', refused_values=refused[:64])
 
 
-def args_reference_seen_ids():
+def args_reference_seen_ids(*, input_access='shared'):
     return Guard(
-        'args_reference_seen_ids', 'args-reference-seen-ids-v1', ('before_tool',), _check, settings_schema=_SCHEMA
+        'args_reference_seen_ids', 'args-reference-seen-ids-v1', ('before_tool',), _check, settings_schema=_SCHEMA, input_access=input_access
     )

@@ -199,7 +199,7 @@ def test_all_real_workflow_labels_can_qualify_and_gate(release_tool, built_relea
     labels += [f'postgres-{os_name}-{version}' for os_name in postgres['os']
                for version in postgres['postgres']]
     labels += [f'floor-{os_name}' for os_name in postgres['os']]
-    assert len(labels) == 24
+    assert len(labels) == 30
     output, receipt = built_release
     for label in labels:
         release_tool.qualify(output / 'artifacts', receipt['source_commit'], label,

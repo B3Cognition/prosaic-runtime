@@ -15,11 +15,12 @@ class ContextExecutionFailure(Exception):
 
 class ContextExecutionGuard:
     def __init__(self, policy, registration, report, work, *, input_byte_cap,
-                 checkpoint=None, deadline=None):
+                 checkpoint=None, deadline=None, expected_native_digest=None):
         self.policy, self.registration, self.initial_report = policy, registration, report
         self.input_byte_cap = input_byte_cap
         self.budget = ContextWorkBudget(policy, work=work, checkpoint=checkpoint, deadline=deadline)
         self._first_wire_digest = None
+        self.expected_native_digest=expected_native_digest
 
     @property
     def work(self):
@@ -41,6 +42,10 @@ class ContextExecutionGuard:
                 or size > self.input_byte_cap or count > self.policy.input_capacity_tokens):
             raise TurnAdmissionError('bindingMismatch')
         self._first_wire_digest = context_digest(native)
+        if self.expected_native_digest is not None:
+            from .conversation_preparation import native_payload_digest
+            if self.expected_native_digest!=native_payload_digest(native):
+                raise TurnAdmissionError('bindingMismatch')
 
     def construct_native(self, callback):
         """Charge local construction/encoding, excluding provider/storage waits."""

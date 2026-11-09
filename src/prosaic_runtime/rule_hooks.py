@@ -117,11 +117,12 @@ def _same(left, right):
 
 
 class RuleHooks:
-    def __init__(self, ruleset, *, message, input_data, budget, check_boundary):
+    def __init__(self, ruleset, *, message, input_data, budget, check_boundary, authoritative_input_data=None):
         self.ruleset = ruleset
         self.message = message
         # Encoded once per turn; each check decodes only what its guard reads, privately.
         self._input = encode_fact(input_data)
+        self._authoritative = encode_fact(authoritative_input_data)
         self._binding_facts = {b.rule_id: (encode_fact(b.settings), encode_fact(b.paths)) for b in ruleset.bindings}
         self.budget, self.check_boundary = budget, check_boundary
         # Results the model saw (after after_tool), each encoded once when observed.
@@ -176,11 +177,16 @@ class RuleHooks:
                 user_message=self.message,
                 input_data=self._input,
                 tool_results=ToolResults(self.seen_results, self.seen_builtin),
+                authoritative_input_data=self._authoritative if binding.guard.input_access=='authoritativeAndModel' else None,
+                input_access=binding.guard.input_access,
                 **facts,
             )
             verdict = binding.guard.check(stage, context)
             if not isinstance(verdict, Verdict) or type(verdict.ok) is not bool:
                 return None
+            if binding.guard.input_access=='authoritativeAndModel':
+                # No private value, reason or repair can become feedback or a tool result.
+                return Verdict(verdict.ok)
             if verdict.reason is not None and type(verdict.reason) is not str:
                 return None
             _refused(verdict.refused_values)
