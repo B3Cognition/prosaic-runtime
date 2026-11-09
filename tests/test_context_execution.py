@@ -12,12 +12,15 @@ def test_native_serialization_is_charged_before_wire_admission():
     from prosaic_runtime.context_assembly import assemble_context
     from prosaic_runtime.context_execution import ContextExecutionGuard, ContextExecutionFailure
     from prosaic_runtime.runtime import _BoundedMixin
+    from prosaic_runtime.context_work import ContextWorkBudget
     native = {'model': 'fixture-model', 'messages': [{'role': 'user', 'content': 'Hello'}], 'max_tokens': 128}
     policy, counters = fixture_context(timeout_ms=10, count=lambda request: 10)
     registration = counters.resolve(policy.counter_identity)
-    _, report, _, work = assemble_context([], lambda history: native, policy, registration, api.TurnLimits())
-    guard = ContextExecutionGuard(policy, registration, report, work, input_byte_cap=196608)
     now = [0]
+    budget = ContextWorkBudget(policy, clock=lambda: now[0])
+    _, report, _, work = assemble_context([], lambda history: native, policy, registration,
+        api.TurnLimits(), budget=budget)
+    guard = ContextExecutionGuard(policy, registration, report, work, input_byte_cap=196608)
     guard.budget.clock = lambda: now[0]
     class SlowEncoder:
         def encode_payload(self, payload):
@@ -38,14 +41,16 @@ def test_native_serialization_is_charged_before_wire_admission():
     ('openai-compatible', 'encode_payload'), ('anthropic', 'encode_payload'),
     ('anthropic', 'native_payload')])
 def test_slow_continuation_construction_stops_before_dispatch_after_effect(turn_fixture, monkeypatch, provider, stage):
-    from prosaic_runtime.context_execution import ContextExecutionGuard
+    from prosaic_runtime.context_work import ContextWorkBudget
     from prosaic_runtime.runtime import _BoundedBackend, _BoundedAnthropicBackend
     now = [time.monotonic_ns()]
-    original_init = ContextExecutionGuard.__init__
+    original_init = ContextWorkBudget.__init__
     def initialize(self, *args, **kwargs):
+        # Preparation and execution must share the controlled clock; real host
+        # scheduling must not exhaust the allowance before the tool effect.
+        kwargs['clock'] = lambda: now[0]
         original_init(self, *args, **kwargs)
-        self.budget.clock = lambda: now[0]
-    monkeypatch.setattr(ContextExecutionGuard, '__init__', initialize)
+    monkeypatch.setattr(ContextWorkBudget, '__init__', initialize)
     backend = _BoundedAnthropicBackend if provider == 'anthropic' else _BoundedBackend
     original = getattr(backend, stage)
     def slow(self, *args, **kwargs):
