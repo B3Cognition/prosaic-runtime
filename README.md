@@ -5,13 +5,15 @@ views, one-budget evidence fitting and frozen restoration. See
 [profiled context inputs](docs/context-packs.md). It is not yet published or
 qualified by hosted CI. Harness owns named packs and per-node selection.
 
-Current release: **0.9.17**. See [release notes and compatible SDK versions](docs/releases.md).
+Current release: **0.9.18**. See [release notes and compatible SDK versions](docs/releases.md).
+
+Runtime **0.9.18** reports the reasoning-effort controls and format actually sent in `Result.metadata['reasoning_effort_v1']`, including defaults, omission, retries and native CLI attempts. Requested/default annotations remain separate; sent does not prove provider compliance. Input identities are unchanged. See the [contract](docs/sent-reasoning-effort.md) and [release notes](docs/release-0.9.18.md).
 
 Runtime **0.9.17** adds bounded trusted-host `ExecutionContext(request_metadata={'run': 'benchmark-42', 'variant': 'baseline'})` labels. Recorder `prepare(intent)` sees the frozen labels before dispatch; they never enter provider prompts, bodies or headers. Empty labels preserve legacy accounting bytes. Existing Harness 0.9.12 retains saved labels across resume, and recorder 0.3.0 uses its existing schema. See [the context and migration contract](docs/accounting.md#request-metadata-v1) and [0.9.17 release notes](docs/release-0.9.17.md).
 
-[Lab0.9.10](https://github.com/B3Cognition/prosaic-integration-lab/releases/tag/v0.9.10)
-qualifies the complete Core0.5.0/Runtime0.9.17/Harness0.9.12 train and supplies a
-[copyable accounting host](https://github.com/B3Cognition/prosaic-integration-lab/blob/v0.9.10/docs/accounting-request-metadata.md).
+[Lab0.9.11](https://github.com/B3Cognition/prosaic-integration-lab/releases/tag/v0.9.11)
+qualifies the complete Core0.5.0/Runtime0.9.18/Harness0.9.12 train and supplies a
+[copyable sent-effort host](https://github.com/B3Cognition/prosaic-integration-lab/blob/v0.9.11/docs/sent-reasoning-effort.md).
 Its release page carries publication and public-consumer evidence; earlier
 manifests remain unchanged and partial mixtures are not qualified.
 
@@ -67,7 +69,7 @@ Runtime is distributed as `b3-prosaic-runtime` and requires
 `b3-prosaic>=0.5.0,<0.6` from the package index. Python imports (`prosaic_runtime`)
 and the `prosaic-runtime` CLI remain unchanged. The separately installed recorder
 is `b3-prosaic-runtime-postgres` **0.3.0**, selecting Runtime 0.9.x.
-Install the release with `python -m pip install 'b3-prosaic-runtime==0.9.17'`.
+Install the release with `python -m pip install 'b3-prosaic-runtime==0.9.18'`.
 
 ### Opt-in final-answer phase
 
@@ -232,7 +234,7 @@ an isolated Python environment; no sudo or global Python installation is needed:
 ```sh
 git clone https://github.com/B3Cognition/prosaic-runtime.git
 cd prosaic-runtime
-git checkout v0.9.17
+git checkout v0.9.18
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install .
@@ -242,7 +244,7 @@ The package installs compatible `b3-prosaic` 0.5.x into the same environment.
 Use the release tag after publication; older release tags retain historical docs.
 
 For public-index installation, create a fresh virtual environment or
-container image and run `python -m pip install 'b3-prosaic-runtime==0.9.17'`.
+container image and run `python -m pip install 'b3-prosaic-runtime==0.9.18'`.
 Install the optional recorder with
 `python -m pip install 'b3-prosaic-runtime-postgres==0.3.0'`. Never add renamed
 packages to an environment containing legacy `prosaic`, `prosaic-runtime` or

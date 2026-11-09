@@ -11,6 +11,7 @@ from .native_backends import execute_native
 from .native_config import NativePolicy, NativeRuntimeConfig
 from .policy import BUILTIN_TOOLS, WRITE_TOOLS, requested_tools
 from .types import Result
+from .effort_evidence import EffortTrace, attach, KEY as EFFORT_KEY
 from .effort import PROVIDER_EFFORTS, EffortUnavailableError, effective_efforts, resolve_effort, validate_effort
 from .effort_discovery import MetadataCancelled, discover_native_efforts
 
@@ -23,7 +24,7 @@ class NativeRuntime:
     grants, receipts, accounting and conversation contracts do not apply.
     Instances may execute concurrently; hosts own workspace write isolation.
     """
-    capabilities = frozenset({'native_profiles_v1', 'profile_pools_v1'})
+    capabilities = frozenset({'native_profiles_v1', 'profile_pools_v1', EFFORT_KEY})
 
     def __init__(self, config, *, source='.prosaic', executable='prosaic', capacity=None):
         if not isinstance(config, NativeRuntimeConfig):
@@ -41,6 +42,7 @@ class NativeRuntime:
             raise ValueError('native execution requires explicit NativePolicy; RunPolicy is not supported')
         if profile is not None and pool is not None:
             raise ValueError('select profile or pool, not both')
+        trace = EffortTrace()
         started = time.monotonic()
         deadline = started + policy.timeout_s
         def emit(event, **data):
@@ -55,7 +57,7 @@ class NativeRuntime:
             return None
         early = stopped()
         if early is not None:
-            return early
+            return attach(early, trace)
         if isinstance(artifact, str):
             artifact = inspect_artifact(artifact, self.source, executable=self.executable,
                                         timeout_s=min(30, max(.001, deadline - time.monotonic())))
@@ -116,7 +118,7 @@ class NativeRuntime:
                 native_execution_v1={'attempts': attempts, 'known_tokens': known_tokens,
                                      'duration_ms': (time.monotonic() - started) * 1000})
             emit('completed', exit_code=result.exit_code, token_usage=result.token_usage)
-            return result
+            return attach(result, trace)
 
         def capacity_interrupted(exc, previous=None):
             reason = 'cancelled' if isinstance(exc, InterruptedError) else 'timeout'
@@ -158,6 +160,7 @@ class NativeRuntime:
             except EffortUnavailableError:
                 emit('profile_skipped', profile=name, reason='effort_unavailable')
                 continue
+            configured_effort = endpoint.effort
             endpoint = replace(endpoint, effort=selected_effort, supported_efforts=declared)
             eligible_names.append(name)
             emit('profile_selected', profile=name, backend=endpoint.backend, model=endpoint.model)
@@ -165,7 +168,9 @@ class NativeRuntime:
             if early is not None:
                 return finish(early)
             result = execute_native(endpoint, prompt, cwd=workspace, policy=policy, deadline=deadline,
-                env=dict(os.environ if env is None else env), cancelled=cancelled, on_event=on_event)
+                env=dict(os.environ if env is None else env), cancelled=cancelled, on_event=on_event,
+                effort_profile=name, requested_effort=effort, configured_effort=configured_effort)
+            trace.merge(result.metadata.get(EFFORT_KEY))
             result.metadata['profile'] = name
             reason = result.metadata.get('failure_reason')
             attempts.append({'profile': name, 'backend': endpoint.backend, 'model': endpoint.model,

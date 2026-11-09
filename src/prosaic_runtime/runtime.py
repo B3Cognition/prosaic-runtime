@@ -12,6 +12,8 @@ from types import MappingProxyType
 
 from .artifacts import ProsaicArtifact, inspect_artifact
 from .config import RuntimeConfig
+from .effort_evidence import EffortTrace, http_attempt, attach, KEY as EFFORT_KEY
+from .effort import api_default_effort
 from .events import Cancelled, check_cancelled, event_context, emit
 from .openai_compatible import OpenAICompatibleBackend
 from .anthropic import AnthropicBackend
@@ -53,8 +55,12 @@ def _reported_usage(details):
 
 class _BoundedMixin:
     def __init__(self, endpoint, max_input_bytes, custom_tools, deadline, capture=None, budget=None,
-                 scope=None, tool_journal=None, cancelled=None, terminal_capture=None, request_headers=()):
+                 scope=None, tool_journal=None, cancelled=None, terminal_capture=None, request_headers=(),
+                 effort_trace=None, effort_profile=None, requested_effort=None, configured_effort=None):
         super().__init__(endpoint)
+        self.effort_trace = effort_trace if effort_trace is not None else EffortTrace()
+        self.effort_profile = effort_profile
+        self.requested_effort, self.configured_effort = requested_effort, configured_effort
         self.max_input_bytes = max_input_bytes
         self.request_headers = request_headers
         self.reported_token_usage = None
@@ -244,13 +250,20 @@ class _BoundedMixin:
             request.add_header("X-Client-Request-Id", call_id)
         accepted = False
         opener = urllib.request.build_opener(_NoRedirect())
+        def dispatch(timeout):
+            row = http_attempt(request.data, backend=self._config.provider, profile=self.effort_profile,
+                call_id=request.get_header('X-client-request-id'), requested=self.requested_effort,
+                configured=self.configured_effort)
+            timeout = self.before_http_dispatch(timeout)
+            self.effort_trace.add(row)
+            return timeout
         try:
             # Observers and persisted intent preparation can stop execution.
             # Check both boundaries; reserve the attempt only at real dispatch.
             self.check_boundary()
             response = (self.capture.open(opener, request, timeout,
-                            before_dispatch=self.before_http_dispatch) if self.capture is not None
-                        else opener.open(request, timeout=self.before_http_dispatch(timeout)))
+                            before_dispatch=dispatch) if self.capture is not None
+                        else opener.open(request, timeout=dispatch(timeout)))
             accepted = True
             with response:
                 status = response.status
@@ -386,7 +399,7 @@ class ProsaicRuntime:
     capabilities |= frozenset({'tool_outcomes_v1', 'bounded_tool_recovery_v1', 'direct_tool_v1'})
     capabilities |= frozenset({'terminal_tool_v1'})
     capabilities |= frozenset({'rule_admission_v1'})
-    capabilities |= frozenset({'accounting_request_metadata_v1'})
+    capabilities |= frozenset({'accounting_request_metadata_v1', EFFORT_KEY})
     capabilities |= frozenset({'guard_input_views_v1'})
     capabilities |= frozenset({'frozen_turn_inputs_v1'})
     capabilities |= frozenset({'context_input_variants_v1'})
@@ -546,6 +559,8 @@ class ProsaicRuntime:
         capture, budget = TurnCapture(owned['message'], scope, limits), InvocationBudget(policy)
         if 'inputViews' in owned:
             capture.bind_input_views(owned['inputViews'])
+        trace = EffortTrace()
+        capture.effort_trace = trace
         # Freeze attribution and the destination before any host observation.
         recorder = accounting if accounting is not None else self.accounting
         enabled = recorder is not None or context is not None or self.context_defaults is not None
@@ -602,7 +617,7 @@ class ProsaicRuntime:
                     on_event=lambda event: capture.event(event, on_event), cancelled=cancelled, env=env, context=context, accounting=accounting,
                     operation_context=scope, tool_journal=tool_journal,
                     _turn_prepared=owned, _turn_capture=capture, _budget=budget, _turn_snapshot=snapshot,
-                    _turn_accounting=frozen_accounting, _request_headers=owned_headers)
+                    _turn_accounting=frozen_accounting, _request_headers=owned_headers, _effort_trace=trace)
             except TurnAdmissionError:
                 raise
             except Exception:
@@ -741,7 +756,7 @@ class ProsaicRuntime:
             on_event=None, cancelled=None, env=None,
             acquisition: str | ProsaicArtifact | None = None, context=None, accounting=None,
             operation_context=None, tool_journal=None, _turn_prepared=None, _turn_capture=None, _budget=None,
-            _turn_snapshot=None, _turn_accounting=None, _request_headers=()) -> Result:
+            _turn_snapshot=None, _turn_accounting=None, _request_headers=(), _effort_trace=None) -> Result:
         policy = policy or RunPolicy(timeout_s=self.config.limits.timeout_s,
                                      max_tool_rounds=self.config.limits.max_tool_rounds)
         budget = _budget if _budget is not None else InvocationBudget(policy)
@@ -754,6 +769,7 @@ class ProsaicRuntime:
         if _turn_capture is not None and enabled:
             _turn_capture.bind_accounting(resolved, recorder, policy.max_provider_requests,
                                           policy.max_tool_calls if requested_tools(artifact.frontmatter.get('tools')) else 0)
+        trace = _effort_trace if _effort_trace is not None else EffortTrace()
         captures = []
         terminal = TerminalCapture()
         try:
@@ -762,7 +778,7 @@ class ProsaicRuntime:
                                cancelled=cancelled, env=env, acquisition=acquisition,
                                _operation_context=operation_context, _tool_journal=tool_journal,
                                _turn_prepared=_turn_prepared, _turn_capture=_turn_capture, _turn_snapshot=_turn_snapshot,
-                               _terminal_capture=terminal, _request_headers=_request_headers)
+                               _terminal_capture=terminal, _request_headers=_request_headers, _effort_trace=trace)
         except AccountingError:
             result = Result(1, '', 'accounting persistence failed; do not retry the provider automatically',
                             token_usage=budget.reported_tokens if budget.usage_complete and budget.provider_requests else None,
@@ -795,14 +811,14 @@ class ProsaicRuntime:
                 result.metadata['token_usage_status']='unknown'
         if budget.enabled or strict or policy.allowed_terminal_tools:
             result.metadata['invocation_budgets_v1'] = budget.metadata()
-        return result
+        return attach(result, trace)
 
     def _run(self, artifact: str | ProsaicArtifact, arguments: str = "", *,
             cwd: str | Path = ".", policy: RunPolicy | None = None,
             on_event=None, cancelled=None, env=None,
             acquisition: str | ProsaicArtifact | None = None, _recorder=None, _context=None, _capture_ref=None,
             _budget=None, _operation_context=None, _tool_journal=None,
-            _turn_prepared=None, _turn_capture=None, _turn_snapshot=None, _terminal_capture=None, _request_headers=()) -> Result:
+            _turn_prepared=None, _turn_capture=None, _turn_snapshot=None, _terminal_capture=None, _request_headers=(), _effort_trace=None) -> Result:
         config, custom, cli = _turn_snapshot if _turn_snapshot is not None else (self.config, self._custom_tools, self._cli_tools)
         policy = policy or RunPolicy(timeout_s=self.config.limits.timeout_s,
                                      max_tool_rounds=self.config.limits.max_tool_rounds)
@@ -908,7 +924,9 @@ class ProsaicRuntime:
                 backend = backend_type(endpoint, policy.max_input_bytes, custom,
                                        started + policy.timeout_s, capture, _budget,
                                        _operation_context, _tool_journal, cancelled,
-                                       terminal_capture=_terminal_capture, request_headers=_request_headers)
+                                       terminal_capture=_terminal_capture, request_headers=_request_headers,
+                                       effort_trace=_effort_trace, effort_profile=profile,
+                                       requested_effort=effort, configured_effort=api_default_effort(endpoint.features))
                 backend.accounting_context = _context
                 request = Invocation(str(Path(cwd).resolve()) if cwd is not None else None,
                                      prompt, invocation_env, remaining, {"prompt_metadata": metadata})

@@ -22,7 +22,17 @@ def test_untagged_agents_are_byte_identical_to_pre_rule_admission_main(configura
     assert sorted(observed) == sorted(golden)
     for name in golden:
         assert observed[name]['requests'] == golden[name]['requests'], f'{name}: request bytes changed'
-        assert observed[name] == golden[name], f'{name}: observable result changed'
+        # Runtime0.9.18 deliberately adds versioned transport observations.
+        # Keep the reviewed golden JSON and every pre-existing observable byte.
+        packet = observed[name]
+        result = packet['result'] if 'result' in packet else packet['turn']['result']
+        trace = result['metadata'].pop('reasoning_effort_v1')
+        assert trace['version'] == 1 and trace['complete'] is True
+        assert trace['attempt_count'] == len(packet['requests']) and trace['omitted_attempts'] == 0
+        assert len(trace['attempts']) == len(packet['requests'])
+        assert all(row['format'] == 'omitted' and row['sent'] == {} and
+                   row['provider_confirmation'] == 'not_observed' for row in trace['attempts'])
+        assert observed[name] == golden[name], f'{name}: legacy observable result changed'
 
 
 def test_untagged_turn_result_reports_no_rules():

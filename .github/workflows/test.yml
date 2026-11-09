@@ -25,6 +25,7 @@ jobs:
         run: |
           python -m pip install ./.ci-prosaic
           python -m pip install -e '.[test]'
+          python -m pip install --force-reinstall --no-deps 'https://files.pythonhosted.org/packages/0d/a8/8b926410b806448dd7762c8b04f7c4c6b0b86d2837b8a5c30d374aa892c0/b3_prosaic_harness-0.9.12-py3-none-any.whl#sha256=fb07797c3e42ab2e7e8f0a727b7bd25229e9b223cf15309716f10ff9d1f1147b'
       - name: Install Linux CLI sandbox backend
         if: runner.os == 'Linux'
         run: |

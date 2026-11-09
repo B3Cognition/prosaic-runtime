@@ -219,7 +219,8 @@ def native_command(profile, policy, *, mcp_file):
     return argv
 
 
-def execute_native(profile, prompt, *, cwd, policy, deadline, env, on_event=None, cancelled=None):
+def execute_native(profile, prompt, *, cwd, policy, deadline, env, on_event=None, cancelled=None,
+                   effort_profile=None, requested_effort=None, configured_effort=None):
     events = NativeEvents(profile.backend, on_event)
     invocation_env = dict(env)
     if profile.config_dir:
@@ -227,9 +228,15 @@ def execute_native(profile, prompt, *, cwd, policy, deadline, env, on_event=None
     with tempfile.TemporaryDirectory(prefix='prosaic-native-') as temporary:
         mcp = Path(temporary) / 'mcp.json'
         mcp.write_text('{"mcpServers": {}}', encoding='utf-8')
-        outcome = run_process(native_command(profile, policy, mcp_file=mcp), prompt,
+        argv = native_command(profile, policy, mcp_file=mcp)
+        outcome = run_process(argv, prompt,
             cwd=cwd, env=invocation_env, deadline=deadline, max_output_bytes=policy.max_output_bytes,
             on_message=events, cancelled=cancelled)
+    from .effort_evidence import EffortTrace, native_attempt, KEY as EFFORT_KEY
+    trace = EffortTrace()
+    if outcome.launched:
+        trace.add(native_attempt(argv, backend=profile.backend, profile=effort_profile,
+            model=profile.model, requested=requested_effort, configured=configured_effort))
     reason = outcome.failure
     if not reason:
         reason = ('malformed_output' if events.invalid else
@@ -243,7 +250,7 @@ def execute_native(profile, prompt, *, cwd, policy, deadline, env, on_event=None
         outcome.failure is None and not events.invalid and events.terminal
         and not events.success and events.zero_turns and not events.effects and not events.work_started
         and reason in {'usage_limit', 'rate_limit', 'unavailable'})
-    metadata = {'backend': profile.backend, 'model': profile.model,
+    metadata = {EFFORT_KEY: trace.to_dict(), 'backend': profile.backend, 'model': profile.model,
         'work_started': events.work_started,
         'permission_owner': 'native', 'safe_to_fallback': safe,
         'effects_uncertain': outcome.launched and (events.effects or not successful and not safe),

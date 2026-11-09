@@ -14,6 +14,7 @@ from .runtime import ProsaicRuntime
 from .lifecycle import tracked
 from .policy import RunPolicy
 from .types import Result
+from .effort_evidence import EffortTrace, attach, KEY as EFFORT_KEY
 from .budgets import InvocationBudgetExceeded
 
 
@@ -26,6 +27,7 @@ class AdapterBoundary(Exception):
 class _Attempts:
     def __init__(self, policy, maximum, deadline, cancelled):
         self.policy, self.maximum, self.deadline, self.cancelled = policy, maximum, deadline, cancelled
+        self.effort_trace = EffortTrace()
         self.records = []
         self.requests = self.tools = self.tokens = 0
         self.complete = True
@@ -77,6 +79,7 @@ class _Attempts:
         if type(result) is not Result:
             raise ValueError('adapter delegate must return Result')
         owned = deepcopy(result)
+        self.effort_trace.merge(owned.metadata.get(EFFORT_KEY))
         info = owned.metadata.get('invocation_budgets_v1', {})
         requests = info.get('provider_requests', 1)
         tools = info.get('tool_calls', 0)
@@ -143,7 +146,7 @@ class _Attempts:
         result.metadata['invocation_budgets_v1'] = {'provider_requests': self.requests,
             'tool_calls': self.tools, 'reported_tokens': self.tokens, 'usage_complete': self.complete}
         result.metadata['runtime_adapter_v1'] = {**descriptor, 'attempts': deepcopy(self.records)}
-        return result
+        return attach(result, self.effort_trace)
 
 
 @dataclass(frozen=True)
@@ -208,8 +211,12 @@ class RuntimeAdapter:
             effective = ledger.remaining(**reductions)
             if type(projected) is not str:
                 raise ValueError('adapter arguments must be text')
-            result = self.runtime.run(artifact, projected, policy=effective, on_event=on_event,
-                                      cancelled=cancelled, **options)
+            try:
+                result = self.runtime.run(artifact, projected, policy=effective, on_event=on_event,
+                                          cancelled=cancelled, **options)
+            except Exception:
+                ledger.effort_trace.merge(None)
+                raise
             ledger.add(result, projected)
             return result
         try:

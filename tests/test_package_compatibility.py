@@ -34,7 +34,7 @@ def test_wheel_metadata():
     adapter = {Requirement(raw).name: Requirement(raw)
                for raw in metadata.requires("b3-prosaic-runtime-postgres")}
     assert "0.9.2" in adapter["b3-prosaic-runtime"].specifier
-    assert "0.9.17" in adapter["b3-prosaic-runtime"].specifier
+    assert "0.9.18" in adapter["b3-prosaic-runtime"].specifier
     assert "0.10.0" not in adapter["b3-prosaic-runtime"].specifier
     assert "3.2.1" in adapter["psycopg"].specifier
     assert "3.2.0" not in adapter["psycopg"].specifier

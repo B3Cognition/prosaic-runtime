@@ -14,6 +14,7 @@ from .policy import BUILTIN_TOOLS, WRITE_TOOLS, requested_tools
 from .rules import refuse_unenforced
 from .runtime import ProsaicRuntime
 from .types import Result
+from .effort_evidence import EffortTrace, attach, KEY as EFFORT_KEY
 from .unified_config import PoolPolicy, UnifiedRuntimeConfig
 from .effort import PROVIDER_EFFORTS, EffortUnavailableError, api_default_effort, api_effort_capabilities, effective_efforts, resolve_effort, validate_effort
 from .effort_discovery import MetadataCancelled, discover_native_efforts
@@ -25,7 +26,7 @@ class UnifiedRuntime:
     Native inner provider calls remain opaque. API counters are separately
     bounded across API candidates. Hosts own writable-workspace isolation.
     """
-    capabilities = frozenset({'unified_pools_v1'})
+    capabilities = frozenset({'unified_pools_v1', EFFORT_KEY})
 
     def __init__(self, config, *, source='.prosaic', executable='prosaic', capacity=None):
         if not isinstance(config, UnifiedRuntimeConfig):
@@ -51,6 +52,7 @@ class UnifiedRuntime:
         selection = config.pools[pool]
         native = config.native_config.profiles if config.native_config else {}
         api = config.api_config.profiles if config.api_config else {}
+        trace = EffortTrace()
         attempts, resets = [], []
         native_count = api_requests = api_tools = api_tokens = known_tokens = 0
         usage_complete = api_usage_complete = True
@@ -73,7 +75,7 @@ class UnifiedRuntime:
             if attempts:
                 result.metadata['profile'] = attempts[-1]['profile']
             emit('completed', exit_code=result.exit_code)
-            return result
+            return attach(result, trace)
 
         def stopped():
             if cancelled is not None and cancelled():
@@ -219,6 +221,7 @@ class UnifiedRuntime:
                     api_tokens += partial
                     api_usage_complete &= result.token_usage is not None
             except Exception:
+                trace.merge(None)
                 if is_native:
                     native_unknown = True
                 else:
@@ -228,6 +231,10 @@ class UnifiedRuntime:
                 entry.update(exit_code=1, failure_reason='execution_uncertain', safe_to_fallback=False)
                 return finish(Result(1, '', 'delegate execution uncertain',
                     metadata={'failure_reason': 'execution_uncertain', 'recovery_required': True}))
+            if is_native:
+                trace.merge(result.metadata.get(EFFORT_KEY), _configured_effort=default)
+            else:
+                trace.merge(result.metadata.get(EFFORT_KEY))
             known_tokens += partial
             usage_complete &= result.token_usage is not None
             proof = result.metadata.get('prework_failure_v1', {})
