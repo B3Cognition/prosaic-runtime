@@ -234,7 +234,7 @@ an isolated Python environment; no sudo or global Python installation is needed:
 ```sh
 git clone https://github.com/B3Cognition/prosaic-runtime.git
 cd prosaic-runtime
-git checkout v0.9.18
+git checkout v0.9.19
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install .
