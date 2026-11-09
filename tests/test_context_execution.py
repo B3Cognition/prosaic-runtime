@@ -12,12 +12,15 @@ def test_native_serialization_is_charged_before_wire_admission():
     from prosaic_runtime.context_assembly import assemble_context
     from prosaic_runtime.context_execution import ContextExecutionGuard, ContextExecutionFailure
     from prosaic_runtime.runtime import _BoundedMixin
+    from prosaic_runtime.context_work import ContextWorkBudget
     native = {'model': 'fixture-model', 'messages': [{'role': 'user', 'content': 'Hello'}], 'max_tokens': 128}
     policy, counters = fixture_context(timeout_ms=10, count=lambda request: 10)
     registration = counters.resolve(policy.counter_identity)
-    _, report, _, work = assemble_context([], lambda history: native, policy, registration, api.TurnLimits())
-    guard = ContextExecutionGuard(policy, registration, report, work, input_byte_cap=196608)
     now = [0]
+    budget = ContextWorkBudget(policy, clock=lambda: now[0])
+    _, report, _, work = assemble_context([], lambda history: native, policy, registration,
+        api.TurnLimits(), budget=budget)
+    guard = ContextExecutionGuard(policy, registration, report, work, input_byte_cap=196608)
     guard.budget.clock = lambda: now[0]
     class SlowEncoder:
         def encode_payload(self, payload):
