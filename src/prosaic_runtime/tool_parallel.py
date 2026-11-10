@@ -212,13 +212,16 @@ class ParallelToolCoordinator:
         self._drain()
         if self._errors:self._raise_failure()
 
-    def iter_results(self,calls):
-        if self._calls:raise ValueError('parallel coordinator already used')
+    def plan(self,calls):
+        if self._calls:raise ValueError('parallel coordinator already planned')
         self._calls=tuple(calls)
         for index,call in enumerate(calls):
             ident,call_index=self._identity(call,index)
             self.evidence['calls'].append(dict(callId=ident,callIndex=call_index,batchIndex=index,state='notStarted',
                 handlerEntered=False,journalState='notUsed',outcomeCode=None,durationMs=0))
+    def iter_results(self,calls):
+        if not self._calls:self.plan(calls)
+        elif tuple(calls)!=self._calls:raise ValueError('parallel coordinator call drift')
         try:
             for indices in self._windows(calls):
                 if self._eligible(calls[indices[0]]) and sum(self.dispatch.custom[calls[i]['function']['name']].max_result_bytes+1536 for i in indices)>self.policy.max_buffered_result_bytes:

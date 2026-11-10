@@ -269,6 +269,7 @@ class ParallelBatchCursor:
         self.reservation=reserve_tool_batch(backend.budget,backend.execution_budgets,len(calls))
         self.coordinator=ParallelToolCoordinator(backend.parallel_tools,check_boundary=backend.check_boundary,
             reservation=self.reservation,dispatch=self.dispatch,reduce=lambda c,s:s.outcome,emit=emit_after_completion)
+        self.coordinator.plan(tuple(calls))
         self.iterator=self.coordinator.iter_results(tuple(calls))
         backend.budget.parallel_batches.append(self.coordinator.evidence)
     def execute_message(self,call):

@@ -853,3 +853,7 @@ host outcomes require a fenced ToolJournal or equivalent durable application
 repository; interrupted effects must not be repeated automatically.
 
 See [execution correlation and graceful drain](docs/execution-lifecycle.md) for the host shutdown contract.
+
+The next development candidate supports opt-in, bounded **parallel read tools**
+on both API provider wires, with ordered guards and evidence. See
+[parallel read policy, events and compatibility](docs/parallel-tools.md).

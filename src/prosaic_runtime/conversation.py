@@ -270,15 +270,15 @@ class TurnEvidence(_OwnedRecord):
     def from_dict(cls, document):
         encoded = encode_owned(document)
         value = json.loads(encoded)
-        if type(value.get('version')) is not int or value['version'] not in (1,2,3):
+        if type(value.get('version')) is not int or value['version'] not in (1,2,3,4):
             raise ValueError('invalid evidence version')
         _closed(value, {'version', 'providerAttempts', 'toolAttempts', 'knownUsage',
                         'usageComplete', 'toolOutcomes', 'failureCode', 'accounting'} | ({'inputViews'} if value['version']>=2 else set()) |
-                        ({'toolContractV1'} if value['version']==3 else set()))
-        if value['version']==2 or value['version']==3 and value['inputViews'] is not None:
+                        ({'toolContractV1'} if value['version']>=3 else set()) | ({'parallelToolsV1'} if value['version']==4 else set()))
+        if value['version']==2 or value['version']>=3 and value['inputViews'] is not None:
             from .input_views import validate_views
             validate_views(value['inputViews'])
-        if value['version']==3:
+        if value['version']>=3:
             contract = value['toolContractV1']
             _closed(contract, {'bindings', 'evidence', 'citations'})
             from .tool_evidence import validate_invocation_evidence
@@ -299,6 +299,9 @@ class TurnEvidence(_OwnedRecord):
                     deliveries=evidence['deliveries'][record['id']]) for record in evidence['records'] if record['id'] in evidence['deliveries']})
                 if citations['registrySha256'] != digest(registry) or citations['proof'] != 'runtimeObserved':
                     raise ValueError('invalid citation registry digest')
+        if value['version']==4:
+            from .tool_parallel_contracts import validate_parallel_evidence
+            validate_parallel_evidence(value['parallelToolsV1'])
         for key in ('providerAttempts', 'toolAttempts'):
             if type(value[key]) is not int or value[key] < 0:
                 raise ValueError('invalid attempt count')

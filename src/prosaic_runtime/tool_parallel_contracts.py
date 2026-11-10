@@ -57,8 +57,8 @@ def validate_parallel_event(value):
         if type(value[key]) is not str or not re.fullmatch('[0-9a-f]{64}',value[key]):raise ValueError('invalid parallel correlation')
     for key in ('callIndex','batchIndex'):
         if type(value[key]) is not int or value[key]<0:raise ValueError('invalid parallel index')
-    if (value['state'] not in {'completed','replayed','uncertain','notStarted'} or
-            type(value['handlerEntered']) is not bool or value['journalState'] not in {'notUsed','claimedUncertain','replayed','committed'} or
+    if (type(value['state']) is not str or value['state'] not in {'completed','replayed','uncertain','notStarted'} or
+            type(value['handlerEntered']) is not bool or type(value['journalState']) is not str or value['journalState'] not in {'notUsed','claimedUncertain','replayed','committed'} or
             type(value['durationMs']) not in (int,float) or not math.isfinite(value['durationMs']) or not 0<=value['durationMs']<=2**63-1):
         raise ValueError('invalid parallel state')
     if value['outcomeCode'] is not None:ToolOutcome(value['outcomeCode'])
@@ -69,3 +69,45 @@ def validate_parallel_event(value):
     if value['state']=='completed' and (not value['handlerEntered'] or value['journalState'] not in {'notUsed','committed'} or value['outcomeCode'] not in {'ok','controlled_failure'}):
         raise ValueError('invalid parallel completion')
     return json.loads(encode_owned(value,max_bytes=1024))
+
+
+SCHEDULER='independent-read-windows-v1'
+
+
+def parallel_binding(policy):
+    return dict(version=1,scheduler=SCHEDULER,policy=policy.to_dict())
+
+
+def validate_parallel_binding(value):
+    if (type(value) is not dict or set(value)!={'version','scheduler','policy'} or
+            type(value['version']) is not int or value['version']!=1 or value['scheduler']!=SCHEDULER):
+        raise ValueError('invalid parallel binding')
+    ParallelToolPolicyV1.from_dict(value['policy'])
+    return value
+
+
+def validate_parallel_schedule(value):
+    from .conversation import encode_owned
+    import json,re
+    if (type(value) is not dict or set(value)!={'version','scheduler','policy','batches'} or
+            type(value['batches']) is not list):raise ValueError('invalid parallel schedule')
+    validate_parallel_binding({k:value[k] for k in ('version','scheduler','policy')})
+    seen=set();batch_ids=set();previous=-1
+    for batch in value['batches']:
+        if (type(batch) is not dict or set(batch)!={'version','batchId','calls'} or type(batch['version']) is not int or batch['version']!=1 or
+                type(batch['batchId']) is not str or not re.fullmatch('[0-9a-f]{64}',batch['batchId']) or batch['batchId'] in batch_ids or type(batch['calls']) is not list):
+            raise ValueError('invalid parallel batch')
+        batch_ids.add(batch['batchId'])
+        for index,call in enumerate(batch['calls']):
+            if type(call) is not dict:raise ValueError('invalid parallel call')
+            event=validate_parallel_event(dict(version=1,batchId=batch['batchId'],**call))
+            if event['batchIndex']!=index or event['callIndex']<=previous or event['callId'] in seen:raise ValueError('invalid parallel call order')
+            previous=event['callIndex'];seen.add(event['callId'])
+    return json.loads(encode_owned(value))
+
+
+def validate_parallel_evidence(value):
+    if type(value) is not dict or set(value)!={'bindings','schedule'}:raise ValueError('invalid parallel evidence')
+    binding=validate_parallel_binding(value['bindings']);schedule=validate_parallel_schedule(value['schedule'])
+    if binding!={k:schedule[k] for k in ('version','scheduler','policy')}:raise ValueError('parallel binding drift')
+    return value

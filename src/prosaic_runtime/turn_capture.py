@@ -237,6 +237,10 @@ class TurnCapture:
             document.update(version=3, inputViews=self.input_views, toolContractV1=dict(
                 bindings=registry.bindings.to_dict(), evidence=registry.to_dict(),
                 citations=registry.citations.to_dict() if registry.citations is not None else None))
+        if budget.policy.parallel_tools is not None:
+            from .tool_parallel_contracts import parallel_binding
+            binding=parallel_binding(budget.policy.parallel_tools)
+            document.update(version=4,parallelToolsV1=dict(bindings=binding,schedule=dict(**binding,batches=budget.parallel_batches)))
         try:
             encode_owned(document, max_bytes=self.limits.max_evidence_bytes,
                          max_depth=self.limits.max_json_depth, max_nodes=self.limits.max_json_nodes)

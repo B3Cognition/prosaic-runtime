@@ -418,7 +418,7 @@ class ProsaicRuntime:
     capabilities |= frozenset({'guard_input_views_v1'})
     capabilities |= frozenset({'frozen_turn_inputs_v1'})
     capabilities |= frozenset({'context_input_variants_v1'})
-    capabilities |= frozenset({'tool_events_v1', 'tool_results_v1', 'citations_v1'})
+    capabilities |= frozenset({'tool_events_v1', 'tool_results_v1', 'citations_v1', 'parallel_tool_calls_v1'})
     def __init__(self, config: RuntimeConfig, *, source=".prosaic", executable="prosaic", custom_tools=None,
                  accounting=None, context_defaults=None, lifecycle=None, guards=None, allow_unbound_guards=False):
         self.lifecycle = lifecycle if lifecycle is not None else ExecutionLifecycle()
@@ -516,14 +516,14 @@ class ProsaicRuntime:
                         context_work=context_work if context_work is not None else artifact.context_work)
                 elif token_counters is not None or context_work is not None:
                     raise TurnAdmissionError('invalidPolicy')
-                if artifact.encoding_version in ('conversation-turn-v3', 'conversation-turn-v4'):
+                if artifact.encoding_version in ('conversation-turn-v3', 'conversation-turn-v4', 'conversation-turn-v5'):
                     from .input_views import AuthoritativeInputLimits
                     context_args.update(input_profile=owned.get('inputProfile'),
                         authoritative_input_data=owned.get('authoritativeInputData'),
                         authoritative_input_profile=owned.get('authoritativeInputProfile'),
                         authoritative_input_limits=AuthoritativeInputLimits(**owned['authoritativeInputLimits']) if owned.get('authoritativeInputLimits') is not None else None)
                 # Readmission repeats admission silently; warnings were raised at preparation.
-                if artifact.encoding_version in ('conversation-turn-v3', 'conversation-turn-v4'):
+                if artifact.encoding_version in ('conversation-turn-v3', 'conversation-turn-v4', 'conversation-turn-v5'):
                     from .context_contracts import ContextPolicy
                     prepared=self.restore_turn(approved,
                         history=tuple(ConversationMessage.from_dict(m) for m in owned['history']),
@@ -612,13 +612,13 @@ class ProsaicRuntime:
             try:
                 guard.readmit(lambda: initial_payload(self, approved, policy, owned['selectedHistory'],
                     owned['message'], owned['inputData'], context_policy=context_policy,
-                    canonical_messages=prepared.encoding_version in ('conversation-turn-v3', 'conversation-turn-v4'))[-1])
+                    canonical_messages=prepared.encoding_version in ('conversation-turn-v3', 'conversation-turn-v4', 'conversation-turn-v5'))[-1])
             except ToolDeadlineExceeded:
                 terminal = capture.finish(Result(1, '', 'timeout', timed_out=True,
                     metadata={'failure_reason': 'invocation_timeout'}), budget)
                 return with_rules(replace(terminal, context_report=guard.report, context_work=guard.work))
             owned['_contextGuard'] = guard
-        elif prepared.encoding_version in ('conversation-turn-v3', 'conversation-turn-v4'):
+        elif prepared.encoding_version in ('conversation-turn-v3', 'conversation-turn-v4', 'conversation-turn-v5'):
             from .conversation_preparation import initial_payload,native_payload_digest
             native=initial_payload(self,approved,policy,owned['history'],owned['message'],owned['inputData'],canonical_messages=True)[-1]
             if native_payload_digest(native)!=owned['nativePayloadDigest'] or len(json.dumps(native,allow_nan=False).encode('utf-8'))!=prepared.input_bytes:
@@ -838,7 +838,7 @@ class ProsaicRuntime:
             result.metadata['invocation_budgets_v1'] = budget.metadata()
         if policy.parallel_tools is not None:
             from .conversation import encode_owned
-            result.metadata['parallel_tools_v1']=json.loads(encode_owned(dict(version=1,
+            result.metadata['parallel_tools_v1']=json.loads(encode_owned(dict(version=1,scheduler='independent-read-windows-v1',
                 policy=policy.parallel_tools.to_dict(),batches=budget.parallel_batches),max_bytes=65536))
         return attach(result, trace)
 
