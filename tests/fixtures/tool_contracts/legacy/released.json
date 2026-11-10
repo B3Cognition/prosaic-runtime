@@ -1,0 +1,135 @@
+{
+  "descriptor": {
+    "authorization_required": false,
+    "description": "Lookup",
+    "max_argument_bytes": 16384,
+    "max_result_bytes": 65536,
+    "name": "lookup",
+    "parameters": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "version": "v1"
+  },
+  "events": [
+    {
+      "call_id": "call-1",
+      "event": "tool_started",
+      "name": "lookup",
+      "turn": 1
+    },
+    {
+      "call_id": "call-1",
+      "duration_ms": 42,
+      "event": "tool_completed",
+      "name": "lookup",
+      "status": "ok",
+      "turn": 1
+    }
+  ],
+  "failure": {
+    "error": "missing",
+    "status": "error"
+  },
+  "policy": {
+    "allowed_tools": [],
+    "bounded_tool_recovery": false,
+    "forbidden_roots": [],
+    "initial_tool": null,
+    "max_input_bytes": 262144,
+    "max_provider_requests": 2,
+    "max_reported_tokens": null,
+    "max_tool_calls": 0,
+    "max_tool_rounds": 8,
+    "read_roots": [],
+    "timeout_s": 120,
+    "write_paths": []
+  },
+  "prepared": {
+    "document": {
+      "agent": {
+        "body": "ALWAYS use supplied facts. NEVER invent evidence.",
+        "frontmatter": {
+          "description": "Synthetic",
+          "name": "approved"
+        },
+        "id": "approved",
+        "resources": [],
+        "type": "subagent"
+      },
+      "cliSandbox": {
+        "mode": "off",
+        "runtimeRoots": []
+      },
+      "endpoint": {
+        "base_url": "http://127.0.0.1:9/v1",
+        "features": {
+          "max_tool_rounds": 8,
+          "streaming": false,
+          "tool_calls": false,
+          "transcript": false,
+          "web_tools": false
+        },
+        "max_response_bytes": 8388608,
+        "max_tokens": 4096,
+        "model": "synthetic",
+        "provider": "openai-compatible",
+        "supported_efforts": null,
+        "temperature": 0.2
+      },
+      "history": [],
+      "inputData": {
+        "task": "Review \u017e"
+      },
+      "limits": {
+        "max_assistant_bytes": 65536,
+        "max_event_bytes": 65536,
+        "max_evidence_bytes": 4194304,
+        "max_history_bytes": 4194304,
+        "max_input_bytes": 196608,
+        "max_json_depth": 64,
+        "max_json_nodes": 65536,
+        "max_metadata_bytes": 65536,
+        "max_turn_bytes": 131072,
+        "max_user_bytes": 16384
+      },
+      "message": "Hello",
+      "messages": [
+        {
+          "content": "ALWAYS use supplied facts. NEVER invent evidence.",
+          "role": "system"
+        },
+        {
+          "content": "{\"message\": \"Hello\", \"inputData\": {\"task\": \"Review \u017e\"}}",
+          "role": "user"
+        }
+      ],
+      "policy": {
+        "allowed_tools": [],
+        "bounded_tool_recovery": false,
+        "forbidden_roots": [],
+        "initial_tool": null,
+        "max_input_bytes": 196608,
+        "max_provider_requests": 2,
+        "max_reported_tokens": null,
+        "max_tool_calls": 0,
+        "max_tool_rounds": 8,
+        "read_roots": [],
+        "timeout_s": 120,
+        "write_paths": []
+      },
+      "profile": "local",
+      "tools": {},
+      "workspace": null
+    },
+    "encoding": "conversation-turn-v1",
+    "identity": "f599b2b2ab1718ab977b6c3ec9d225648d5a543dba0a726b9f46755b13fbe90a"
+  },
+  "success": {
+    "result": {
+      "count": 14
+    },
+    "status": "ok"
+  }
+}

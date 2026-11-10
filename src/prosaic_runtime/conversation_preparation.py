@@ -12,6 +12,7 @@ from .policy import RunPolicy, requested_tools, BUILTIN_TOOLS, READ_TOOLS, WRITE
 from .rules import RuleAdmissionError, turn_rules
 from .conversation import (PreparedTurn, TurnLimits, TurnAdmissionError, encode_owned,
                            validate_conversation_history)
+from .tool_event_contract import current_bindings, tool_contract_preparation
 
 
 def policy_document(policy):
@@ -96,6 +97,10 @@ def current_user_text(message,input_data):
 
 def initial_projection(artifact, history, message, input_data, endpoint):
     instructions = artifact.render()
+    bindings = current_bindings()
+    if bindings is not None and bindings.citations is not None:
+        from .citations import CITATION_INSTRUCTIONS
+        instructions = CITATION_INSTRUCTIONS + '\n\n' + instructions
     current = current_user_text(message,input_data)
     return [{'role': 'system', 'content': instructions},
             *encode_history_messages(history, provider=endpoint.provider),
@@ -142,12 +147,13 @@ def native_payload_digest(native):
     return hashlib.sha256(json.dumps(native,allow_nan=False).encode('utf-8')).hexdigest()
 
 
+@tool_contract_preparation
 def prepare_turn(runtime, artifact, *, message, history=(), input_data=None, policy=None,
                  limits=None, workspace=None, context_policy=None, token_counters=None,
                  context_selection=None, context_report=None, context_work=None, _warn_rules=True,
                  input_profile=None, authoritative_input_data=None, authoritative_input_profile=None,
                  authoritative_input_limits=None, _frozen_input=None, _input_variant_selection=None,
-                 _input_data_variants=None):
+                 _input_data_variants=None, tool_contract_bindings=None):
     limits = limits if limits is not None else TurnLimits()
     if type(limits) is not TurnLimits:
         raise TurnAdmissionError('invalidPolicy')
@@ -183,6 +189,8 @@ def prepare_turn(runtime, artifact, *, message, history=(), input_data=None, pol
                 raise ValueError('invalid path scope')
         policy = policy_from_document(json.loads(encode_owned(policy_document(policy))))
         names = requested & runtime.config.allowed_tools & policy.allowed_tools
+        from .tool_contracts import admit_tool_contracts
+        admit_tool_contracts(runtime._custom_tools, names, tool_contract_bindings)
         from .terminal import admit_terminal_tools
         admit_terminal_tools(runtime._custom_tools, names, policy.allowed_terminal_tools, supported=False)
         if names != requested or requested - BUILTIN_TOOLS - runtime.tool_descriptors.keys():
@@ -201,6 +209,15 @@ def prepare_turn(runtime, artifact, *, message, history=(), input_data=None, pol
         if (limits.max_evidence_bytes < 1024 + (policy.max_tool_calls * 1536 if names else 0) or
                 limits.max_metadata_bytes < 128 or limits.max_event_bytes < 128):
             raise ValueError('terminal evidence headroom required')
+        if tool_contract_bindings is not None:
+            contract_limits = tool_contract_bindings.limits
+            reserve = contract_limits.max_evidence_bytes + contract_limits.max_citation_bytes + len(encode_owned(tool_contract_bindings.to_dict()))
+            if limits.max_evidence_bytes < 1024 + reserve + (policy.max_tool_calls * 1536 if names else 0):
+                raise ValueError('tool contract evidence headroom required')
+            if limits.max_event_bytes < contract_limits.max_event_bytes:
+                raise ValueError('tool contract event headroom required')
+            if tool_contract_bindings.citations is not None and limits.max_metadata_bytes < 128 + contract_limits.max_citation_bytes:
+                raise ValueError('citation metadata headroom required')
     except (TypeError, ValueError, AttributeError, UnicodeError) as exc:
         raise TurnAdmissionError('invalidPolicy') from exc
     try:
@@ -239,7 +256,7 @@ def prepare_turn(runtime, artifact, *, message, history=(), input_data=None, pol
             registration = admit_counter(context_policy, token_counters, endpoint)
             def candidate(history):
                 return initial_payload(runtime, owned_agent, policy, history, message, data,
-                                       context_policy=context_policy,canonical_messages=views is not None)[-1]
+                                       context_policy=context_policy,canonical_messages=views is not None or tool_contract_bindings is not None)[-1]
             if context_selection is not None:
                 selected_history, report, selection, work = restore_selection(owned_history,
                     context_policy, registration, context_selection, context_report, context_work)
@@ -267,12 +284,12 @@ def prepare_turn(runtime, artifact, *, message, history=(), input_data=None, pol
         elif _frozen_input is None:
             profile, endpoint, metadata, messages, native = initial_payload(
                 runtime, owned_agent, policy, selected_history, message, data,
-                context_policy=context_policy,canonical_messages=views is not None)
+                context_policy=context_policy,canonical_messages=views is not None or tool_contract_bindings is not None)
             # This is the exact byte encoding used by both existing transports.
             input_bytes = len(json.dumps(native, allow_nan=False).encode('utf-8'))
-            native_digest=native_payload_digest(native) if views is not None else None
+            native_digest=native_payload_digest(native) if views is not None or tool_contract_bindings is not None else None
         else:
-            if views is None: raise TurnAdmissionError('bindingMismatch')
+            if views is None and tool_contract_bindings is None: raise TurnAdmissionError('bindingMismatch')
             profile,endpoint,metadata=prepared_endpoint(runtime,owned_agent,policy,context_policy)
             messages=initial_projection(owned_agent,selected_history,message,data,endpoint)
             input_bytes=_frozen_input['inputBytes']
@@ -296,6 +313,9 @@ def prepare_turn(runtime, artifact, *, message, history=(), input_data=None, pol
         if not ruleset.empty:
             # Guard versions and effective bindings: readmission detects drift.
             material['rules'] = ruleset.material()
+        if tool_contract_bindings is not None:
+            material['toolContractV1'] = tool_contract_bindings.to_dict()
+            material['nativePayloadDigest'] = native_digest
         if views is not None:
             material.update(views)
             from .frozen_turns import InputVariantSelection
@@ -326,11 +346,12 @@ def prepare_turn(runtime, artifact, *, message, history=(), input_data=None, pol
             max_bytes=ownership_cap,
             max_depth=limits.max_json_depth, max_nodes=limits.max_json_nodes)).hexdigest()
         prepared = PreparedTurn._create(encoded, identity, input_bytes,
-            encoding_version='conversation-turn-v3' if views is not None else ('conversation-turn-v2' if context_policy is not None else 'conversation-turn-v1'),
+            encoding_version='conversation-turn-v4' if tool_contract_bindings is not None else (
+                'conversation-turn-v3' if views is not None else ('conversation-turn-v2' if context_policy is not None else 'conversation-turn-v1')),
             context_work=work)
         # Private compiled rules, reused by execution; never serialized or compared.
         object.__setattr__(prepared, '_rules', ruleset)
-        if views is not None:
+        if views is not None or tool_contract_bindings is not None:
             object.__setattr__(prepared,'_initial_context_work',work.to_dict() if work is not None else None)
             # Freezeability is an admission requirement, including combined
             # ownership/field bounds; it must not fail after an effect.

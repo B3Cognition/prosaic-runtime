@@ -89,3 +89,8 @@ reasons. They never consume the model correction allowance or redispatch an
 uncertain effect. A valid effect outcome commits before a subsequent cancellation
 or deadline check. See [trusted tool effects](tool-effects.md) for host identity,
 fencing, versioning and reconciliation responsibilities.
+# Safe tool contracts
+
+The development SDK supports independently enabled event/result contracts and
+explicit host-attested citation validation. Automatic citations require the API
+model loop. See [safe tool events and citations](tool-events-citations.md).

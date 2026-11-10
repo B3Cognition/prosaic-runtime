@@ -1,5 +1,5 @@
 """Execute neutral Prosaic artifacts with explicitly granted authority."""
-__version__ = '0.9.19'
+__version__ = '0.9.20'
 
 from .artifacts import ProsaicArtifact
 from .config import EndpointConfig, RuntimeConfig, RunLimits, CliSandboxConfig
@@ -16,6 +16,15 @@ from .conformance import evaluate_conformance
 
 __all__ = ["ProsaicArtifact", "EndpointConfig", "RuntimeConfig", "RunLimits", "CliSandboxConfig", "RunPolicy", "ProsaicRuntime", "Result", "CustomTool"]
 __all__ += ["validate_execution_artifact", "validate_custom_tools", "custom_descriptors", "TerminalCompletion"]
+
+from .tool_contracts import (ToolContractLimitsV1, EvidenceDraftV1, ToolResultV1,
+    ToolResultContractV1, ToolDisplayFieldV1, ToolEventPolicyV1, EvidenceUseV1,
+    ToolDisplayUseV1, EvidenceAuthorizerV1, ToolDisplayAuthorizerV1,
+    CitationPolicyV1, ToolContractBindingsV1)
+__all__ += ['ToolContractLimitsV1', 'EvidenceDraftV1', 'ToolResultV1',
+    'ToolResultContractV1', 'ToolDisplayFieldV1', 'ToolEventPolicyV1', 'EvidenceUseV1',
+    'ToolDisplayUseV1', 'EvidenceAuthorizerV1', 'ToolDisplayAuthorizerV1',
+    'CitationPolicyV1', 'ToolContractBindingsV1']
 
 from .structured_tools import Completion, StructuredToolError, StructuredToolLoop, ToolRequest
 
@@ -73,3 +82,9 @@ __all__ += ["Guard", "GuardContext", "RuleAdmissionError", "RuleBindingWarning",
 from .unified_config import PoolPolicy, UnifiedRuntimeConfig
 from .unified import UnifiedRuntime
 __all__ += ["PoolPolicy", "UnifiedRuntimeConfig", "UnifiedRuntime"]
+from .citations import CitationsV1, CitationViolation, validate_citations
+from .tool_evidence import ToolInvocationEvidenceV1, EligibleEvidenceV1
+from .tool_evidence import HostDeliveryAttestationV1
+from .tool_imports import HostEvidenceImportV1
+__all__ += ['CitationsV1', 'CitationViolation', 'validate_citations', 'ToolInvocationEvidenceV1',
+            'EligibleEvidenceV1', 'HostDeliveryAttestationV1', 'HostEvidenceImportV1']

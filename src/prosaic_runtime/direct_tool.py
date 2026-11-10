@@ -17,6 +17,9 @@ from .tool_outcomes import ToolOutcome
 from .tools import ToolDeadlineExceeded, depth, execute_custom_tool, parse_arguments
 from .types import Result
 from .effort_evidence import EffortTrace, KEY as EFFORT_KEY
+from .tool_event_contract import managed_events
+from .tool_event_contract import current_bindings, current_registry, call_identity
+from .tool_contracts import admit_tool_contracts
 
 
 def run_tool(runtime, name, arguments, *, policy=None, cwd='.', on_event=None,
@@ -25,6 +28,7 @@ def run_tool(runtime, name, arguments, *, policy=None, cwd='.', on_event=None,
     # Snapshot authority before any observer or trusted callback can change it.
     config, custom, cli = runtime.config, dict(runtime._custom_tools), frozenset(runtime._cli_tools)
     grants = frozenset(config.allowed_tools)
+    admit_tool_contracts(custom, {name} if type(name) is str else (), current_bindings(), automatic_citations=False)
     policy = policy if policy is not None else RunPolicy(timeout_s=config.limits.timeout_s,
                                                         max_tool_rounds=config.limits.max_tool_rounds)
     if type(policy) is not RunPolicy:
@@ -107,12 +111,18 @@ def run_tool(runtime, name, arguments, *, policy=None, cwd='.', on_event=None,
                 budget.before_tool()
                 execution_started()
                 tool_started = time.monotonic()
-                emit('tool_started', version=1, name=name, tool_version=tool.version,
-                     call_id='direct-0', turn=0)
+                if not managed_events(tool):
+                    emit('tool_started', version=1, name=name, tool_version=tool.version,
+                         call_id='direct-0', turn=0)
                 payload = execute_custom_tool(tool, raw, check_boundary=boundary, scope=scope,
                     deadline=deadline, cancelled=cancelled if cancelled is not None else lambda: False,
                     call_index=0, tool_journal=tool_journal, accounting_context=resolved,
                     on_outcome=record_outcome)
+                registry = current_registry()
+                if tool.result_contract is not None and registry is not None:
+                    from .tool_evidence import digest
+                    payload = registry.stage(tool, payload, payload, call_id=call_identity(scope, 0, 0),
+                        call_index=0, arguments_sha256=digest(arguments), replayed=outcome.replayed)
                 result = (finish(value=payload['result']) if payload['status'] == 'ok'
                           else finish(payload['error']))
         except Cancelled:
@@ -126,7 +136,7 @@ def run_tool(runtime, name, arguments, *, policy=None, cwd='.', on_event=None,
         except Exception:
             result = finish('critical_hook_error' if emitter.critical_hook_failed else 'execution_failure')
         finally:
-            if tool_started is not None and not emitter.critical_hook_failed:
+            if tool_started is not None and not emitter.critical_hook_failed and not managed_events(tool):
                 try:
                     # Terminal evidence must still reach the host after cancellation.
                     with event_context(on_event):

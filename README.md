@@ -1,5 +1,7 @@
 # Prosaic Runtime
 
+Runtime **0.9.20** adds opt-in safe tool events and checked citations. See [release notes](docs/release-0.9.20.md) and [the contract](docs/tool-events-citations.md).
+
 Runtime **0.9.19** supplies [profiled context inputs](docs/context-packs.md) for
 Harness context packs: separate model and private validation views, bounded
 evidence fitting, and frozen turn restoration. Harness **0.9.13** owns named
@@ -69,7 +71,7 @@ Runtime is distributed as `b3-prosaic-runtime` and requires
 `b3-prosaic>=0.5.0,<0.6` from the package index. Python imports (`prosaic_runtime`)
 and the `prosaic-runtime` CLI remain unchanged. The separately installed recorder
 is `b3-prosaic-runtime-postgres` **0.3.0**, selecting Runtime 0.9.x.
-Install the release with `python -m pip install 'b3-prosaic-runtime==0.9.19'`.
+Install the release with `python -m pip install 'b3-prosaic-runtime==0.9.20'`.
 
 ### Opt-in final-answer phase
 
@@ -234,7 +236,7 @@ an isolated Python environment; no sudo or global Python installation is needed:
 ```sh
 git clone https://github.com/B3Cognition/prosaic-runtime.git
 cd prosaic-runtime
-git checkout v0.9.19
+git checkout v0.9.20
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install .
@@ -244,7 +246,7 @@ The package installs compatible `b3-prosaic` 0.5.x into the same environment.
 Use the release tag after publication; older release tags retain historical docs.
 
 For public-index installation, create a fresh virtual environment or
-container image and run `python -m pip install 'b3-prosaic-runtime==0.9.19'`.
+container image and run `python -m pip install 'b3-prosaic-runtime==0.9.20'`.
 Install the optional recorder with
 `python -m pip install 'b3-prosaic-runtime-postgres==0.3.0'`. Never add renamed
 packages to an environment containing legacy `prosaic`, `prosaic-runtime` or

@@ -36,7 +36,9 @@ class UnifiedRuntime:
         self.capacity = capacity if capacity is not None else CapacityStore(config.capacity_file)
 
     def run(self, artifact, arguments='', *, cwd='.', policy=None, pool=None,
-            on_event=None, cancelled=None, env=None):
+            on_event=None, cancelled=None, env=None, tool_contract_bindings=None):
+        if tool_contract_bindings is not None:
+            raise ValueError('unsupported pooled tool contracts')
         if not isinstance(policy, PoolPolicy):
             raise ValueError('unified execution requires explicit PoolPolicy')
         if policy.api_policy is not None and policy.api_policy.allowed_terminal_tools:

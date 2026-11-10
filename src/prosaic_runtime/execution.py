@@ -51,6 +51,13 @@ class ExecutionBackend:
             {"role": "system", "content": self.tool_guidance()},
             {"role": "user", "content": request.prompt}
         ]
+        from .tool_event_contract import current_registry
+        evidence_registry = current_registry()
+        citation_policy = evidence_registry.bindings.citations if evidence_registry is not None else None
+        if citation_policy is not None and initial_messages is None:
+            from .citations import CITATION_INSTRUCTIONS
+            messages = list(messages)
+            messages.insert(0, {'role': 'system', 'content': CITATION_INSTRUCTIONS})
         deadline = time.monotonic() + max(0.001, request.timeout_s)
         token_usage = 0
         token_usage_details: dict[str, int] = {}
@@ -339,10 +346,13 @@ class ExecutionBackend:
                     )
                     call_id = str(tool_call.get("id") or "")
                     call_started = time.monotonic()
-                    emit("tool_started", name=tool_name, call_id=call_id, turn=turn_number,
-                         **self.tool_event_metadata(tool_name),
-                         **({'argumentsSha256': content_digest(json.loads(tool_call['function']['arguments']))}
-                            if getattr(registry, 'terminal_tools', ()) else {}))
+                    from .tool_event_contract import managed_events
+                    managed_event = managed_events(getattr(registry, 'custom', {}).get(tool_name))
+                    if not managed_event:
+                        emit("tool_started", name=tool_name, call_id=call_id, turn=turn_number,
+                             **self.tool_event_metadata(tool_name),
+                             **({'argumentsSha256': content_digest(json.loads(tool_call['function']['arguments']))}
+                                if getattr(registry, 'terminal_tools', ()) else {}))
                     from .tool_effects import ToolEffectFailure
                     from .tool_outcomes import ToolOutcome
                     refusal = hooks.refusal(tool_call) if hooks is not None else None
@@ -360,19 +370,38 @@ class ExecutionBackend:
                     except ToolEffectFailure:
                         outcome = getattr(registry, 'last_outcome', ToolOutcome('unclassified')).to_dict()
                         try:
-                            emit('tool_completed', name=tool_name, call_id=call_id, turn=turn_number,
-                                 status='error', duration_ms=round((time.monotonic()-call_started)*1000, 3),
-                                 read_receipts=[], tool_outcome=outcome, **self.tool_event_metadata(tool_name))
+                            if not managed_event:
+                                emit('tool_completed', name=tool_name, call_id=call_id, turn=turn_number,
+                                     status='error', duration_ms=round((time.monotonic()-call_started)*1000, 3),
+                                     read_receipts=[], tool_outcome=outcome, **self.tool_event_metadata(tool_name))
                         except Cancelled:
                             # Terminal journal uncertainty takes precedence over a
                             # later cancellation boundary; neither permits replay.
                             pass
                         raise
                     executed = tool_message
-                    if hooks is not None and refusal is None:
-                        # The model and history see the checked result; events,
-                        # conformance and effect evidence keep what actually ran.
-                        tool_message = hooks.after_tool(tool_call, executed)
+                    from .tool_event_contract import current_registry
+                    evidence_registry = current_registry()
+                    checked_event = None
+                    try:
+                        if hooks is not None and refusal is None:
+                            # Raw completion remains private; guards check the logical data.
+                            tool_message = hooks.after_tool(tool_call, executed)
+                        registered = getattr(registry, 'custom', {}).get(tool_name)
+                        if evidence_registry is not None and tool_message is not STOP:
+                            checked_payload = json.loads(tool_message['content'])
+                            if registered is not None and registered.result_contract is not None and refusal is None:
+                                from .tool_evidence import digest
+                                checked_payload = evidence_registry.stage(registered, json.loads(executed['content']),
+                                    checked_payload, call_id=registry.last_contract_call_id,
+                                    call_index=registry.last_contract_call_index,
+                                    arguments_sha256=digest(json.loads(tool_call['function']['arguments'])),
+                                    replayed=registry.last_outcome.replayed)
+                                tool_message = {**tool_message, 'content': json.dumps(checked_payload, ensure_ascii=False, allow_nan=False)}
+                            checked_event = checked_payload
+                    finally:
+                        if evidence_registry is not None:
+                            evidence_registry.finish_event(getattr(registry, 'last_contract_call_id', None), checked_event)
                     if turn_capture is not None and tool_message is not STOP:
                         turn_capture.tool(tool_call, tool_message)
                     tool_payload = json.loads(executed["content"])
@@ -385,12 +414,13 @@ class ExecutionBackend:
                                           ("path", "sha256", "offset", "lines_read", "line_count")}]
                     terminal = getattr(registry, 'terminal_capture', None)
                     completion = terminal.evidence if terminal is not None else None
-                    emit("tool_completed", name=tool_name, call_id=call_id, turn=turn_number,
-                         status=status, duration_ms=round((time.monotonic() - call_started) * 1000, 3),
-                         read_receipts=read_receipts,
-                         tool_outcome=getattr(registry, 'last_outcome', ToolOutcome('ok' if status=='ok' else 'unclassified')).to_dict(),
-                         **self.tool_event_metadata(tool_name),
-                         **({'terminalCompletion': binding(completion)} if completion is not None else {}))
+                    if not managed_event:
+                        emit("tool_completed", name=tool_name, call_id=call_id, turn=turn_number,
+                             status=status, duration_ms=round((time.monotonic() - call_started) * 1000, 3),
+                             read_receipts=read_receipts,
+                             tool_outcome=getattr(registry, 'last_outcome', ToolOutcome('ok' if status=='ok' else 'unclassified')).to_dict(),
+                             **self.tool_event_metadata(tool_name),
+                             **({'terminalCompletion': binding(completion)} if completion is not None else {}))
                     if completion is not None:
                         self.check_boundary()
                         return CliRunResult(0, json.dumps(tool_payload['result'], ensure_ascii=False,
@@ -530,6 +560,21 @@ class ExecutionBackend:
                     return rule_stop()
                 if decision == RETRY:
                     continue  # Draft and unprivileged feedback were appended; budgets still apply.
+            if citation_policy is not None:
+                from .citations import citation_markers, validate_citations, CitationViolation
+                eligible = evidence_registry.eligible()
+                try:
+                    markers = citation_markers(turn.text, maximum=evidence_registry.bindings.limits.max_citations)
+                    for evidence_id in dict.fromkeys(m['evidenceId'] for m in markers):
+                        if evidence_id in eligible.ids:
+                            evidence_registry.authorize(evidence_id, 'cite')
+                    evidence_registry.citations = validate_citations(turn.text, eligible, citation_policy,
+                        limits=evidence_registry.bindings.limits)
+                except CitationViolation:
+                    if hooks is not None and hooks.citation_retry(turn, messages):
+                        continue
+                    return CliRunResult(1, '', 'citationViolation', token_usage=token_usage,
+                        metadata={'failure_reason': 'citationViolation', 'token_usage_details': token_usage_details})
             if turn_capture is not None:
                 turn_capture.assistant(turn)
             if text_withheld():

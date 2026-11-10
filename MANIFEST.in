@@ -43,3 +43,7 @@ include docs/context-packs.md docs/release-0.9.19.md
 include scripts/context_pack_wheel_smoke.py
 include tests/test_context_pack_installed.py
 recursive-include adapters/postgres/tests *.py
+include docs/tool-events-citations.md
+include scripts/tool_contract_smoke.py
+include tests/test_tool_contract_installed.py
+recursive-include tests/fixtures/tool_contracts *.json

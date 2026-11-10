@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.20 — 2026-11-10
+
+- Add opt-in safe scalar tool events, typed private tool results and actual-delivery evidence.
+- Validate final citations after guards; preserve complete private guard facts and old disabled behavior.
+- Preserve known completion on event/capacity failure and bound the complete registry atomically.
+- Keep Core/recorder bytes unchanged; see [release notes](docs/release-0.9.20.md).
+
 ## 0.9.19 — 2026-11-09
 
 - Add explicit input profiles and independent private guard facts with fail-only feedback.

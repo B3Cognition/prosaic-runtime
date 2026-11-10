@@ -350,13 +350,15 @@ def _check(stage, context):
     )
 
 
-def value_in_tool_output(*, input_access='shared'):
+def value_in_tool_output(*, input_access='shared', tool_result_contract=None):
+    if tool_result_contract not in (None, 'v1'):
+        raise ValueError('invalid tool result contract')
     # Refused values are regex-constrained figures ("EUR 650", "3x", "EUR 1.2.3"): a marker,
     # sign, spacing or emphasis, digits, separators and a scale only, which cannot carry
     # instructions, so this guard opts in to echoing them in answer-stage retry feedback.
     return Guard(
         'value_in_tool_output',
-        'value-in-tool-output-v2',
+        'value-in-tool-output-v2' if tool_result_contract is None else 'value-in-tool-output-v3-tool-result-v1',
         ('before_answer', 'final'),
         _check,
         echo_values=True,

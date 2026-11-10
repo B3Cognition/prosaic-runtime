@@ -14,6 +14,7 @@ from .operation_context import ToolExecutionContext, bounded_reference
 from .tool_effects import ToolEffectFailure, ToolFailure, canonical_json, snapshot_outcome, validate_claim, failure_outcome
 from .tool_outcomes import ToolOutcome
 from .terminal import TerminalCompletion, TerminalCompletionError
+from .tool_contracts import ToolResultContractV1, ToolEventPolicyV1
 
 
 class ToolDeadlineExceeded(TimeoutError):
@@ -79,10 +80,17 @@ class CustomTool:
     with_context: bool
     operation_key: Callable | None
     terminal: bool
+    result_contract: ToolResultContractV1 | None
+    event_policy: ToolEventPolicyV1 | None
 
     def __init__(self, name, description, parameters, handler, version, *,
                  max_argument_bytes=16384, max_result_bytes=65536, authorize=None,
-                 with_context=False, operation_key=None, terminal=False):
+                 with_context=False, operation_key=None, terminal=False,
+                 result_contract=None, event_policy=None):
+        if result_contract is not None and type(result_contract) is not ToolResultContractV1:
+            raise ValueError('invalid tool result contract')
+        if event_policy is not None and type(event_policy) is not ToolEventPolicyV1:
+            raise ValueError('invalid tool event policy')
         if not isinstance(name, str) or not re.fullmatch(r'[A-Za-z][A-Za-z0-9_-]{0,63}', name) or name in BUILTIN_TOOLS:
             raise ValueError('invalid or reserved custom tool name')
         for label, value, limit in [('description', description, 4096), ('version', version, 128)]:
@@ -113,7 +121,8 @@ class CustomTool:
         for key, value in dict(name=name, description=description, _schema_json=schema_json,
                                handler=handler, version=version, max_argument_bytes=max_argument_bytes,
                                max_result_bytes=max_result_bytes, authorize=authorize,
-                               with_context=with_context, operation_key=operation_key, terminal=terminal).items():
+                               with_context=with_context, operation_key=operation_key, terminal=terminal,
+                               result_contract=result_contract, event_policy=event_policy).items():
             object.__setattr__(self, key, value)
 
     @property
@@ -131,6 +140,10 @@ class CustomTool:
             descriptor['journaled'] = True
         if self.terminal:
             descriptor['terminal'] = True
+        if self.result_contract is not None:
+            descriptor['result_contract'] = self.result_contract.to_dict()
+        if self.event_policy is not None:
+            descriptor['event_policy'] = self.event_policy.to_dict()
         return descriptor
 
 
@@ -194,7 +207,60 @@ def bounded_result(value, maximum, *, on_outcome=None):
 def execute_custom_tool(tool, raw_arguments, *, check_boundary, scope=None,
                         deadline=None, cancelled=lambda: False, call_index=0, tool_journal=None,
                         on_completion=None, accounting_context=None, on_outcome=None,
-                        on_terminal=None):
+                        on_terminal=None, tool_contract_bindings=None, _event_call_id=None, _event_exchange=0,
+                        _defer_event=False):
+    from .tool_event_contract import current_bindings, current_registry, managed_events, ToolEventLifecycle, call_identity
+    bindings, registry = tool_contract_bindings or current_bindings(), current_registry()
+    options = dict(check_boundary=check_boundary, scope=scope, deadline=deadline, cancelled=cancelled,
+        call_index=call_index, tool_journal=tool_journal, on_completion=on_completion,
+        accounting_context=accounting_context, on_outcome=on_outcome, on_terminal=on_terminal)
+    manage = managed_events(tool, bindings)
+    capture = registry is not None and tool.result_contract is not None
+    if not manage and not capture:
+        return _execute_custom_tool(tool, raw_arguments, **options)
+    bindings.__post_init__()
+    if scope != bindings.scope:
+        raise ValueError('tool contract scope mismatch')
+    call_id = _event_call_id or call_identity(scope, _event_exchange, call_index)
+    lifecycle = ToolEventLifecycle(tool, bindings, call_index, call_id=call_id, exchange=_event_exchange) if manage else None
+    known = [None, None]
+    queued = False
+    def report(outcome):
+        if lifecycle is not None:
+            lifecycle.outcome = outcome
+        if on_outcome is not None:
+            on_outcome(outcome)
+    def complete(outcome, status='completed', **refs):
+        known[:] = outcome, status
+        # Persist known completion before a critical event sink can fail.
+        if on_completion is not None:
+            on_completion(outcome, status, **refs)
+        if capture:
+            arguments = parse_arguments(raw_arguments, tool.parameters, tool.max_argument_bytes)
+            registry.capture_completion(tool, outcome, call_id=call_id, call_index=call_index,
+                arguments_sha256=hashlib.sha256(canonical_json(arguments).encode()).hexdigest(), status=status)
+        if lifecycle is not None and not _defer_event:
+            lifecycle.finish(outcome, status)
+    options.update(on_outcome=report, on_completion=complete,
+        _before_handler=lifecycle.start if lifecycle is not None else None)
+    try:
+        result = _execute_custom_tool(tool, raw_arguments, **options)
+        if lifecycle is not None:
+            if _defer_event and registry is not None:
+                registry._pending_events[call_id] = lifecycle
+                queued = True
+            else:
+                lifecycle.finish(result, known[1])
+        return result
+    finally:
+        if lifecycle is not None and not queued:
+            lifecycle.finish(known[0], known[1] or ('uncertain' if lifecycle.started_at is not None else None))
+
+
+def _execute_custom_tool(tool, raw_arguments, *, check_boundary, scope=None,
+                        deadline=None, cancelled=lambda: False, call_index=0, tool_journal=None,
+                        on_completion=None, accounting_context=None, on_outcome=None,
+                        on_terminal=None, _before_handler=None):
     if on_outcome is not None and not callable(on_outcome):
         raise ValueError('invalid tool outcome observer')
     def report(code, replayed=False):
@@ -270,15 +336,28 @@ def execute_custom_tool(tool, raw_arguments, *, check_boundary, scope=None,
                 on_completion(None, 'uncertain', operation_key=key, signature=signature)
             raise ToolEffectFailure('tool_effect_uncertain')
         if claim.state == 'replay':
+            if tool.result_contract is not None:
+                from .tool_result_contract import validate_tool_result_outcome
+                try:
+                    replay = validate_tool_result_outcome(tool, replay)
+                except ValueError:
+                    report('tool_journal_failed')
+                    raise ToolEffectFailure('tool_journal_failed') from None
             report('ok' if replay['status'] == 'ok' else 'controlled_failure', True)
             if on_completion is not None:
                 on_completion(replay, 'replayed', operation_key=key, signature=signature)
             check_boundary()
             return replay
         check_boundary()
+        if _before_handler is not None:
+            _before_handler(arguments)
         try:
             value = invoke(tool.handler, context)
-            outcome = snapshot_outcome(failure_outcome(value), tool.max_result_bytes)
+            if tool.result_contract is not None:
+                from .tool_result_contract import normalize_tool_result
+                outcome = normalize_tool_result(tool, value)
+            else:
+                outcome = snapshot_outcome(failure_outcome(value), tool.max_result_bytes)
         except Exception:
             # Dispatch errors and unusable results cannot establish completion.
             report('tool_effect_uncertain')
@@ -292,12 +371,14 @@ def execute_custom_tool(tool, raw_arguments, *, check_boundary, scope=None,
             if on_completion is not None:
                 on_completion(None, 'uncertain', operation_key=key, signature=signature)
             raise ToolEffectFailure('tool_journal_failed') from None
-        # Commit valid completion before observing cancellation or deadline.
+        # Commit and classify completion before any fallible sink/callback.
+        report('ok' if outcome['status'] == 'ok' else 'controlled_failure')
         if on_completion is not None:
             on_completion(outcome, 'completed', operation_key=key, signature=signature)
-        report('ok' if outcome['status'] == 'ok' else 'controlled_failure')
         check_boundary()
         return outcome
+    if _before_handler is not None:
+        _before_handler(arguments)
     try:
         value = invoke(tool.handler)
     except (Cancelled, ToolDeadlineExceeded):
@@ -318,7 +399,16 @@ def execute_custom_tool(tool, raw_arguments, *, check_boundary, scope=None,
         result = {'status': 'ok', 'result': value.output}
         report('ok')
     else:
-        result = bounded_result(value, tool.max_result_bytes, on_outcome=on_outcome)
+        if tool.result_contract is not None:
+            from .tool_result_contract import normalize_tool_result, ToolResultValidationError
+            try:
+                result = normalize_tool_result(tool, value)
+                report('ok' if result['status'] == 'ok' else 'controlled_failure')
+            except ToolResultValidationError as exc:
+                report(exc.code)
+                result = {'status': 'error', 'error': exc.code}
+        else:
+            result = bounded_result(value, tool.max_result_bytes, on_outcome=on_outcome)
     if on_completion is not None:
         on_completion(result, signature=completion_signature)
     check_boundary()

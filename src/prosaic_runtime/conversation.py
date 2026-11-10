@@ -19,6 +19,7 @@ FAILURE_CODES = frozenset({
     'incompleteGeneration', 'bindingMismatch', 'interrupted',
     # Only hosts that register guards and bind rules can observe this code.
     'ruleViolation',
+    'citationViolation', 'evidenceUseDenied', 'invalidToolResult',
 })
 
 
@@ -269,13 +270,35 @@ class TurnEvidence(_OwnedRecord):
     def from_dict(cls, document):
         encoded = encode_owned(document)
         value = json.loads(encoded)
-        if type(value.get('version')) is not int or value['version'] not in (1,2):
+        if type(value.get('version')) is not int or value['version'] not in (1,2,3):
             raise ValueError('invalid evidence version')
         _closed(value, {'version', 'providerAttempts', 'toolAttempts', 'knownUsage',
-                        'usageComplete', 'toolOutcomes', 'failureCode', 'accounting'} | ({'inputViews'} if value['version']==2 else set()))
-        if value['version']==2:
+                        'usageComplete', 'toolOutcomes', 'failureCode', 'accounting'} | ({'inputViews'} if value['version']>=2 else set()) |
+                        ({'toolContractV1'} if value['version']==3 else set()))
+        if value['version']==2 or value['version']==3 and value['inputViews'] is not None:
             from .input_views import validate_views
             validate_views(value['inputViews'])
+        if value['version']==3:
+            contract = value['toolContractV1']
+            _closed(contract, {'bindings', 'evidence', 'citations'})
+            from .tool_evidence import validate_invocation_evidence
+            from .tool_contracts import validate_bindings_document
+            binding = validate_bindings_document(contract['bindings'])
+            evidence = validate_invocation_evidence(contract['evidence'], imports=binding['retained'])
+            if any(record['scope'] != binding['scope'] for record in evidence['records']):
+                raise ValueError('foreign evidence scope')
+            if value['failureCode'] is None and binding['citations'] is not None and contract['citations'] is None:
+                raise ValueError('missing accepted citations')
+            if contract['citations'] is not None:
+                from .citations import CitationsV1
+                citations = CitationsV1.from_dict(contract['citations']).to_dict()
+                if any(m['evidenceId'] not in evidence['deliveries'] for m in citations['markers']):
+                    raise ValueError('citation lacks captured delivery')
+                from .tool_evidence import digest
+                registry = dict(version=1, scope=binding['scope'], records={record['id']: dict(**record,
+                    deliveries=evidence['deliveries'][record['id']]) for record in evidence['records'] if record['id'] in evidence['deliveries']})
+                if citations['registrySha256'] != digest(registry) or citations['proof'] != 'runtimeObserved':
+                    raise ValueError('invalid citation registry digest')
         for key in ('providerAttempts', 'toolAttempts'):
             if type(value[key]) is not int or value[key] < 0:
                 raise ValueError('invalid attempt count')

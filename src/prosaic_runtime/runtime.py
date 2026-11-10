@@ -15,6 +15,9 @@ from .config import RuntimeConfig
 from .effort_evidence import EffortTrace, http_attempt, attach, KEY as EFFORT_KEY
 from .effort import api_default_effort
 from .events import Cancelled, check_cancelled, event_context, emit
+from .tool_event_contract import tool_contract_entry
+from .tool_evidence import EvidenceUseDenied
+from .tool_result_contract import ToolResultValidationError
 from .openai_compatible import OpenAICompatibleBackend
 from .anthropic import AnthropicBackend
 from .admission import validate_execution_artifact
@@ -250,10 +253,19 @@ class _BoundedMixin:
             request.add_header("X-Client-Request-Id", call_id)
         accepted = False
         opener = urllib.request.build_opener(_NoRedirect())
+        from .tool_event_contract import current_registry
+        evidence_registry = current_registry()
+        ticket = (evidence_registry.prepare_delivery(None, encoded_bytes=request.data)
+                  if evidence_registry is not None else None)
+        delivery_id = None
         def dispatch(timeout):
+            nonlocal delivery_id
             row = http_attempt(request.data, backend=self._config.provider, profile=self.effort_profile,
                 call_id=request.get_header('X-client-request-id'), requested=self.requested_effort,
                 configured=self.configured_effort)
+            if ticket is not None:
+                delivery_id = request.get_header('X-client-request-id') or uuid4().hex
+                evidence_registry.begin_delivery(ticket, delivery_id)
             timeout = self.before_http_dispatch(timeout)
             self.effort_trace.add(row)
             return timeout
@@ -267,6 +279,8 @@ class _BoundedMixin:
             accepted = True
             with response:
                 status = response.status
+                if ticket is not None:
+                    evidence_registry.confirm_delivery(ticket, delivery_id)
                 yield response
             outcome = 'timed_out' if self._stream_timed_out else 'completed'
         except Cancelled:
@@ -403,6 +417,7 @@ class ProsaicRuntime:
     capabilities |= frozenset({'guard_input_views_v1'})
     capabilities |= frozenset({'frozen_turn_inputs_v1'})
     capabilities |= frozenset({'context_input_variants_v1'})
+    capabilities |= frozenset({'tool_events_v1', 'tool_results_v1', 'citations_v1'})
     def __init__(self, config: RuntimeConfig, *, source=".prosaic", executable="prosaic", custom_tools=None,
                  accounting=None, context_defaults=None, lifecycle=None, guards=None, allow_unbound_guards=False):
         self.lifecycle = lifecycle if lifecycle is not None else ExecutionLifecycle()
@@ -449,7 +464,7 @@ class ProsaicRuntime:
                      policy=None, limits=None, workspace=None, context_policy=None,
                      token_counters=None, context_selection=None, context_report=None, context_work=None,
                      _warn_rules=True, input_profile=None, authoritative_input_data=None,
-                     authoritative_input_profile=None, authoritative_input_limits=None):
+                     authoritative_input_profile=None, authoritative_input_limits=None, tool_contract_bindings=None):
         """Purely admit and own one role-aware conversational input."""
         from .conversation_preparation import prepare_turn
         return prepare_turn(self, artifact, message=message, history=history,
@@ -458,15 +473,18 @@ class ProsaicRuntime:
                             context_selection=context_selection, context_report=context_report,
                             context_work=context_work, _warn_rules=_warn_rules,input_profile=input_profile,
                             authoritative_input_data=authoritative_input_data,
-                            authoritative_input_profile=authoritative_input_profile,authoritative_input_limits=authoritative_input_limits)
+                            authoritative_input_profile=authoritative_input_profile,authoritative_input_limits=authoritative_input_limits,
+                            tool_contract_bindings=tool_contract_bindings)
 
     @tracked
+    @tool_contract_entry
     def turn(self, artifact, *, message=None, history=(), input_data=None,
              policy=None, limits=None, workspace=None, on_event=None, cancelled=None,
              env=None, context=None, accounting=None, observer=None,
              operation_context=None, tool_journal=None, context_policy=None,
              token_counters=None, context_work=None, context_checkpoint=None, on_admitted=None, request_headers=None,
-             input_profile=None, authoritative_input_data=None, authoritative_input_profile=None, authoritative_input_limits=None):
+             input_profile=None, authoritative_input_data=None, authoritative_input_profile=None, authoritative_input_limits=None,
+             tool_contract_bindings=None):
         """Execute one bounded role-aware turn; streamed events are provisional."""
         from .request_headers import snapshot_headers
         owned_headers = snapshot_headers(request_headers)
@@ -479,6 +497,8 @@ class ProsaicRuntime:
                 raise TurnAdmissionError('invalidPolicy')
             try:
                 owned = json.loads(artifact._encoded)
+                if owned.get('toolContractV1') != (tool_contract_bindings.to_dict() if tool_contract_bindings is not None else None):
+                    raise TurnAdmissionError('bindingMismatch')
                 approved = ProsaicArtifact.from_inspection(owned['agent'])
                 context_args = {}
                 if 'contextPolicy' in owned:
@@ -495,21 +515,21 @@ class ProsaicRuntime:
                         context_work=context_work if context_work is not None else artifact.context_work)
                 elif token_counters is not None or context_work is not None:
                     raise TurnAdmissionError('invalidPolicy')
-                if artifact.encoding_version=='conversation-turn-v3':
+                if artifact.encoding_version in ('conversation-turn-v3', 'conversation-turn-v4'):
                     from .input_views import AuthoritativeInputLimits
-                    context_args.update(input_profile=owned['inputProfile'],
-                        authoritative_input_data=owned['authoritativeInputData'],
-                        authoritative_input_profile=owned['authoritativeInputProfile'],
-                        authoritative_input_limits=AuthoritativeInputLimits(**owned['authoritativeInputLimits']) if owned['authoritativeInputLimits'] is not None else None)
+                    context_args.update(input_profile=owned.get('inputProfile'),
+                        authoritative_input_data=owned.get('authoritativeInputData'),
+                        authoritative_input_profile=owned.get('authoritativeInputProfile'),
+                        authoritative_input_limits=AuthoritativeInputLimits(**owned['authoritativeInputLimits']) if owned.get('authoritativeInputLimits') is not None else None)
                 # Readmission repeats admission silently; warnings were raised at preparation.
-                if artifact.encoding_version=='conversation-turn-v3':
+                if artifact.encoding_version in ('conversation-turn-v3', 'conversation-turn-v4'):
                     from .context_contracts import ContextPolicy
                     prepared=self.restore_turn(approved,
                         history=tuple(ConversationMessage.from_dict(m) for m in owned['history']),
                         frozen_input=artifact.export_frozen_input(),policy=policy_from_document(owned['policy']),
                         limits=TurnLimits(**owned['limits']),workspace=owned['workspace'],
                         context_policy=ContextPolicy.from_dict(owned['contextPolicy']) if 'contextPolicy' in owned else None,
-                        token_counters=token_counters,context_work=context_work)
+                        token_counters=token_counters,context_work=context_work,tool_contract_bindings=tool_contract_bindings)
                 else:
                     prepared = self.prepare_turn(approved, message=owned['message'],
                         history=tuple(ConversationMessage.from_dict(m) for m in owned['history']),
@@ -527,7 +547,7 @@ class ProsaicRuntime:
                 input_data=input_data, policy=policy, limits=limits, workspace=workspace,
                 context_policy=context_policy, token_counters=token_counters,input_profile=input_profile,
                 authoritative_input_data=authoritative_input_data,authoritative_input_profile=authoritative_input_profile,
-                authoritative_input_limits=authoritative_input_limits)
+                authoritative_input_limits=authoritative_input_limits,tool_contract_bindings=tool_contract_bindings)
             if context_work is not None:
                 raise TurnAdmissionError('invalidPolicy')
             owned = json.loads(prepared._encoded)
@@ -591,13 +611,13 @@ class ProsaicRuntime:
             try:
                 guard.readmit(lambda: initial_payload(self, approved, policy, owned['selectedHistory'],
                     owned['message'], owned['inputData'], context_policy=context_policy,
-                    canonical_messages=prepared.encoding_version=='conversation-turn-v3')[-1])
+                    canonical_messages=prepared.encoding_version in ('conversation-turn-v3', 'conversation-turn-v4'))[-1])
             except ToolDeadlineExceeded:
                 terminal = capture.finish(Result(1, '', 'timeout', timed_out=True,
                     metadata={'failure_reason': 'invocation_timeout'}), budget)
                 return with_rules(replace(terminal, context_report=guard.report, context_work=guard.work))
             owned['_contextGuard'] = guard
-        elif prepared.encoding_version=='conversation-turn-v3':
+        elif prepared.encoding_version in ('conversation-turn-v3', 'conversation-turn-v4'):
             from .conversation_preparation import initial_payload,native_payload_digest
             native=initial_payload(self,approved,policy,owned['history'],owned['message'],owned['inputData'],canonical_messages=True)[-1]
             if native_payload_digest(native)!=owned['nativePayloadDigest'] or len(json.dumps(native,allow_nan=False).encode('utf-8'))!=prepared.input_bytes:
@@ -637,20 +657,21 @@ class ProsaicRuntime:
         return cls(RuntimeConfig.load(path), **kwargs)
 
     def restore_turn(self,artifact,*,history=(),frozen_input,policy,limits,context_policy=None,
-                     token_counters=None,workspace=None,context_work=None,fresh_attempt=False):
+                     token_counters=None,workspace=None,context_work=None,fresh_attempt=False,tool_contract_bindings=None):
         from .frozen_turns import restore_turn
         return restore_turn(self,artifact,history=history,frozen_input=frozen_input,policy=policy,limits=limits,
             context_policy=context_policy,token_counters=token_counters,workspace=workspace,
-            context_work=context_work,fresh_attempt=fresh_attempt)
+            context_work=context_work,fresh_attempt=fresh_attempt,tool_contract_bindings=tool_contract_bindings)
 
     def prepare_turn_variants(self,artifact,*,message,history=(),input_data_variants,policy=None,
                               limits=None,workspace=None,context_policy,token_counters,input_profile=None,
-                              authoritative_input_data=None,authoritative_input_profile=None,authoritative_input_limits=None):
+                              authoritative_input_data=None,authoritative_input_profile=None,authoritative_input_limits=None,tool_contract_bindings=None):
         from .input_variants import prepare_turn_variants
         return prepare_turn_variants(self,artifact,message=message,history=history,input_data_variants=input_data_variants,
             policy=policy,limits=limits,workspace=workspace,context_policy=context_policy,token_counters=token_counters,
             input_profile=input_profile,authoritative_input_data=authoritative_input_data,
-            authoritative_input_profile=authoritative_input_profile,authoritative_input_limits=authoritative_input_limits)
+            authoritative_input_profile=authoritative_input_profile,authoritative_input_limits=authoritative_input_limits,
+            tool_contract_bindings=tool_contract_bindings)
 
     def _preflight_names(self, names, cwd, policy, env, deadline, *, _snapshot=None):
         config, custom, cli = _snapshot if _snapshot is not None else (self.config, self._custom_tools, self._cli_tools)
@@ -696,9 +717,10 @@ class ProsaicRuntime:
                                      dict(os.environ if env is None else env), deadline)
 
     @tracked
+    @tool_contract_entry
     def run_tool(self, name, arguments, *, policy=None, cwd='.', on_event=None,
                  cancelled=None, operation_context=None, tool_journal=None,
-                 observer=None, context=None, accounting=None) -> Result:
+                 observer=None, context=None, accounting=None, tool_contract_bindings=None) -> Result:
         """Execute one granted host CustomTool with literal JSON arguments and no model.
 
         Builtin and CLI tools are unsupported. Trusted callbacks cooperate with
@@ -710,11 +732,13 @@ class ProsaicRuntime:
                         tool_journal=tool_journal, observer=observer, context=context, accounting=accounting)
 
     @tracked
+    @tool_contract_entry
     def run(self, artifact: str | ProsaicArtifact, arguments: str = "", *,
             cwd: str | Path = '.', policy: RunPolicy | None = None,
             on_event=None, cancelled=None, env=None,
             acquisition: str | ProsaicArtifact | None = None, context=None, accounting=None,
-            observer=None, operation_context: InvocationScope | None = None, tool_journal=None, request_headers=None) -> Result:
+            observer=None, operation_context: InvocationScope | None = None, tool_journal=None, request_headers=None,
+            tool_contract_bindings=None) -> Result:
         from .request_headers import snapshot_headers
         owned_headers = snapshot_headers(request_headers)
         scope = InvocationScope(str(uuid4())) if operation_context is None else operation_context
@@ -844,6 +868,11 @@ class ProsaicRuntime:
                     refuse_unenforced(artifact)
                 validate_execution_artifact(artifact, config)
                 requested = requested_tools(artifact.frontmatter.get("tools"))
+                from .tool_contracts import admit_tool_contracts
+                from .tool_event_contract import current_bindings
+                admit_tool_contracts(custom, requested, current_bindings())
+                if current_bindings() is not None and (policy.max_provider_requests is None or policy.max_tool_calls is None):
+                    raise ValueError('tool contracts require finite attempt caps')
                 admit_tool_effects(custom, requested, _operation_context, _tool_journal)
                 unsupported = requested - BUILTIN_TOOLS - custom.keys()
                 if unsupported:
@@ -930,8 +959,17 @@ class ProsaicRuntime:
                 backend.accounting_context = _context
                 request = Invocation(str(Path(cwd).resolve()) if cwd is not None else None,
                                      prompt, invocation_env, remaining, {"prompt_metadata": metadata})
+                from .tool_event_contract import current_bindings
+                citation_enabled = current_bindings() is not None and current_bindings().citations is not None
                 if _turn_prepared is None:
-                    result = backend.run_prompt(request)
+                    from .events import withheld_text
+                    with withheld_text(citation_enabled):
+                        if citation_enabled:
+                            from .openai_compatible import _feature_enabled
+                            result = backend._run_prompt_with_tools(request, metadata,
+                                _feature_enabled(endpoint.features, 'streaming', default=True))
+                        else:
+                            result = backend.run_prompt(request)
                 else:
                     from .openai_compatible import _feature_enabled
                     backend.turn_mode = True
@@ -945,11 +983,12 @@ class ProsaicRuntime:
                         backend.rule_hooks = _turn_prepared['_ruleHooks'] = RuleHooks(
                             ruleset, message=_turn_prepared['message'], input_data=_turn_prepared['inputData'],
                             authoritative_input_data=_turn_prepared.get('authoritativeInputData'),
-                            budget=_budget, check_boundary=backend.check_boundary)
+                            budget=_budget, check_boundary=backend.check_boundary,
+                            typed_result_tools=tuple(name for name, tool in custom.items() if tool.result_contract is not None))
                         answer_rules = any(b.bound for b in ruleset.at('before_answer') + ruleset.at('final'))
                     from .events import withheld_text
                     # A draft that answer-stage rules may refuse is never previewed or streamed early.
-                    with withheld_text(answer_rules):
+                    with withheld_text(answer_rules or citation_enabled):
                         result = backend._run_prompt_with_tools(request, metadata,
                             _feature_enabled(endpoint.features, 'streaming', default=True),
                             initial_messages=_turn_prepared['messages'],
@@ -1000,6 +1039,10 @@ class ProsaicRuntime:
                 if _terminal_capture.evidence is not None:
                     backend.check_boundary()
                 return result
+            except EvidenceUseDenied:
+                return Result(1, '', 'evidenceUseDenied', metadata={'failure_reason': 'evidenceUseDenied'})
+            except ToolResultValidationError:
+                return Result(1, '', 'invalidToolResult', metadata={'failure_reason': 'invalidToolResult'})
             except TurnOutputExceeded:
                 return Result(1, '', 'outputLimit', metadata={'failure_reason': 'outputLimit'})
             except InvalidToolRequest:

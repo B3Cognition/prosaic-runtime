@@ -6,6 +6,7 @@ from .conversation import (_OwnedRecord, _closed, encode_owned, TurnAdmissionErr
                            TurnLimits, validate_conversation_history)
 from .context_assembly import context_digest
 from .input_views import AuthoritativeInputLimits, _profile, validate_views
+from .tool_event_contract import tool_contract_preparation
 
 FROZEN_LIMIT=8388608
 
@@ -42,7 +43,7 @@ class FrozenTurnInput(_OwnedRecord):
             'authoritativeInputLimits','inputViews','inputVariantSelection','sourceHistoryDigest','selectedHistoryDigest',
             'bindings','contextSelection','contextReport','initialContextWork','contextWork',
             'nativePayloadDigest','workspaceDigest','executionAttempt'})
-        if type(document['version']) is not int or document['version']!=1 or document['encodingVersion']!='conversation-turn-v3':
+        if type(document['version']) is not int or (document['version'], document['encodingVersion']) not in ((1, 'conversation-turn-v3'), (2, 'conversation-turn-v4')):
             raise ValueError('invalid frozen version')
         for name in ('contextIdentity','messageDigest','sourceHistoryDigest','selectedHistoryDigest','nativePayloadDigest','workspaceDigest'):
             _hash(document[name])
@@ -51,25 +52,31 @@ class FrozenTurnInput(_OwnedRecord):
             raise ValueError('invalid frozen message')
         if type(document['inputBytes']) is not int or document['inputBytes']<=0: raise ValueError('invalid input size')
         if type(document['executionAttempt']) is not int or not 1<=document['executionAttempt']<=2**31-1: raise ValueError('invalid execution attempt')
-        _profile(document['inputProfile'])
-        selection=InputVariantSelection.from_dict(document['inputVariantSelection']).to_dict()
-        if selection['inputProfile']!=document['inputProfile'] or selection['selectedDigest']!=context_digest(document['selectedInputData']):
-            raise ValueError('invalid input selection')
-        views=validate_views(document['inputViews'])
-        if views['model']!={'profile':document['inputProfile'],'digest':context_digest(document['selectedInputData'])}:
-            raise ValueError('invalid model view')
-        authoritative=document['authoritativeInputData']
-        if authoritative is not None:
-            if type(authoritative) is not dict: raise ValueError('invalid private input')
-            limits=AuthoritativeInputLimits(**document['authoritativeInputLimits'])
-            encode_owned(authoritative,max_bytes=limits.max_bytes,max_depth=limits.max_depth,max_nodes=limits.max_nodes)
-            if views['authoritative']!={'profile':document['authoritativeInputProfile'],'digest':context_digest(authoritative)}:
+        if document['version'] == 1 or document['inputViews'] is not None:
+            _profile(document['inputProfile'])
+            selection=InputVariantSelection.from_dict(document['inputVariantSelection']).to_dict()
+            if selection['inputProfile']!=document['inputProfile'] or selection['selectedDigest']!=context_digest(document['selectedInputData']):
+                raise ValueError('invalid input selection')
+            views=validate_views(document['inputViews'])
+            if views['model']!={'profile':document['inputProfile'],'digest':context_digest(document['selectedInputData'])}:
+                raise ValueError('invalid model view')
+            authoritative=document['authoritativeInputData']
+            if authoritative is not None:
+                if type(authoritative) is not dict: raise ValueError('invalid private input')
+                limits=AuthoritativeInputLimits(**document['authoritativeInputLimits'])
+                encode_owned(authoritative,max_bytes=limits.max_bytes,max_depth=limits.max_depth,max_nodes=limits.max_nodes)
+                if views['authoritative']!={'profile':document['authoritativeInputProfile'],'digest':context_digest(authoritative)}:
+                    raise ValueError('invalid private view')
+            elif any(document[k] is not None for k in ('authoritativeInputProfile','authoritativeInputLimits')) or views['authoritative'] is not None:
                 raise ValueError('invalid private view')
-        elif any(document[k] is not None for k in ('authoritativeInputProfile','authoritativeInputLimits')) or views['authoritative'] is not None:
-            raise ValueError('invalid private view')
+        elif any(document[k] is not None for k in ('inputProfile', 'authoritativeInputData', 'authoritativeInputProfile', 'authoritativeInputLimits', 'inputVariantSelection')):
+            raise ValueError('unexpected optional input view')
         bindings=document['bindings']
         _closed(bindings,{'agent','policy','limits','profile','endpoint','tools','cliSandbox'},
-                {'rules','contextPolicy','counterDescriptor'})
+                {'rules','contextPolicy','counterDescriptor'} | ({'toolContractV1'} if document['version']==2 else set()))
+        if document['version']==2:
+            from .tool_contracts import validate_bindings_document
+            validate_bindings_document(bindings.get('toolContractV1'))
         limits=TurnLimits(**bindings['limits'])
         encode_owned(document['selectedInputData'],max_bytes=limits.max_input_bytes,
             max_depth=limits.max_json_depth,max_nodes=limits.max_json_nodes)
@@ -95,18 +102,18 @@ def _monotone(before,after):
 
 
 def export_frozen(prepared):
-    if prepared.encoding_version!='conversation-turn-v3': raise TurnAdmissionError('unsupportedCapability')
+    if prepared.encoding_version not in ('conversation-turn-v3', 'conversation-turn-v4'): raise TurnAdmissionError('unsupportedCapability')
     value=json.loads(prepared._encoded)
     excluded={'history','selectedHistory','messages','message','inputData','workspace','inputProfile',
         'authoritativeInputData','authoritativeInputProfile','authoritativeInputLimits','inputViews',
         'inputVariantSelection','nativePayloadDigest','contextSelection','contextReport'}
     work=prepared.context_work.to_dict() if prepared.context_work is not None else None
-    record=dict(version=1,encodingVersion=prepared.encoding_version,contextIdentity=prepared.context_identity,
+    record=dict(version=2 if prepared.encoding_version=='conversation-turn-v4' else 1,encodingVersion=prepared.encoding_version,contextIdentity=prepared.context_identity,
         inputBytes=prepared.input_bytes,message=value['message'],messageDigest=hashlib.sha256(value['message'].encode('utf-8')).hexdigest(),
-        selectedInputData=value['inputData'],inputProfile=value['inputProfile'],
-        authoritativeInputData=value['authoritativeInputData'],authoritativeInputProfile=value['authoritativeInputProfile'],
-        authoritativeInputLimits=value['authoritativeInputLimits'],inputViews=value['inputViews'],
-        inputVariantSelection=value['inputVariantSelection'],sourceHistoryDigest=context_digest(value['history']),
+        selectedInputData=value['inputData'],inputProfile=value.get('inputProfile'),
+        authoritativeInputData=value.get('authoritativeInputData'),authoritativeInputProfile=value.get('authoritativeInputProfile'),
+        authoritativeInputLimits=value.get('authoritativeInputLimits'),inputViews=value.get('inputViews'),
+        inputVariantSelection=value.get('inputVariantSelection'),sourceHistoryDigest=context_digest(value['history']),
         selectedHistoryDigest=context_digest(value.get('selectedHistory',value['history'])),
         bindings={k:v for k,v in value.items() if k not in excluded},contextSelection=value.get('contextSelection'),
         contextReport=value.get('contextReport'),initialContextWork=getattr(prepared,'_initial_context_work',work),
@@ -115,11 +122,14 @@ def export_frozen(prepared):
     return FrozenTurnInput.from_dict(record)
 
 
+@tool_contract_preparation
 def restore_turn(runtime,artifact,*,history=(),frozen_input,policy,limits,context_policy=None,
-                 token_counters=None,workspace=None,context_work=None,fresh_attempt=False):
+                 token_counters=None,workspace=None,context_work=None,fresh_attempt=False,tool_contract_bindings=None):
     try:
         if type(fresh_attempt) is not bool: raise ValueError('invalid attempt option')
         frozen=FrozenTurnInput.from_dict(frozen_input.to_dict() if type(frozen_input) is FrozenTurnInput else frozen_input).to_dict()
+        if frozen['bindings'].get('toolContractV1') != (tool_contract_bindings.to_dict() if tool_contract_bindings is not None else None):
+            raise ValueError('tool contract binding')
         if type(limits) is not TurnLimits or context_digest(str(workspace) if workspace is not None else None)!=frozen['workspaceDigest']:
             raise ValueError('workspace binding')
         owned_history=validate_conversation_history(history,limits=limits)
@@ -148,7 +158,8 @@ def restore_turn(runtime,artifact,*,history=(),frozen_input,policy,limits,contex
             context_selection=ContextSelection.from_dict(frozen['contextSelection']) if frozen['contextSelection'] is not None else None,
             context_report=ContextAssemblyReport.from_dict(frozen['contextReport']) if frozen['contextReport'] is not None else None,
             context_work=work,_warn_rules=False,_frozen_input=frozen,
-            _input_variant_selection=InputVariantSelection.from_dict(frozen['inputVariantSelection']))
+            _input_variant_selection=InputVariantSelection.from_dict(frozen['inputVariantSelection']) if frozen['inputVariantSelection'] is not None else None,
+            tool_contract_bindings=tool_contract_bindings)
         if prepared.context_identity!=frozen['contextIdentity']: raise ValueError('context binding')
         material=json.loads(prepared._encoded)
         if context_digest(material.get('selectedHistory',material['history']))!=frozen['selectedHistoryDigest']:

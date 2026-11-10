@@ -37,7 +37,9 @@ class NativeRuntime:
         self.capacity = capacity if capacity is not None else CapacityStore(config.capacity_file)
 
     def run(self, artifact, arguments='', *, cwd='.', policy=None, profile=None,
-            pool=None, on_event=None, cancelled=None, env=None):
+            pool=None, on_event=None, cancelled=None, env=None, tool_contract_bindings=None):
+        if tool_contract_bindings is not None:
+            raise ValueError('unsupported native tool contracts')
         if not isinstance(policy, NativePolicy):
             raise ValueError('native execution requires explicit NativePolicy; RunPolicy is not supported')
         if profile is not None and pool is not None:

@@ -11,7 +11,7 @@ from .frozen_turns import InputVariantSelection
 
 def prepare_turn_variants(runtime,artifact,*,message,history=(),input_data_variants,policy=None,
                           limits=None,workspace=None,context_policy,token_counters,input_profile=None,
-                          authoritative_input_data=None,authoritative_input_profile=None,authoritative_input_limits=None):
+                          authoritative_input_data=None,authoritative_input_profile=None,authoritative_input_limits=None,tool_contract_bindings=None):
     limits=TurnLimits() if limits is None else limits
     if type(limits) is not TurnLimits: raise TurnAdmissionError('invalidPolicy')
     try:
@@ -31,7 +31,7 @@ def prepare_turn_variants(runtime,artifact,*,message,history=(),input_data_varia
         limits=limits,workspace=workspace,context_policy=context_policy,token_counters=token_counters,
         input_profile=input_profile if input_profile is not None else 'context-input-variants-v1',
         authoritative_input_data=authoritative_input_data,authoritative_input_profile=authoritative_input_profile,
-        authoritative_input_limits=authoritative_input_limits,_input_data_variants=values)
+        authoritative_input_limits=authoritative_input_limits,_input_data_variants=values,tool_contract_bindings=tool_contract_bindings)
 
 
 def fit_variants(runtime,agent,run_policy,limits,source_history,message,variants,policy,registration,input_profile):
