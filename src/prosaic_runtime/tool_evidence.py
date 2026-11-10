@@ -83,6 +83,7 @@ class EvidenceRegistryV1:
         self._pending_events = {}
         self.citations = None
         self._imports_ready = False
+        self._snapshot()  # Refuse an unrepresentable host budget before execution.
 
     def _snapshot(self, *, records=None, calls=None, deliveries=None):
         # All retained components share one budget, including JSON framing.

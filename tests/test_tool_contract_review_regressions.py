@@ -77,3 +77,10 @@ def test_large_completed_api_result_fails_closed_without_second_request(provider
             assert turn.evidence.to_dict()['toolOutcomes'][0]['outcome']['result']['data']['body']=='x'*65000
         else:result=fx.runtime.run(fx.agent,policy=fx.policy,tool_contract_bindings=binding(scope))
         assert result.exit_code!=0 and result.stderr=='invalidToolResult' and effects==[1] and len(fx.requests)==1
+
+
+def test_unrepresentable_registry_budget_refuses_before_any_effect():
+    effects=[];rt=runtime(lambda args:effects.append(1) or {'ok':True},event_policy=api.ToolEventPolicyV1('1',{}))
+    scope=api.InvocationScope('tiny');small=replace(binding(scope),limits=api.ToolContractLimitsV1(max_evidence_bytes=2))
+    with pytest.raises(ValueError):rt.run_tool('lookup',{'value':1},policy=POLICY,tool_contract_bindings=small)
+    assert effects==[]
