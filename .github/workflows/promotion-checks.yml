@@ -1,0 +1,62 @@
+name: Promotion contract
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  metadata:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - run: python -m pip install pytest PyYAML
+      - run: python -m pytest --noconftest -o pythonpath= -q tests/test_release_promotion.py
+  reused-source:
+    if: ${{ false }}
+    runs-on: ubuntu-24.04
+    steps:
+      - run: exit 1
+  verified-gate:
+    needs: [metadata, reused-source]
+    if: ${{ always() && needs.metadata.result == 'success' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo 'Verified original qualifications stand in for intentionally skipped source jobs'
+  eligible-publish:
+    needs: verified-gate
+    if: ${{ always() && needs.verified-gate.result == 'success' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo 'Publication eligibility fixture only; no credentials or uploads'
+  rejected-gate:
+    if: ${{ false }}
+    runs-on: ubuntu-24.04
+    steps:
+      - run: exit 1
+  refused-publish:
+    needs: rejected-gate
+    if: ${{ always() && needs.rejected-gate.result == 'success' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - run: exit 1
+  contract:
+    needs: [metadata, verified-gate, eligible-publish, refused-publish]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Verify real hosted skip propagation and refusal
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python - <<'PYTEST'
+          import json,os
+          results=json.loads(os.environ['RESULTS'])
+          assert {name:item['result'] for name,item in results.items()}=={
+              'metadata':'success','verified-gate':'success',
+              'eligible-publish':'success','refused-publish':'skipped'}
+          PYTEST

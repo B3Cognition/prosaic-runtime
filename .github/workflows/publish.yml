@@ -3,6 +3,10 @@ name: Publish SDK
 on:
   workflow_dispatch:
     inputs:
+      release_tag:
+        description: Existing immutable version tag; empty uses the workflow ref
+        type: string
+        default: ''
       candidate_run_id:
         description: Successful build run at this exact commit; required for promotion
         type: string
@@ -24,7 +28,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: package-${{ github.ref }}
+  group: package-${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -37,7 +41,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.ref }}
           fetch-depth: 0
+      - name: Resolve immutable release source
+        run: echo "PROSAIC_RELEASE_SOURCE=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
@@ -45,9 +52,9 @@ jobs:
       - name: Build or promote immutable candidate bytes
         env:
           GH_TOKEN: ${{ secrets.ECOSYSTEM_ARTIFACT_TOKEN || github.token }}
-          SOURCE_COMMIT: ${{ github.sha }}
-          SOURCE_REF: ${{ github.ref }}
-          SOURCE_TAG: ${{ github.ref_name }}
+          SOURCE_COMMIT: ${{ env.PROSAIC_RELEASE_SOURCE }}
+          SOURCE_REF: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.ref }}
+          SOURCE_TAG: ${{ inputs.release_tag || github.ref_name }}
           CANDIDATE_RUN: ${{ inputs.candidate_run_id }}
           PUBLISH: ${{ inputs.publish }}
         run: |
@@ -127,7 +134,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.ref }}
           fetch-depth: 0
+      - name: Resolve immutable release source
+        run: echo "PROSAIC_RELEASE_SOURCE=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: ${{ matrix.python }}
@@ -184,11 +194,11 @@ jobs:
       - name: Qualify applicable Linux source cases without skipped gates
         if: runner.os == 'Linux'
         run: |
-          .venv/bin/python scripts/release_artifacts.py qualify --directory release/artifacts --commit "$GITHUB_SHA" --label native-${{ matrix.os }}-${{ matrix.python }}-source --junit "$RUNNER_TEMP/runtime-source.xml" -- .venv/bin/python -m pytest -q --ignore=tests/test_context_pack_installed.py --ignore=tests/test_tool_contract_installed.py --junitxml="$RUNNER_TEMP/runtime-source.xml" -k 'not test_framework_python_starts_without_a_broad_prefix_grant and not test_wheel_metadata'
+          .venv/bin/python scripts/release_artifacts.py qualify --directory release/artifacts --commit "$PROSAIC_RELEASE_SOURCE" --label native-${{ matrix.os }}-${{ matrix.python }}-source --junit "$RUNNER_TEMP/runtime-source.xml" -- .venv/bin/python -m pytest -q --ignore=tests/test_context_pack_installed.py --ignore=tests/test_tool_contract_installed.py --junitxml="$RUNNER_TEMP/runtime-source.xml" -k 'not test_framework_python_starts_without_a_broad_prefix_grant and not test_wheel_metadata'
       - name: Qualify macOS source including its framework interpreter gate
         if: runner.os == 'macOS'
         run: |
-          .venv/bin/python scripts/release_artifacts.py qualify --directory release/artifacts --commit "$GITHUB_SHA" --label native-${{ matrix.os }}-${{ matrix.python }}-source --junit "$RUNNER_TEMP/runtime-source.xml" -- .venv/bin/python -m pytest -q --ignore=tests/test_context_pack_installed.py --ignore=tests/test_tool_contract_installed.py --junitxml="$RUNNER_TEMP/runtime-source.xml" -k 'not test_wheel_metadata'
+          .venv/bin/python scripts/release_artifacts.py qualify --directory release/artifacts --commit "$PROSAIC_RELEASE_SOURCE" --label native-${{ matrix.os }}-${{ matrix.python }}-source --junit "$RUNNER_TEMP/runtime-source.xml" -- .venv/bin/python -m pytest -q --ignore=tests/test_context_pack_installed.py --ignore=tests/test_tool_contract_installed.py --junitxml="$RUNNER_TEMP/runtime-source.xml" -k 'not test_wheel_metadata'
       - name: Qualify the transported isolated wheel and metadata
         env:
           PROSAIC_RUNTIME_WHEEL_ACCEPTANCE: '1'
@@ -196,14 +206,14 @@ jobs:
           python -m venv .wheel-test
           .wheel-test/bin/python -m pip install 'https://files.pythonhosted.org/packages/0d/a8/8b926410b806448dd7762c8b04f7c4c6b0b86d2837b8a5c30d374aa892c0/b3_prosaic_harness-0.9.12-py3-none-any.whl#sha256=fb07797c3e42ab2e7e8f0a727b7bd25229e9b223cf15309716f10ff9d1f1147b'
           .wheel-test/bin/python -m pip install pytest packaging release/upstream-wheels/b3_prosaic-0.5.0-py3-none-any.whl release/artifacts/b3_prosaic_runtime-0.9.20-py3-none-any.whl release/artifacts/b3_prosaic_runtime_postgres-0.3.0-py3-none-any.whl
-          .venv/bin/python scripts/release_artifacts.py qualify --directory release/artifacts --commit "$GITHUB_SHA" --label native-${{ matrix.os }}-${{ matrix.python }}-wheel --junit "$RUNNER_TEMP/runtime-wheel.xml" -- .wheel-test/bin/python -I -c "import os, runpy, subprocess, sys; runpy.run_path('scripts/wheel_smoke.py', run_name='__main__'); runpy.run_path('scripts/native_wheel_smoke.py', run_name='__main__'); runpy.run_path('scripts/production_wheel_smoke.py', run_name='__main__'); runpy.run_path('scripts/conversation_wheel_smoke.py', run_name='__main__'); runpy.run_path('scripts/terminal_completion_smoke.py', run_name='__main__'); runpy.run_path('scripts/rule_admission_wheel_smoke.py', run_name='__main__'); runpy.run_path('scripts/context_pack_wheel_smoke.py', run_name='__main__'); runpy.run_path('scripts/tool_contract_smoke.py', run_name='__main__'); subprocess.run([sys.executable, '-I', '-m', 'pytest', '-o', 'pythonpath=tests', 'tests/test_package_compatibility.py::test_wheel_metadata', 'tests/test_fee_formats.py', 'tests/test_request_headers.py', 'tests/test_accounting_request_metadata.py', 'tests/test_sent_effort.py', 'tests/test_sent_effort_native.py', 'tests/test_sent_effort_durable.py', '-q', '--junitxml=' + os.environ['RUNNER_TEMP'] + '/runtime-wheel.xml'], check=True)"
+          .venv/bin/python scripts/release_artifacts.py qualify --directory release/artifacts --commit "$PROSAIC_RELEASE_SOURCE" --label native-${{ matrix.os }}-${{ matrix.python }}-wheel --junit "$RUNNER_TEMP/runtime-wheel.xml" -- .wheel-test/bin/python -I -c "import os, runpy, subprocess, sys; runpy.run_path('scripts/wheel_smoke.py', run_name='__main__'); runpy.run_path('scripts/native_wheel_smoke.py', run_name='__main__'); runpy.run_path('scripts/production_wheel_smoke.py', run_name='__main__'); runpy.run_path('scripts/conversation_wheel_smoke.py', run_name='__main__'); runpy.run_path('scripts/terminal_completion_smoke.py', run_name='__main__'); runpy.run_path('scripts/rule_admission_wheel_smoke.py', run_name='__main__'); runpy.run_path('scripts/context_pack_wheel_smoke.py', run_name='__main__'); runpy.run_path('scripts/tool_contract_smoke.py', run_name='__main__'); subprocess.run([sys.executable, '-I', '-m', 'pytest', '-o', 'pythonpath=tests', 'tests/test_package_compatibility.py::test_wheel_metadata', 'tests/test_fee_formats.py', 'tests/test_request_headers.py', 'tests/test_accounting_request_metadata.py', 'tests/test_sent_effort.py', 'tests/test_sent_effort_native.py', 'tests/test_sent_effort_durable.py', '-q', '--junitxml=' + os.environ['RUNNER_TEMP'] + '/runtime-wheel.xml'], check=True)"
           .wheel-test/bin/python -m pip check
       - name: Verify minimum dependencies on both Linux architectures
         if: matrix.python == '3.11' && runner.os == 'Linux'
         run: |
           python -m venv .floor-test
           .floor-test/bin/python -m pip install 'PyYAML==6.0' 'pyuca==1.2' 'markdown-it-py==3.0.0' 'jsonschema==4.23.0' 'referencing==0.28.4' 'psycopg[binary]==3.2.1' release/upstream-wheels/b3_prosaic-0.5.0-py3-none-any.whl release/artifacts/b3_prosaic_runtime-0.9.20-py3-none-any.whl release/artifacts/b3_prosaic_runtime_postgres-0.3.0-py3-none-any.whl
-          .venv/bin/python scripts/release_artifacts.py qualify --directory release/artifacts --commit "$GITHUB_SHA" --label floor-${{ matrix.os }} -- .floor-test/bin/python -I -c "import runpy; runpy.run_path('scripts/production_wheel_smoke.py', run_name='__main__'); runpy.run_path('scripts/conversation_wheel_smoke.py', run_name='__main__'); runpy.run_path('scripts/rule_admission_wheel_smoke.py', run_name='__main__'); runpy.run_path('scripts/context_pack_wheel_smoke.py', run_name='__main__')"
+          .venv/bin/python scripts/release_artifacts.py qualify --directory release/artifacts --commit "$PROSAIC_RELEASE_SOURCE" --label floor-${{ matrix.os }} -- .floor-test/bin/python -I -c "import runpy; runpy.run_path('scripts/production_wheel_smoke.py', run_name='__main__'); runpy.run_path('scripts/conversation_wheel_smoke.py', run_name='__main__'); runpy.run_path('scripts/rule_admission_wheel_smoke.py', run_name='__main__'); runpy.run_path('scripts/context_pack_wheel_smoke.py', run_name='__main__')"
           .floor-test/bin/python -m pip check
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
@@ -238,6 +248,10 @@ jobs:
           --health-retries 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.ref }}
+      - name: Resolve immutable release source
+        run: echo "PROSAIC_RELEASE_SOURCE=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: '3.12'
@@ -257,7 +271,7 @@ jobs:
           from pathlib import Path
           spec = importlib.util.spec_from_file_location('release', 'scripts/release_artifacts.py')
           release = importlib.util.module_from_spec(spec); spec.loader.exec_module(release)
-          release.verify_receipt(Path('release/artifacts'), '${{ github.sha }}')
+          release.verify_receipt(Path('release/artifacts'), '${{ env.PROSAIC_RELEASE_SOURCE }}')
           release.verify_upstream(Path('release/artifacts'), Path('release/upstream-wheels'))
           PY
           python -m pip install release/upstream-wheels/b3_prosaic-0.5.0-py3-none-any.whl release/artifacts/b3_prosaic_runtime-0.9.20-py3-none-any.whl release/artifacts/b3_prosaic_runtime_postgres-0.3.0-py3-none-any.whl
@@ -282,7 +296,7 @@ jobs:
           METERING_RUNTIME_DSN: postgresql://metering_runtime:metering-ci-only@127.0.0.1:5432/metering_test
           PROSAIC_OWNED_DB_AUDIT: '1'
         run: |
-          python scripts/release_artifacts.py qualify --directory release/artifacts --commit "$GITHUB_SHA" --label postgres-${{ matrix.os }}-${{ matrix.postgres }} --junit "$RUNNER_TEMP/runtime-postgres.xml" -- python -I -m pytest -o pythonpath=tests adapters/postgres/tests -q -k 'not harness_resume' --junitxml="$RUNNER_TEMP/runtime-postgres.xml"
+          python scripts/release_artifacts.py qualify --directory release/artifacts --commit "$PROSAIC_RELEASE_SOURCE" --label postgres-${{ matrix.os }}-${{ matrix.postgres }} --junit "$RUNNER_TEMP/runtime-postgres.xml" -- python -I -m pytest -o pythonpath=tests adapters/postgres/tests -q -k 'not harness_resume' --junitxml="$RUNNER_TEMP/runtime-postgres.xml"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: qualified-postgres-${{ matrix.os }}-${{ matrix.postgres }}
@@ -297,6 +311,10 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.ref }}
+      - name: Resolve immutable release source
+        run: echo "PROSAIC_RELEASE_SOURCE=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: '3.12'
@@ -328,7 +346,7 @@ jobs:
                     for version in ('3.11', '3.12', '3.13') for kind in ('source', 'wheel')]
           labels += [f'postgres-{os_name}-{version}' for os_name in ('ubuntu-24.04', 'ubuntu-24.04-arm') for version in ('16', '18')]
           labels += [f'floor-{os_name}' for os_name in ('ubuntu-24.04', 'ubuntu-24.04-arm')]
-          release.require_qualification(Path('release/artifacts'), os.environ['GITHUB_SHA'], labels)
+          release.require_qualification(Path('release/artifacts'), os.environ['PROSAIC_RELEASE_SOURCE'], labels)
           PY
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
@@ -337,7 +355,7 @@ jobs:
           if-no-files-found: error
           retention-days: 90
   pypi:
-    if: github.event_name == 'workflow_dispatch' && inputs.publish && startsWith(github.ref, 'refs/tags/')
+    if: ${{ always() && needs.gate.result == 'success' && github.event_name == 'workflow_dispatch' && inputs.publish && startsWith(github.ref, 'refs/tags/') }}
     needs: gate
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -347,6 +365,10 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.ref }}
+      - name: Resolve immutable release source
+        run: echo "PROSAIC_RELEASE_SOURCE=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: '3.12'
@@ -356,7 +378,7 @@ jobs:
           name: qualified-release
           path: release/artifacts
       - name: Refuse conflicting existing index bytes
-        run: python scripts/release_artifacts.py index-check --distribution b3-prosaic-runtime --directory release/artifacts --commit ${{ github.sha }} --allow-missing
+        run: python scripts/release_artifacts.py index-check --distribution b3-prosaic-runtime --directory release/artifacts --commit ${{ env.PROSAIC_RELEASE_SOURCE }} --allow-missing
       - name: Prepare only distribution files for upload
         run: |
           mkdir upload
@@ -366,9 +388,10 @@ jobs:
           packages-dir: upload/
           skip-existing: true # Safe only with the mandatory pre/post digest checks.
       - name: Verify actual downloaded public bytes
-        run: python scripts/release_artifacts.py index-check --distribution b3-prosaic-runtime --directory release/artifacts --commit ${{ github.sha }}
+        run: python scripts/release_artifacts.py index-check --distribution b3-prosaic-runtime --directory release/artifacts --commit ${{ env.PROSAIC_RELEASE_SOURCE }}
 
   github-release:
+    if: ${{ always() && needs.gate.result == 'success' && needs.pypi.result == 'success' }}
     needs: [gate, pypi]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -376,6 +399,10 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.ref }}
+      - name: Resolve immutable release source
+        run: echo "PROSAIC_RELEASE_SOURCE=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: '3.12'
@@ -387,12 +414,12 @@ jobs:
       - name: Publish the same bytes and evidence without replacing assets
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         run: |
-          python scripts/release_artifacts.py verify --directory release/artifacts --commit "$GITHUB_SHA"
+          python scripts/release_artifacts.py verify --directory release/artifacts --commit "$PROSAIC_RELEASE_SOURCE"
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             gh release download "$RELEASE_TAG" --dir existing
-            python scripts/release_artifacts.py verify --directory existing --commit "$GITHUB_SHA"
+            python scripts/release_artifacts.py verify --directory existing --commit "$PROSAIC_RELEASE_SOURCE"
             cmp existing/release-receipt.json release/artifacts/release-receipt.json
             cmp existing/upstream-receipt.json release/artifacts/upstream-receipt.json
           else
