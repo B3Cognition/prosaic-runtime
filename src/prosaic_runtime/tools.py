@@ -207,7 +207,40 @@ def bounded_result(value, maximum, *, on_outcome=None):
 def execute_custom_tool(tool, raw_arguments, *, check_boundary, scope=None,
                         deadline=None, cancelled=lambda: False, call_index=0, tool_journal=None,
                         on_completion=None, accounting_context=None, on_outcome=None,
-                        on_terminal=None):
+                        on_terminal=None, tool_contract_bindings=None, _event_call_id=None, _event_exchange=0):
+    from .tool_event_contract import current_bindings, managed_events, ToolEventLifecycle
+    bindings = tool_contract_bindings or current_bindings()
+    options = dict(check_boundary=check_boundary, scope=scope, deadline=deadline, cancelled=cancelled,
+        call_index=call_index, tool_journal=tool_journal, on_completion=on_completion,
+        accounting_context=accounting_context, on_outcome=on_outcome, on_terminal=on_terminal)
+    if not managed_events(tool, bindings):
+        return _execute_custom_tool(tool, raw_arguments, **options)
+    bindings.__post_init__()
+    if scope != bindings.scope:
+        raise ValueError('tool contract scope mismatch')
+    lifecycle = ToolEventLifecycle(tool, bindings, call_index, call_id=_event_call_id, exchange=_event_exchange)
+    def report(outcome):
+        lifecycle.outcome = outcome
+        if on_outcome is not None:
+            on_outcome(outcome)
+    def complete(outcome, status='completed', **refs):
+        # Persist known completion before a critical event sink can fail.
+        if on_completion is not None:
+            on_completion(outcome, status, **refs)
+        lifecycle.finish(outcome, status)
+    options.update(on_outcome=report, on_completion=complete, _before_handler=lifecycle.start)
+    try:
+        result = _execute_custom_tool(tool, raw_arguments, **options)
+        lifecycle.finish(result)
+        return result
+    finally:
+        lifecycle.finish(status='uncertain' if lifecycle.started_at is not None else None)
+
+
+def _execute_custom_tool(tool, raw_arguments, *, check_boundary, scope=None,
+                        deadline=None, cancelled=lambda: False, call_index=0, tool_journal=None,
+                        on_completion=None, accounting_context=None, on_outcome=None,
+                        on_terminal=None, _before_handler=None):
     if on_outcome is not None and not callable(on_outcome):
         raise ValueError('invalid tool outcome observer')
     def report(code, replayed=False):
@@ -296,6 +329,8 @@ def execute_custom_tool(tool, raw_arguments, *, check_boundary, scope=None,
             check_boundary()
             return replay
         check_boundary()
+        if _before_handler is not None:
+            _before_handler(arguments)
         try:
             value = invoke(tool.handler, context)
             if tool.result_contract is not None:
@@ -322,6 +357,8 @@ def execute_custom_tool(tool, raw_arguments, *, check_boundary, scope=None,
         report('ok' if outcome['status'] == 'ok' else 'controlled_failure')
         check_boundary()
         return outcome
+    if _before_handler is not None:
+        _before_handler(arguments)
     try:
         value = invoke(tool.handler)
     except (Cancelled, ToolDeadlineExceeded):

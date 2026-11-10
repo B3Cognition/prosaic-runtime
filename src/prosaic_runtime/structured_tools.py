@@ -12,11 +12,13 @@ from uuid import uuid4
 
 from jsonschema import ValidationError
 
-from .events import Cancelled
+from .events import Cancelled, event_context
 from .operation_context import InvocationScope
 from .tool_effects import admit_tool_effects, ToolEffectFailure
 from .tool_outcomes import ToolOutcome
-from .telemetry import ObserverEmitter
+from .telemetry import ObserverEmitter, observation_context
+from .tool_event_contract import managed_events
+from .tool_contracts import ToolContractBindingsV1
 from .tools import (ToolDeadlineExceeded, depth, execute_custom_tool, parse_arguments, reject_constant,
                     unique_pairs, validate_custom_tools)
 
@@ -43,13 +45,21 @@ class StructuredToolLoop:
     def __init__(self, tools, *, arguments, deadline, allowed_tools=(), max_turns=12,
                  max_input_bytes=196608, max_response_bytes=131072, max_history_bytes=131072,
                  max_identical_calls=1, cancelled=lambda: False, on_event=lambda event: None,
-                 operation_context=None, tool_journal=None, observer=None):
+                 operation_context=None, tool_journal=None, observer=None, tool_contract_bindings=None):
         self.tools = validate_custom_tools(tools)
         self.allowed_tools = frozenset(allowed_tools)
         if self.allowed_tools - self.tools.keys():
             raise ValueError('granted tools must be registered')
         from .terminal import admit_terminal_tools
         admit_terminal_tools(self.tools, self.allowed_tools, supported=False)
+        if tool_contract_bindings is not None:
+            if type(tool_contract_bindings) is not ToolContractBindingsV1:
+                raise ValueError('invalid tool contract bindings')
+            tool_contract_bindings.__post_init__()
+            if operation_context is not None and operation_context != tool_contract_bindings.scope:
+                raise ValueError('tool contract scope mismatch')
+            operation_context = tool_contract_bindings.scope
+        self.tool_contract_bindings = tool_contract_bindings
         self.operation_context = InvocationScope(str(uuid4())) if operation_context is None else operation_context
         admit_tool_effects(self.tools, self.allowed_tools, self.operation_context, tool_journal)
         self.tool_journal = tool_journal
@@ -112,8 +122,10 @@ class StructuredToolLoop:
         if self.calls.get(key, 0) >= self.max_identical_calls:
             raise StructuredToolError('repeated-tool-call')
         self.calls[key] = self.calls.get(key, 0) + 1
-        self.on_event({'type': 'tool_start', 'name': request.name})
-        self.emitter.emit('tool_started', name=request.name)
+        managed_event = managed_events(tool, self.tool_contract_bindings)
+        if not managed_event:
+            self.on_event({'type': 'tool_start', 'name': request.name})
+            self.emitter.emit('tool_started', name=request.name)
         index = self.call_index
         self.call_index += 1
         terminal = ToolOutcome('unclassified')
@@ -121,12 +133,15 @@ class StructuredToolLoop:
             nonlocal terminal
             terminal = ToolOutcome.from_dict(value.to_dict())
         def completed(status):
-            self.emitter.emit('tool_completed', name=request.name, status=status,
-                              tool_outcome=terminal.to_dict())
+            if not managed_event:
+                self.emitter.emit('tool_completed', name=request.name, status=status,
+                                  tool_outcome=terminal.to_dict())
         try:
-            outcome = execute_custom_tool(tool, raw, check_boundary=self.check_boundary,
-                scope=self.operation_context, deadline=self.deadline, cancelled=self.cancelled,
-                call_index=index, tool_journal=self.tool_journal, on_outcome=capture)
+            with observation_context(self.emitter, self.tools), event_context(self.on_event, self.cancelled):
+                outcome = execute_custom_tool(tool, raw, check_boundary=self.check_boundary,
+                    scope=self.operation_context, deadline=self.deadline, cancelled=self.cancelled,
+                    call_index=index, tool_journal=self.tool_journal, on_outcome=capture,
+                    tool_contract_bindings=self.tool_contract_bindings)
         except ToolEffectFailure as exc:
             completed('error')
             raise StructuredToolError(exc.reason) from None
@@ -137,7 +152,8 @@ class StructuredToolLoop:
         if outcome['status'] != 'ok':
             completed('error')
             raise StructuredToolError('tool-' + outcome['error'])
-        self.on_event({'type': 'tool_complete', 'name': request.name})
+        if not managed_event:
+            self.on_event({'type': 'tool_complete', 'name': request.name})
         completed('ok')
         return {'name': request.name, 'arguments': args}, outcome['result']
 

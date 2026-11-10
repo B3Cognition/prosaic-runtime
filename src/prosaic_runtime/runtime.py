@@ -15,6 +15,7 @@ from .config import RuntimeConfig
 from .effort_evidence import EffortTrace, http_attempt, attach, KEY as EFFORT_KEY
 from .effort import api_default_effort
 from .events import Cancelled, check_cancelled, event_context, emit
+from .tool_event_contract import tool_contract_entry
 from .openai_compatible import OpenAICompatibleBackend
 from .anthropic import AnthropicBackend
 from .admission import validate_execution_artifact
@@ -461,12 +462,14 @@ class ProsaicRuntime:
                             authoritative_input_profile=authoritative_input_profile,authoritative_input_limits=authoritative_input_limits)
 
     @tracked
+    @tool_contract_entry
     def turn(self, artifact, *, message=None, history=(), input_data=None,
              policy=None, limits=None, workspace=None, on_event=None, cancelled=None,
              env=None, context=None, accounting=None, observer=None,
              operation_context=None, tool_journal=None, context_policy=None,
              token_counters=None, context_work=None, context_checkpoint=None, on_admitted=None, request_headers=None,
-             input_profile=None, authoritative_input_data=None, authoritative_input_profile=None, authoritative_input_limits=None):
+             input_profile=None, authoritative_input_data=None, authoritative_input_profile=None, authoritative_input_limits=None,
+             tool_contract_bindings=None):
         """Execute one bounded role-aware turn; streamed events are provisional."""
         from .request_headers import snapshot_headers
         owned_headers = snapshot_headers(request_headers)
@@ -696,9 +699,10 @@ class ProsaicRuntime:
                                      dict(os.environ if env is None else env), deadline)
 
     @tracked
+    @tool_contract_entry
     def run_tool(self, name, arguments, *, policy=None, cwd='.', on_event=None,
                  cancelled=None, operation_context=None, tool_journal=None,
-                 observer=None, context=None, accounting=None) -> Result:
+                 observer=None, context=None, accounting=None, tool_contract_bindings=None) -> Result:
         """Execute one granted host CustomTool with literal JSON arguments and no model.
 
         Builtin and CLI tools are unsupported. Trusted callbacks cooperate with
@@ -710,11 +714,13 @@ class ProsaicRuntime:
                         tool_journal=tool_journal, observer=observer, context=context, accounting=accounting)
 
     @tracked
+    @tool_contract_entry
     def run(self, artifact: str | ProsaicArtifact, arguments: str = "", *,
             cwd: str | Path = '.', policy: RunPolicy | None = None,
             on_event=None, cancelled=None, env=None,
             acquisition: str | ProsaicArtifact | None = None, context=None, accounting=None,
-            observer=None, operation_context: InvocationScope | None = None, tool_journal=None, request_headers=None) -> Result:
+            observer=None, operation_context: InvocationScope | None = None, tool_journal=None, request_headers=None,
+            tool_contract_bindings=None) -> Result:
         from .request_headers import snapshot_headers
         owned_headers = snapshot_headers(request_headers)
         scope = InvocationScope(str(uuid4())) if operation_context is None else operation_context

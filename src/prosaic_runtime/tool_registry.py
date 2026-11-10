@@ -109,6 +109,15 @@ class BoundedToolRegistry:
     def execute_message(self, tool_call):
         self.last_outcome = ToolOutcome('unclassified')
         name, options = self._admit_attempt(tool_call)
+        options['_event_call_id'] = None
+        options['_event_exchange'] = self.turn
+        from .tool_event_contract import call_identity, current_bindings
+        if current_bindings() is not None:
+            # Neutral turns already allocated a stable ID for this exact call.
+            owner = getattr(self.execution_options, '__self__', None)
+            capture = getattr(owner, 'turn_capture', None)
+            options['_event_call_id'] = (capture.call_ids[tool_call['id']] if capture is not None else
+                call_identity(current_bindings().scope, self.turn, options.get('call_index', 0)))
         function = tool_call.get('function')
         if isinstance(name, str) and name not in self.custom:
             message = self.builtin.execute_message(tool_call)

@@ -89,7 +89,13 @@ class TurnCapture:
             owned['text'] = event.get('text', '')
         elif kind in {'tool_started', 'tool_completed'}:
             owned['name'] = event.get('name')
-            owned['call_id'] = self.call_ids.get(event.get('call_id'))
+            if 'toolEventV1' in event:
+                owned['call_id'] = event.get('call_id') if event.get('call_id') in self.call_ids.values() else None
+                owned['toolEventV1'] = event['toolEventV1']
+                owned['tool_version'] = event.get('tool_version')
+                owned['turn'] = event.get('turn')
+            else:
+                owned['call_id'] = self.call_ids.get(event.get('call_id'))
             if kind == 'tool_completed':
                 owned['status'] = event.get('status')
                 if 'tool_outcome' in event:

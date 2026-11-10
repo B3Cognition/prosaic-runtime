@@ -339,10 +339,13 @@ class ExecutionBackend:
                     )
                     call_id = str(tool_call.get("id") or "")
                     call_started = time.monotonic()
-                    emit("tool_started", name=tool_name, call_id=call_id, turn=turn_number,
-                         **self.tool_event_metadata(tool_name),
-                         **({'argumentsSha256': content_digest(json.loads(tool_call['function']['arguments']))}
-                            if getattr(registry, 'terminal_tools', ()) else {}))
+                    from .tool_event_contract import managed_events
+                    managed_event = managed_events(getattr(registry, 'custom', {}).get(tool_name))
+                    if not managed_event:
+                        emit("tool_started", name=tool_name, call_id=call_id, turn=turn_number,
+                             **self.tool_event_metadata(tool_name),
+                             **({'argumentsSha256': content_digest(json.loads(tool_call['function']['arguments']))}
+                                if getattr(registry, 'terminal_tools', ()) else {}))
                     from .tool_effects import ToolEffectFailure
                     from .tool_outcomes import ToolOutcome
                     refusal = hooks.refusal(tool_call) if hooks is not None else None
@@ -360,9 +363,10 @@ class ExecutionBackend:
                     except ToolEffectFailure:
                         outcome = getattr(registry, 'last_outcome', ToolOutcome('unclassified')).to_dict()
                         try:
-                            emit('tool_completed', name=tool_name, call_id=call_id, turn=turn_number,
-                                 status='error', duration_ms=round((time.monotonic()-call_started)*1000, 3),
-                                 read_receipts=[], tool_outcome=outcome, **self.tool_event_metadata(tool_name))
+                            if not managed_event:
+                                emit('tool_completed', name=tool_name, call_id=call_id, turn=turn_number,
+                                     status='error', duration_ms=round((time.monotonic()-call_started)*1000, 3),
+                                     read_receipts=[], tool_outcome=outcome, **self.tool_event_metadata(tool_name))
                         except Cancelled:
                             # Terminal journal uncertainty takes precedence over a
                             # later cancellation boundary; neither permits replay.
@@ -385,12 +389,13 @@ class ExecutionBackend:
                                           ("path", "sha256", "offset", "lines_read", "line_count")}]
                     terminal = getattr(registry, 'terminal_capture', None)
                     completion = terminal.evidence if terminal is not None else None
-                    emit("tool_completed", name=tool_name, call_id=call_id, turn=turn_number,
-                         status=status, duration_ms=round((time.monotonic() - call_started) * 1000, 3),
-                         read_receipts=read_receipts,
-                         tool_outcome=getattr(registry, 'last_outcome', ToolOutcome('ok' if status=='ok' else 'unclassified')).to_dict(),
-                         **self.tool_event_metadata(tool_name),
-                         **({'terminalCompletion': binding(completion)} if completion is not None else {}))
+                    if not managed_event:
+                        emit("tool_completed", name=tool_name, call_id=call_id, turn=turn_number,
+                             status=status, duration_ms=round((time.monotonic() - call_started) * 1000, 3),
+                             read_receipts=read_receipts,
+                             tool_outcome=getattr(registry, 'last_outcome', ToolOutcome('ok' if status=='ok' else 'unclassified')).to_dict(),
+                             **self.tool_event_metadata(tool_name),
+                             **({'terminalCompletion': binding(completion)} if completion is not None else {}))
                     if completion is not None:
                         self.check_boundary()
                         return CliRunResult(0, json.dumps(tool_payload['result'], ensure_ascii=False,
