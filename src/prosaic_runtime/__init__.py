@@ -88,3 +88,6 @@ from .tool_evidence import HostDeliveryAttestationV1
 from .tool_imports import HostEvidenceImportV1
 __all__ += ['CitationsV1', 'CitationViolation', 'validate_citations', 'ToolInvocationEvidenceV1',
             'EligibleEvidenceV1', 'HostDeliveryAttestationV1', 'HostEvidenceImportV1']
+
+from .tool_parallel_contracts import ParallelToolPolicyV1
+__all__ += ['ParallelToolPolicyV1']

@@ -19,13 +19,18 @@ def policy_document(policy):
     if policy.allowed_terminal_tools:
         raise ValueError('terminal tools are unsupported in conversation turns')
     return {**{f.name: getattr(policy, f.name) for f in fields(policy)
-               if f.name != 'allowed_terminal_tools'},
+               if f.name not in {'allowed_terminal_tools', 'parallel_tools'}},
+            **({'parallel_tools': policy.parallel_tools.to_dict()} if policy.parallel_tools is not None else {}),
             'allowed_tools': sorted(policy.allowed_tools),
             'read_roots': list(policy.read_roots), 'write_paths': list(policy.write_paths),
             'forbidden_roots': list(policy.forbidden_roots)}
 
 
 def policy_from_document(document):
+    document = dict(document)
+    if 'parallel_tools' in document:
+        from .tool_parallel_contracts import ParallelToolPolicyV1
+        document['parallel_tools'] = ParallelToolPolicyV1.from_dict(document['parallel_tools'])
     return RunPolicy(**{**document, 'allowed_tools': frozenset(document['allowed_tools']),
                         'read_roots': tuple(document['read_roots']),
                         'write_paths': tuple(document['write_paths']),

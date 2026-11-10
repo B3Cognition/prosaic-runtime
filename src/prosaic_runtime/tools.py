@@ -82,11 +82,14 @@ class CustomTool:
     terminal: bool
     result_contract: ToolResultContractV1 | None
     event_policy: ToolEventPolicyV1 | None
+    parallel_read: bool
 
     def __init__(self, name, description, parameters, handler, version, *,
                  max_argument_bytes=16384, max_result_bytes=65536, authorize=None,
                  with_context=False, operation_key=None, terminal=False,
-                 result_contract=None, event_policy=None):
+                 result_contract=None, event_policy=None, parallel_read=False):
+        if type(parallel_read) is not bool or parallel_read and (not with_context or terminal):
+            raise ValueError('parallel reads require contextual nonterminal tools')
         if result_contract is not None and type(result_contract) is not ToolResultContractV1:
             raise ValueError('invalid tool result contract')
         if event_policy is not None and type(event_policy) is not ToolEventPolicyV1:
@@ -122,7 +125,7 @@ class CustomTool:
                                handler=handler, version=version, max_argument_bytes=max_argument_bytes,
                                max_result_bytes=max_result_bytes, authorize=authorize,
                                with_context=with_context, operation_key=operation_key, terminal=terminal,
-                               result_contract=result_contract, event_policy=event_policy).items():
+                               result_contract=result_contract, event_policy=event_policy, parallel_read=parallel_read).items():
             object.__setattr__(self, key, value)
 
     @property
@@ -140,6 +143,8 @@ class CustomTool:
             descriptor['journaled'] = True
         if self.terminal:
             descriptor['terminal'] = True
+        if self.parallel_read:
+            descriptor['parallel_read'] = True
         if self.result_contract is not None:
             descriptor['result_contract'] = self.result_contract.to_dict()
         if self.event_policy is not None:
