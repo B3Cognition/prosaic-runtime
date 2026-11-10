@@ -1,5 +1,10 @@
 # Releases and compatibility
 
+Runtime 0.9.20 adds [safe events and captured citations](release-0.9.20.md).
+The tools train pairs it with Harness 0.9.14 / store 0.4.3 and Lab 0.9.13;
+Core 0.5.0 and recorder 0.3.0 are unchanged. Publication is confirmed by the
+versioned release page and its original artifact receipts.
+
 Context-pack release train prepared on 2026-11-09. Runtime 0.9.19 adds
 profiled model/private inputs and frozen restoration; Harness 0.9.13 supplies
 named agent defaults and workflow-node context selection. Lab 0.9.12 pins the

@@ -1,7 +1,7 @@
 # Safe tool events and citations
 
-Development contract: `tool_events_v1`, `tool_results_v1`, `citations_v1`.
-These APIs require the new development SDK; Runtime 0.9.19 does not provide them.
+Runtime 0.9.20 contract: `tool_events_v1`, `tool_results_v1`, `citations_v1`.
+These APIs require Runtime >=0.9.20; Runtime 0.9.19 does not provide them.
 
 Register `CustomTool(event_policy=ToolEventPolicyV1(...))` independently from
 `result_contract=ToolResultContractV1(...)`. Event-only handlers retain their

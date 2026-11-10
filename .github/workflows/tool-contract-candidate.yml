@@ -16,7 +16,7 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install build 'setuptools>=77' wheel packaging pytest
       - name: Build exact source once
-        run: python scripts/release_artifacts.py build --ref '${{ github.sha }}' --output candidate --project . --expect b3-prosaic-runtime=0.9.20.dev2
+        run: python scripts/release_artifacts.py build --ref '${{ github.sha }}' --output candidate --project . --expect b3-prosaic-runtime=0.9.20
       - name: Install original candidate bytes outside checkout
         run: |
           python -m venv /tmp/tool-contract-runtime

@@ -1,8 +1,6 @@
 name: Publish SDK
 
 on:
-  push:
-    tags: ['v*']
   workflow_dispatch:
     inputs:
       candidate_run_id:
@@ -115,6 +113,7 @@ jobs:
 
 
   native:
+    if: ${{ !inputs.candidate_run_id }}
     needs: artifacts
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
@@ -144,7 +143,7 @@ jobs:
         run: |
           python -m venv .venv
           .venv/bin/python -m pip install release/upstream-wheels/b3_prosaic-0.5.0-py3-none-any.whl
-          .venv/bin/python -m pip install release/artifacts/b3_prosaic_runtime_postgres-0.3.0-py3-none-any.whl release/artifacts/b3_prosaic_runtime-0.9.19-py3-none-any.whl
+          .venv/bin/python -m pip install release/artifacts/b3_prosaic_runtime_postgres-0.3.0-py3-none-any.whl release/artifacts/b3_prosaic_runtime-0.9.20-py3-none-any.whl
           .venv/bin/python -m pip install -e '.[test]'
           .venv/bin/python -m pip install --force-reinstall --no-deps 'https://files.pythonhosted.org/packages/0d/a8/8b926410b806448dd7762c8b04f7c4c6b0b86d2837b8a5c30d374aa892c0/b3_prosaic_harness-0.9.12-py3-none-any.whl#sha256=fb07797c3e42ab2e7e8f0a727b7bd25229e9b223cf15309716f10ff9d1f1147b'
           .venv/bin/python - <<'PY'
@@ -185,25 +184,25 @@ jobs:
       - name: Qualify applicable Linux source cases without skipped gates
         if: runner.os == 'Linux'
         run: |
-          .venv/bin/python scripts/release_artifacts.py qualify --directory release/artifacts --commit "$GITHUB_SHA" --label native-${{ matrix.os }}-${{ matrix.python }}-source --junit "$RUNNER_TEMP/runtime-source.xml" -- .venv/bin/python -m pytest -q --ignore=tests/test_context_pack_installed.py --junitxml="$RUNNER_TEMP/runtime-source.xml" -k 'not test_framework_python_starts_without_a_broad_prefix_grant and not test_wheel_metadata'
+          .venv/bin/python scripts/release_artifacts.py qualify --directory release/artifacts --commit "$GITHUB_SHA" --label native-${{ matrix.os }}-${{ matrix.python }}-source --junit "$RUNNER_TEMP/runtime-source.xml" -- .venv/bin/python -m pytest -q --ignore=tests/test_context_pack_installed.py --ignore=tests/test_tool_contract_installed.py --junitxml="$RUNNER_TEMP/runtime-source.xml" -k 'not test_framework_python_starts_without_a_broad_prefix_grant and not test_wheel_metadata'
       - name: Qualify macOS source including its framework interpreter gate
         if: runner.os == 'macOS'
         run: |
-          .venv/bin/python scripts/release_artifacts.py qualify --directory release/artifacts --commit "$GITHUB_SHA" --label native-${{ matrix.os }}-${{ matrix.python }}-source --junit "$RUNNER_TEMP/runtime-source.xml" -- .venv/bin/python -m pytest -q --ignore=tests/test_context_pack_installed.py --junitxml="$RUNNER_TEMP/runtime-source.xml" -k 'not test_wheel_metadata'
+          .venv/bin/python scripts/release_artifacts.py qualify --directory release/artifacts --commit "$GITHUB_SHA" --label native-${{ matrix.os }}-${{ matrix.python }}-source --junit "$RUNNER_TEMP/runtime-source.xml" -- .venv/bin/python -m pytest -q --ignore=tests/test_context_pack_installed.py --ignore=tests/test_tool_contract_installed.py --junitxml="$RUNNER_TEMP/runtime-source.xml" -k 'not test_wheel_metadata'
       - name: Qualify the transported isolated wheel and metadata
         env:
           PROSAIC_RUNTIME_WHEEL_ACCEPTANCE: '1'
         run: |
           python -m venv .wheel-test
           .wheel-test/bin/python -m pip install 'https://files.pythonhosted.org/packages/0d/a8/8b926410b806448dd7762c8b04f7c4c6b0b86d2837b8a5c30d374aa892c0/b3_prosaic_harness-0.9.12-py3-none-any.whl#sha256=fb07797c3e42ab2e7e8f0a727b7bd25229e9b223cf15309716f10ff9d1f1147b'
-          .wheel-test/bin/python -m pip install pytest packaging release/upstream-wheels/b3_prosaic-0.5.0-py3-none-any.whl release/artifacts/b3_prosaic_runtime-0.9.19-py3-none-any.whl release/artifacts/b3_prosaic_runtime_postgres-0.3.0-py3-none-any.whl
-          .venv/bin/python scripts/release_artifacts.py qualify --directory release/artifacts --commit "$GITHUB_SHA" --label native-${{ matrix.os }}-${{ matrix.python }}-wheel --junit "$RUNNER_TEMP/runtime-wheel.xml" -- .wheel-test/bin/python -I -c "import os, runpy, subprocess, sys; runpy.run_path('scripts/wheel_smoke.py', run_name='__main__'); runpy.run_path('scripts/native_wheel_smoke.py', run_name='__main__'); runpy.run_path('scripts/production_wheel_smoke.py', run_name='__main__'); runpy.run_path('scripts/conversation_wheel_smoke.py', run_name='__main__'); runpy.run_path('scripts/terminal_completion_smoke.py', run_name='__main__'); runpy.run_path('scripts/rule_admission_wheel_smoke.py', run_name='__main__'); runpy.run_path('scripts/context_pack_wheel_smoke.py', run_name='__main__'); subprocess.run([sys.executable, '-I', '-m', 'pytest', '-o', 'pythonpath=tests', 'tests/test_package_compatibility.py::test_wheel_metadata', 'tests/test_fee_formats.py', 'tests/test_request_headers.py', 'tests/test_accounting_request_metadata.py', 'tests/test_sent_effort.py', 'tests/test_sent_effort_native.py', 'tests/test_sent_effort_durable.py', '-q', '--junitxml=' + os.environ['RUNNER_TEMP'] + '/runtime-wheel.xml'], check=True)"
+          .wheel-test/bin/python -m pip install pytest packaging release/upstream-wheels/b3_prosaic-0.5.0-py3-none-any.whl release/artifacts/b3_prosaic_runtime-0.9.20-py3-none-any.whl release/artifacts/b3_prosaic_runtime_postgres-0.3.0-py3-none-any.whl
+          .venv/bin/python scripts/release_artifacts.py qualify --directory release/artifacts --commit "$GITHUB_SHA" --label native-${{ matrix.os }}-${{ matrix.python }}-wheel --junit "$RUNNER_TEMP/runtime-wheel.xml" -- .wheel-test/bin/python -I -c "import os, runpy, subprocess, sys; runpy.run_path('scripts/wheel_smoke.py', run_name='__main__'); runpy.run_path('scripts/native_wheel_smoke.py', run_name='__main__'); runpy.run_path('scripts/production_wheel_smoke.py', run_name='__main__'); runpy.run_path('scripts/conversation_wheel_smoke.py', run_name='__main__'); runpy.run_path('scripts/terminal_completion_smoke.py', run_name='__main__'); runpy.run_path('scripts/rule_admission_wheel_smoke.py', run_name='__main__'); runpy.run_path('scripts/context_pack_wheel_smoke.py', run_name='__main__'); runpy.run_path('scripts/tool_contract_smoke.py', run_name='__main__'); subprocess.run([sys.executable, '-I', '-m', 'pytest', '-o', 'pythonpath=tests', 'tests/test_package_compatibility.py::test_wheel_metadata', 'tests/test_fee_formats.py', 'tests/test_request_headers.py', 'tests/test_accounting_request_metadata.py', 'tests/test_sent_effort.py', 'tests/test_sent_effort_native.py', 'tests/test_sent_effort_durable.py', '-q', '--junitxml=' + os.environ['RUNNER_TEMP'] + '/runtime-wheel.xml'], check=True)"
           .wheel-test/bin/python -m pip check
       - name: Verify minimum dependencies on both Linux architectures
         if: matrix.python == '3.11' && runner.os == 'Linux'
         run: |
           python -m venv .floor-test
-          .floor-test/bin/python -m pip install 'PyYAML==6.0' 'pyuca==1.2' 'markdown-it-py==3.0.0' 'jsonschema==4.23.0' 'referencing==0.28.4' 'psycopg[binary]==3.2.1' release/upstream-wheels/b3_prosaic-0.5.0-py3-none-any.whl release/artifacts/b3_prosaic_runtime-0.9.19-py3-none-any.whl release/artifacts/b3_prosaic_runtime_postgres-0.3.0-py3-none-any.whl
+          .floor-test/bin/python -m pip install 'PyYAML==6.0' 'pyuca==1.2' 'markdown-it-py==3.0.0' 'jsonschema==4.23.0' 'referencing==0.28.4' 'psycopg[binary]==3.2.1' release/upstream-wheels/b3_prosaic-0.5.0-py3-none-any.whl release/artifacts/b3_prosaic_runtime-0.9.20-py3-none-any.whl release/artifacts/b3_prosaic_runtime_postgres-0.3.0-py3-none-any.whl
           .venv/bin/python scripts/release_artifacts.py qualify --directory release/artifacts --commit "$GITHUB_SHA" --label floor-${{ matrix.os }} -- .floor-test/bin/python -I -c "import runpy; runpy.run_path('scripts/production_wheel_smoke.py', run_name='__main__'); runpy.run_path('scripts/conversation_wheel_smoke.py', run_name='__main__'); runpy.run_path('scripts/rule_admission_wheel_smoke.py', run_name='__main__'); runpy.run_path('scripts/context_pack_wheel_smoke.py', run_name='__main__')"
           .floor-test/bin/python -m pip check
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
@@ -214,6 +213,7 @@ jobs:
           retention-days: 90
 
   postgres:
+    if: ${{ !inputs.candidate_run_id }}
     needs: artifacts
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
@@ -260,7 +260,7 @@ jobs:
           release.verify_receipt(Path('release/artifacts'), '${{ github.sha }}')
           release.verify_upstream(Path('release/artifacts'), Path('release/upstream-wheels'))
           PY
-          python -m pip install release/upstream-wheels/b3_prosaic-0.5.0-py3-none-any.whl release/artifacts/b3_prosaic_runtime-0.9.19-py3-none-any.whl release/artifacts/b3_prosaic_runtime_postgres-0.3.0-py3-none-any.whl
+          python -m pip install release/upstream-wheels/b3_prosaic-0.5.0-py3-none-any.whl release/artifacts/b3_prosaic_runtime-0.9.20-py3-none-any.whl release/artifacts/b3_prosaic_runtime_postgres-0.3.0-py3-none-any.whl
       - name: Use the immutable published recorder 0.3.0 for PostgreSQL compatibility
         run: python -m pip install --force-reinstall --no-deps 'https://files.pythonhosted.org/packages/4f/95/39d4602749df2e83a8d7afc4f9f68819e0dea48c2f688d824f8a07ed1aae/b3_prosaic_runtime_postgres-0.3.0-py3-none-any.whl#sha256=5f29ce5b0a1cb3ce4ee41f44c50e322b5b1af73cbe186ecadc428f81ccc7b5ca'
       - name: Provision separate owned migration and runtime roles
@@ -291,7 +291,8 @@ jobs:
           retention-days: 90
 
   gate:
-    needs: [native, postgres]
+    if: ${{ always() && needs.artifacts.result == 'success' && (inputs.candidate_run_id != '' || (needs.native.result == 'success' && needs.postgres.result == 'success')) }}
+    needs: [artifacts, native, postgres]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -305,6 +306,7 @@ jobs:
           name: release-bytes
           path: release/artifacts
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        if: ${{ !inputs.candidate_run_id }}
         with:
           pattern: qualified-*
           merge-multiple: true
@@ -358,7 +360,7 @@ jobs:
       - name: Prepare only distribution files for upload
         run: |
           mkdir upload
-          cp release/artifacts/b3_prosaic_runtime-0.9.19-py3-none-any.whl release/artifacts/b3_prosaic_runtime-0.9.19.tar.gz upload/
+          cp release/artifacts/b3_prosaic_runtime-0.9.20-py3-none-any.whl release/artifacts/b3_prosaic_runtime-0.9.20.tar.gz upload/
       - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           packages-dir: upload/
@@ -394,5 +396,5 @@ jobs:
             cmp existing/release-receipt.json release/artifacts/release-receipt.json
             cmp existing/upstream-receipt.json release/artifacts/upstream-receipt.json
           else
-            gh release create "$RELEASE_TAG" --verify-tag --title "$RELEASE_TAG" --notes-file docs/release-0.9.19.md release/artifacts/*
+            gh release create "$RELEASE_TAG" --verify-tag --title "$RELEASE_TAG" --notes-file docs/release-0.9.20.md release/artifacts/*
           fi
