@@ -1,5 +1,5 @@
 """Explicit host-owned parallel read bounds; never inferred from model output."""
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True)

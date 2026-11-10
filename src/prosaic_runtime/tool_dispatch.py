@@ -56,11 +56,14 @@ class PreparedToolCallV1:
 
 
 def _report(options, code, replayed=False):
+    options.get('_phase_state', {})['code'] = code
     callback = options.get('on_outcome')
     if callback is not None: callback(ToolOutcome(code, replayed))
 
 
 def _complete(options, outcome, status='completed', **refs):
+    state=options.get('_phase_state', {})
+    state.update(status=status, **refs)
     callback = options.get('on_completion')
     if callback is not None: callback(outcome, status, **refs)
 
@@ -72,6 +75,7 @@ def _settlement(call_id, call_index, batch_index, code, outcome=None, **kw):
 
 def prepare_custom_tool_call(tool, raw_arguments, *, call_id, call_index, batch_index, options):
     from .tools import parse_arguments, ToolDeadlineExceeded
+    options.setdefault('_phase_state', {})
     callback = options.get('on_outcome')
     if callback is not None and not callable(callback): raise ValueError('invalid tool outcome observer')
     check = options['check_boundary']; check()
@@ -112,6 +116,8 @@ def prepare_custom_tool_call(tool, raw_arguments, *, call_id, call_index, batch_
         if signature is None:
             signature=hashlib.sha256(canonical_json(dict(tool_name=tool.name,tool_version=tool.version,arguments=arguments)).encode()).hexdigest()
         refs = dict(operation_key=key,signature=signature)
+        if options.get('_await_operation') is not None:
+            options['_await_operation'](context.scope.operation_namespace,key,signature)
         try: claim = options['tool_journal'].claim(context.scope.operation_namespace,key,signature)
         except Exception:
             _report(options,'tool_journal_failed'); _complete(options,None,'uncertain',**refs)
@@ -131,7 +137,13 @@ def prepare_custom_tool_call(tool, raw_arguments, *, call_id, call_index, batch_
             code='ok' if replay['status']=='ok' else 'controlled_failure'
             _report(options,code,True); _complete(options,replay,'replayed',**refs); check()
             return _settlement(call_id,call_index,batch_index,code,replay,replayed=True)
-        token=claim.claim_token; check()
+        token=claim.claim_token
+        try: check()
+        except BaseException:
+            if options.get('_parallel_mode'):
+                _report(options,'tool_effect_uncertain'); _complete(options,None,'uncertain',**refs)
+                raise ToolEffectFailure('tool_effect_uncertain') from None
+            raise
     return PreparedToolCallV1(call_id,call_index,batch_index,tool,json.dumps(arguments,allow_nan=False).encode(),
         context,MappingProxyType(dict(options)),signature if options.get('on_completion') is not None or key is not None else None,key,token)
 
@@ -187,8 +199,12 @@ def settle_custom_tool_call(call, settlement, *, on_completion=None):
         except Exception:
             _report(options,'tool_journal_failed'); _complete(options,None,'uncertain',**refs)
             raise ToolEffectFailure('tool_journal_failed') from None
+        options.get('_phase_state',{}).update(status='completed',code=code,**refs)
         _report(options,code); _complete(options,outcome,'completed',**refs); check(); return settlement
-    if settlement.exception is not None: raise settlement.exception
+    if settlement.exception is not None:
+        if options.get('_parallel_mode'):
+            _report(options,code); _complete(options,None,'uncertain')
+        raise settlement.exception
     if settlement.terminal is not None:
         if not call.tool.terminal or options.get('on_terminal') is None:
             _report(options,'invalid_result'); raise TerminalCompletionError('terminal_completion_not_granted')
@@ -196,8 +212,12 @@ def settle_custom_tool_call(call, settlement, *, on_completion=None):
         outcome={'status':'ok','result':settlement.terminal.output}
         settlement=_settlement(call.call_id,call.call_index,call.batch_index,'ok',outcome,
             handler_entered=True,started_at=settlement.started_at,finished_at=settlement.finished_at)
+    known=code in {'ok','controlled_failure'}
+    options.get('_phase_state',{}).update(status='completed' if known else 'uncertain',code=code)
     _report(options,code)
-    if code not in {'handler_error','execution_failed'}:
+    if options.get('_parallel_mode') and not known:
+        _complete(options,None,'uncertain')
+    elif code not in {'handler_error','execution_failed'}:
         callback=on_completion or options.get('on_completion')
         if callback is not None: callback(outcome,signature=call.signature)
     check(); return settlement
