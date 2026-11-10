@@ -213,14 +213,14 @@ def execute_custom_tool(tool, raw_arguments, *, check_boundary, scope=None,
                         deadline=None, cancelled=lambda: False, call_index=0, tool_journal=None,
                         on_completion=None, accounting_context=None, on_outcome=None,
                         on_terminal=None, tool_contract_bindings=None, _event_call_id=None, _event_exchange=0,
-                        _defer_event=False, _parallel_mode=False, _phase_state=None):
+                        _defer_event=False, _parallel_mode=False, _phase_state=None, _before_handler=None):
     from .tool_parallel import assert_not_parallel_worker
     from .tool_event_contract import ManagedToolCallV1
     assert_not_parallel_worker()
     options=dict(check_boundary=check_boundary,scope=scope,deadline=deadline,cancelled=cancelled,
         call_index=call_index,tool_journal=tool_journal,on_completion=on_completion,
         accounting_context=accounting_context,on_outcome=on_outcome,on_terminal=on_terminal,
-        _parallel_mode=_parallel_mode,_phase_state=_phase_state if _phase_state is not None else {})
+        _parallel_mode=_parallel_mode,_before_handler=_before_handler,_phase_state=_phase_state if _phase_state is not None else {})
     managed=ManagedToolCallV1(tool,raw_arguments,options,bindings=tool_contract_bindings,
         call_id=_event_call_id,exchange=_event_exchange,defer_event=_defer_event,parallel=_parallel_mode)
     try:

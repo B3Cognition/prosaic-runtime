@@ -117,7 +117,15 @@ def prepare_custom_tool_call(tool, raw_arguments, *, call_id, call_index, batch_
             signature=hashlib.sha256(canonical_json(dict(tool_name=tool.name,tool_version=tool.version,arguments=arguments)).encode()).hexdigest()
         refs = dict(operation_key=key,signature=signature)
         if options.get('_await_operation') is not None:
-            options['_await_operation'](context.scope.operation_namespace,key,signature)
+            waited=options['_await_operation'](context.scope.operation_namespace,key,signature)
+            if waited and tool.authorize is not None:
+                try: allowed=tool.authorize(deepcopy(arguments),context) is True
+                except (Cancelled,ToolDeadlineExceeded):raise
+                except Exception:allowed=False
+                check()
+                if not allowed:
+                    _report(options,'authorization_denied')
+                    return _settlement(call_id,call_index,batch_index,'authorization_denied',{'status':'error','error':'authorization_denied'})
         try: claim = options['tool_journal'].claim(context.scope.operation_namespace,key,signature)
         except Exception:
             _report(options,'tool_journal_failed'); _complete(options,None,'uncertain',**refs)

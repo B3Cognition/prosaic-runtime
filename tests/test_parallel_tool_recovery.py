@@ -186,3 +186,20 @@ def test_every_handler_gets_a_fresh_context_even_when_thread_is_reused():
         assert len(coord.execute(calls).messages)==2
         assert seen==[None,None] and ambient.get()=='OWNER'
     finally:ambient.reset(token)
+
+
+def test_same_key_replay_rechecks_permission_after_owned_wait():
+    queued=Event();allowed=[True];seen=[];checks=[]
+    class RevokingJournal(Journal):
+        def commit(self,*args):super().commit(*args);allowed[0]=False
+    def authorize(a,c):
+        checks.append(1)
+        if len(checks)==2:queued.set();return True
+        return allowed[0]
+    def read(a,c):assert queued.wait(2);seen.append(1);return {'ok':True}
+    registered=tool('lookup',read,operation_key=lambda a,c:'same',authorize=authorize)
+    calls=(call(0),{**call(0),'id':'other'});journal=RevokingJournal()
+    coord,_=coordinator({'lookup':registered},calls,journal=journal)
+    result=coord.execute(calls)
+    assert seen==[1] and result.messages[1]['error']=='authorization_denied'
+    assert coord.evidence['calls'][1]['state']=='notStarted' and len(checks)==3

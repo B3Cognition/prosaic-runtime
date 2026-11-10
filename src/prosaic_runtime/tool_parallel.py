@@ -152,10 +152,11 @@ class ParallelToolCoordinator:
 
     def _await_operation(self,namespace,key,signature):
         slot=self._inflight.get((namespace,key))
-        if slot is None:return
+        if slot is None:return False
         if slot.prepared.signature!=signature:raise ToolEffectFailure('tool_identity_conflict')
         self._drain()
         if self._errors:self._raise_failure()
+        return True
 
     def _raise_failure(self):
         def rank(item):

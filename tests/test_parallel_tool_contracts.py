@@ -74,3 +74,13 @@ def test_enabled_limits_and_tool_declaration_change_identity():
     old = api.CustomTool('lookup', 'Lookup', SCHEMA, lambda a, c: {}, 'v1', with_context=True)
     new = api.CustomTool('lookup', 'Lookup', SCHEMA, lambda a, c: {}, 'v1', with_context=True, parallel_read=True)
     assert old.descriptor != new.descriptor
+
+
+def test_source_ci_qualifies_the_parallel_candidate_without_release_changes():
+    from pathlib import Path
+    import prosaic_runtime as api
+    root=Path(__file__).resolve().parents[1]
+    ci=(root/'.github/workflows/test.yml').read_text()
+    assert f'b3_prosaic_runtime-{api.__version__}-py3-none-any.whl' in ci
+    assert 'tests/test_parallel_tool_installed.py' in ci
+    assert 'b3_prosaic_runtime-0.9.20-py3-none-any.whl' in (root/'.github/workflows/publish.yml').read_text()

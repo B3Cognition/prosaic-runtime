@@ -236,7 +236,10 @@ class ParallelRegistryDispatch:
         clone._outcome=report
         name=call['function']['name']
         from .tool_event_contract import managed_events
-        if not managed_events(self.custom.get(name)):emit('tool_started',name=name,call_id=call['id'],turn=self.registry.turn)
+        if frame['refusal'] is None and not managed_events(self.custom.get(name)):
+            if name in self.custom:
+                options['_before_handler']=lambda arguments:emit('tool_started',name=name,call_id=call['id'],turn=self.registry.turn)
+            else:emit('tool_started',name=name,call_id=call['id'],turn=self.registry.turn)
         try:
             message=(clone.refuse_message(call,frame['refusal']) if frame['refusal'] is not None else clone.execute_message(call))
             frame['outcome']=clone.last_outcome;frame['state']['code']=clone.last_outcome.code

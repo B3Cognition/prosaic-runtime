@@ -66,3 +66,17 @@ def test_parallel_journal_replay_emits_no_second_start(tmp_path):
         assert result.exit_code==0 and seen==[1]
         assert len([e for e in events if e['event']=='tool_started'])==1
         assert [e['toolEventV1']['phase'] for e in events if e['event']=='tool_completed']==['completed','replayed']
+
+
+@pytest.mark.parametrize('denied',[False,True])
+def test_serial_barrier_start_event_requires_handler_entry(tmp_path,denied):
+    from support.tool_journal import SqliteJournal
+    with ConversationFixture('openai-compatible') as fx:
+        seen=[];events=[]
+        policy=configure(fx,lambda a,c:seen.append(1) or a,operation_key=lambda a,c:'key',authorize=lambda a,c:not denied)
+        original=fx.tools['lookup']
+        fx.tools['lookup']=api.CustomTool(original.name,original.description,original.parameters,original.handler,original.version,with_context=True,authorize=original.authorize,operation_key=original.operation_key)
+        queue_json(fx,[wire_call('a',arguments='{"i":0}'),wire_call('b',arguments='{"i":0}')]);fx.queue_text('done')
+        result=fx.runtime.run(fx.agent,policy=policy,tool_contract_bindings=bindings(),on_event=events.append,tool_journal=SqliteJournal(tmp_path/'journal.sqlite'))
+        assert result.exit_code==0 and seen==([] if denied else [1])
+        assert len([e for e in events if e['event']=='tool_started'])==(0 if denied else 1)
