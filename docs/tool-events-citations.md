@@ -65,3 +65,8 @@ model-use permission and actual submission of that container before eligibility.
 The host verifies the original receipt and tenant/actor binding; decoding its
 metadata alone never grants authority. Imported bodies stay outside the registry
 sidecar, which holds bounded hashes/references to the existing captured context.
+
+The reviewed development candidate is 0.9.20.dev2. It supersedes the private
+dev1 build: journal completion is classified before fallible completion events,
+and all registry components share one atomically enforced retained-document bound.
+Capacity failure preserves known completion and stops further evidence exposure.

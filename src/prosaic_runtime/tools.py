@@ -371,10 +371,10 @@ def _execute_custom_tool(tool, raw_arguments, *, check_boundary, scope=None,
             if on_completion is not None:
                 on_completion(None, 'uncertain', operation_key=key, signature=signature)
             raise ToolEffectFailure('tool_journal_failed') from None
-        # Commit valid completion before observing cancellation or deadline.
+        # Commit and classify completion before any fallible sink/callback.
+        report('ok' if outcome['status'] == 'ok' else 'controlled_failure')
         if on_completion is not None:
             on_completion(outcome, 'completed', operation_key=key, signature=signature)
-        report('ok' if outcome['status'] == 'ok' else 'controlled_failure')
         check_boundary()
         return outcome
     if _before_handler is not None:

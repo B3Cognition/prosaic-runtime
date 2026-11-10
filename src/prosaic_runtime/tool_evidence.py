@@ -84,6 +84,16 @@ class EvidenceRegistryV1:
         self.citations = None
         self._imports_ready = False
 
+    def _snapshot(self, *, records=None, calls=None, deliveries=None):
+        # All retained components share one budget, including JSON framing.
+        document=dict(version=1,records=list((self._records if records is None else records).values()),
+            calls=list((self._calls if calls is None else calls).values()),
+            deliveries=self._delivered if deliveries is None else deliveries)
+        try:
+            return owned(document,self.bindings.limits.max_evidence_bytes)
+        except ValueError:
+            raise ToolResultValidationError('result_limit') from None
+
     def _register_imports(self):
         if self._imports_ready:
             return
@@ -100,7 +110,7 @@ class EvidenceRegistryV1:
         candidate = {**self._records, **records}
         if len(candidate) > self.bindings.limits.max_registry_items:
             raise ValueError('evidence registry limit')
-        encode_owned(dict(records=list(candidate.values()), calls=list(self._calls.values())), max_bytes=self.bindings.limits.max_evidence_bytes)
+        self._snapshot(records=candidate)
         self._records = candidate
         self._projections.update(projections)
         self._imports_ready = True
@@ -109,7 +119,20 @@ class EvidenceRegistryV1:
         record = dict(callId=call_id, callIndex=call_index, toolName=tool.name, toolVersion=tool.version,
             argumentsSha256=arguments_sha256, status=status, outcome=outcome)
         candidate = {**self._calls, call_id: record}
-        encode_owned(candidate, max_bytes=self.bindings.limits.max_evidence_bytes)
+        try:
+            self._snapshot(calls=candidate)
+        except ToolResultValidationError:
+            # Completion is already known (and journaled where applicable).
+            # The full private outcome remains in TurnCapture/the effect journal;
+            # retain a bounded completion marker without creating eligible data.
+            marker={**record,'outcome':None}
+            try:
+                self._snapshot(calls={**self._calls,call_id:marker})
+            except ToolResultValidationError:
+                pass
+            else:
+                self._calls[call_id]=marker
+            raise
         self._calls = owned(candidate)
 
     def finish_event(self, call_id, checked=None):
@@ -183,7 +206,7 @@ class EvidenceRegistryV1:
         all_records = {**self._records, **records}
         if len(all_records) > self.bindings.limits.max_registry_items:
             raise ValueError('evidence registry limit')
-        encode_owned(dict(version=1, records=list(all_records.values())), max_bytes=self.bindings.limits.max_evidence_bytes)
+        self._snapshot(records=all_records)
         projected = dict(status='ok', result=dict(version=1, data=data, evidence=references))
         # Preserve both historical JSON framing bounds.
         encode_owned(projected, max_bytes=tool.max_result_bytes)
@@ -230,6 +253,10 @@ class EvidenceRegistryV1:
             raise ValueError('invalid delivery ticket')
         for evidence_id in ticket.evidence_ids:
             self.authorize(evidence_id, 'modelUse')
+        prospective=owned(self._delivered)
+        for evidence_id in ticket.evidence_ids:
+            prospective.setdefault(evidence_id,[]).append(dict(requestId=request_id,inputSha256=ticket.input_sha256))
+        self._snapshot(deliveries=prospective)
         state[1] = request_id
 
     def confirm_delivery(self, ticket, request_id):
@@ -239,8 +266,7 @@ class EvidenceRegistryV1:
         candidate = owned(self._delivered)
         for evidence_id in ticket.evidence_ids:
             candidate.setdefault(evidence_id, []).append(dict(requestId=request_id, inputSha256=ticket.input_sha256))
-        encode_owned(dict(version=1, records=list(self._records.values()), deliveries=candidate),
-            max_bytes=self.bindings.limits.max_evidence_bytes)
+        self._snapshot(deliveries=candidate)
         self._delivered = candidate
         state[2] = True
 
@@ -262,8 +288,7 @@ class EvidenceRegistryV1:
         return EligibleEvidenceV1(document, 'hostAttested', _seal=_SEAL)
 
     def to_dict(self):
-        return owned(dict(version=1, records=list(self._records.values()), deliveries=self._delivered, calls=list(self._calls.values())),
-            self.bindings.limits.max_evidence_bytes)
+        return self._snapshot()
 
 
 @dataclass(frozen=True, init=False)
