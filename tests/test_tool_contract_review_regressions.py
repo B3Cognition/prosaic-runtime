@@ -84,3 +84,14 @@ def test_unrepresentable_registry_budget_refuses_before_any_effect():
     scope=api.InvocationScope('tiny');small=replace(binding(scope),limits=api.ToolContractLimitsV1(max_evidence_bytes=2))
     with pytest.raises(ValueError):rt.run_tool('lookup',{'value':1},policy=POLICY,tool_contract_bindings=small)
     assert effects==[]
+
+
+def test_failed_registry_admission_does_not_change_ambient_authority():
+    from prosaic_runtime.tool_event_contract import tool_contract_session,current_bindings,current_registry
+    from prosaic_runtime.tool_evidence import EvidenceRegistryV1
+    outer=binding(api.InvocationScope('outer'));registry=EvidenceRegistryV1(outer)
+    bad=replace(binding(api.InvocationScope('bad')),limits=api.ToolContractLimitsV1(max_evidence_bytes=2))
+    rt=runtime(event_policy=api.ToolEventPolicyV1('1',{}))
+    with tool_contract_session(outer,registry):
+        with pytest.raises(ValueError):rt.run_tool('lookup',{'value':1},policy=POLICY,tool_contract_bindings=bad)
+        assert current_bindings() is outer and current_registry() is registry

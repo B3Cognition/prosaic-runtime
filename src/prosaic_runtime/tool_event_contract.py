@@ -66,9 +66,10 @@ def tool_contract_entry(function):
             kwargs['operation_context'] = bindings.scope
             if function.__name__ == 'run_tool' and bindings.citations is not None:
                 raise ValueError('unsupported direct automatic citations')
-        token = _bindings.set(bindings)
         from .tool_evidence import EvidenceRegistryV1
+        # Pure registry admission can fail; do not change ambient authority yet.
         registry = EvidenceRegistryV1(bindings) if bindings is not None else None
+        token = _bindings.set(bindings)
         registry_token = _registry.set(registry)
         try:
             result = function(*args, **kwargs)
