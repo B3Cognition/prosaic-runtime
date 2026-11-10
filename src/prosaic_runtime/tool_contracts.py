@@ -294,3 +294,28 @@ class ToolContractBindingsV1:
             evidenceAuthorizer=None if self.evidence_authorizer is None else self.evidence_authorizer.to_dict(),
             displayAuthorizer=None if self.display_authorizer is None else self.display_authorizer.to_dict(),
             citations=None if self.citations is None else self.citations.to_dict(), retained=[], limits=self.limits.to_dict())
+
+
+def validate_bindings_document(value):
+    value = owned(value, 65536)
+    keys = {'version', 'identity', 'bindingVersion', 'scope', 'evidenceAuthorizer', 'displayAuthorizer', 'citations', 'retained', 'limits'}
+    if type(value) is not dict or set(value) != keys or type(value['version']) is not int or value['version'] != 1:
+        raise ValueError('invalid tool contract binding document')
+    reference(value['identity']); reference(value['bindingVersion'])
+    InvocationScope(**value['scope'])
+    ToolContractLimitsV1(**value['limits'])
+    for key in ('evidenceAuthorizer', 'displayAuthorizer'):
+        grant = value[key]
+        if grant is not None:
+            if type(grant) is not dict or set(grant) != {'identity', 'version'}:
+                raise ValueError('invalid authorizer descriptor')
+            reference(grant['identity']); reference(grant['version'])
+    if value['citations'] is not None:
+        policy = value['citations']
+        if (type(policy) is not dict or set(policy) != {'version', 'mode'} or type(policy['version']) is not int or
+                policy['version'] != 1 or value['evidenceAuthorizer'] is None):
+            raise ValueError('invalid citation descriptor')
+        CitationPolicyV1(policy['mode'])
+    if value['retained'] != []:
+        raise ValueError('unverified retained imports')
+    return value

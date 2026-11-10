@@ -228,3 +228,60 @@ class ToolInvocationEvidenceV1:
 
     def to_dict(self):
         return json.loads(self._encoded)
+
+
+def validate_invocation_evidence(document):
+    """Data codec only. Reading a receipt never confers delivery authority."""
+    document = owned(document, 65536)
+    if type(document) is not dict or set(document) != {'version', 'records', 'deliveries', 'calls'} or type(document['version']) is not int or document['version'] != 1:
+        raise ValueError('invalid invocation evidence')
+    if type(document['records']) is not list or len(document['records']) > 256 or type(document['calls']) is not list or type(document['deliveries']) is not dict:
+        raise ValueError('invalid evidence records')
+    calls = {}
+    for call in document['calls']:
+        if type(call) is not dict or set(call) != {'callId', 'callIndex', 'toolName', 'toolVersion', 'argumentsSha256', 'status', 'outcome'}:
+            raise ValueError('invalid captured call')
+        for key in ('callId', 'toolName', 'toolVersion'):
+            reference(call[key])
+        if call['callId'] in calls or type(call['callIndex']) is not int or call['callIndex'] < 0 or call['status'] not in {'completed', 'replayed', 'uncertain'}:
+            raise ValueError('invalid captured call origin')
+        if call['outcome'] is not None and type(call['outcome']) is not dict:
+            raise ValueError('invalid captured completion')
+        calls[call['callId']] = call
+    records = {}
+    for record in document['records']:
+        required = {'version', 'scope', 'callId', 'callIndex', 'toolName', 'toolVersion', 'argumentsSha256',
+            'sourceKey', 'sourceRevision', 'locator', 'selector', 'label', 'bodySha256', 'contentSha256',
+            'contentBytes', 'contentKind', 'observation', 'id'}
+        if type(record) is not dict or set(record) != required:
+            raise ValueError('invalid captured source')
+        from .operation_context import InvocationScope
+        InvocationScope(**record['scope'])
+        draft = EvidenceDraftV1.from_dict({key: record[key] for key in ('sourceKey', 'sourceRevision', 'locator', 'selector', 'label')})
+        if record['id'] != 'ev_' + digest({k: v for k, v in record.items() if k != 'id'}) or record['id'] in records:
+            raise ValueError('invalid captured source identity')
+        call = calls.get(record['callId'])
+        if call is None or any(call[key] != record[key] for key in ('callIndex', 'toolName', 'toolVersion', 'argumentsSha256')):
+            raise ValueError('missing captured source origin')
+        outcome = call['outcome']
+        if type(outcome) is not dict or outcome.get('status') != 'ok':
+            raise ValueError('missing captured source body')
+        value = outcome.get('result')
+        if type(value) is not dict or value.get('version') != 1 or draft.to_dict() not in value.get('sources', []):
+            raise ValueError('missing captured source declaration')
+        selected = select_pointer(value['data'], record['selector'])
+        if (record['contentKind'] != 'json' or record['contentSha256'] != digest(selected) or
+                record['contentBytes'] != len(encode_owned(selected)) or record['bodySha256'] != digest(value['data']) or
+                record['observation'] != ('journalReplay' if call['status'] == 'replayed' else 'callResult')):
+            raise ValueError('captured source mismatch')
+        records[record['id']] = record
+    for evidence_id, deliveries in document['deliveries'].items():
+        if evidence_id not in records or type(deliveries) is not list or not deliveries:
+            raise ValueError('invalid source delivery')
+        for delivery in deliveries:
+            if type(delivery) is not dict or set(delivery) != {'requestId', 'inputSha256'}:
+                raise ValueError('invalid delivery record')
+            reference(delivery['requestId'])
+            if type(delivery['inputSha256']) is not str or len(delivery['inputSha256']) != 64 or any(c not in '0123456789abcdef' for c in delivery['inputSha256']):
+                raise ValueError('invalid delivery digest')
+    return document

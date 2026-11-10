@@ -27,7 +27,8 @@ def failure_code(result):
         'tool_identity_conflict': 'toolEffectUncertain', 'tool_recovery_blocked': 'toolFailure',
         'incomplete_generation': 'incompleteGeneration',
         'incomplete_response': 'incompleteGeneration', 'outputLimit': 'outputLimit',
-        'ruleViolation': 'ruleViolation'}.get(
+        'ruleViolation': 'ruleViolation', 'citationViolation': 'citationViolation',
+        'evidenceUseDenied': 'evidenceUseDenied', 'invalidToolResult': 'invalidToolResult'}.get(
             reason, 'timeout' if result.timed_out else 'providerFailure')
 
 
@@ -222,6 +223,12 @@ class TurnCapture:
                     'failureCode': code, 'accounting': attribution if type(attribution) is dict else None}
         if self.input_views is not None:
             document.update(version=2,inputViews=self.input_views)
+        from .tool_event_contract import current_registry
+        registry = current_registry()
+        if registry is not None:
+            document.update(version=3, inputViews=self.input_views, toolContractV1=dict(
+                bindings=registry.bindings.to_dict(), evidence=registry.to_dict(),
+                citations=registry.citations.to_dict() if registry.citations is not None else None))
         try:
             encode_owned(document, max_bytes=self.limits.max_evidence_bytes,
                          max_depth=self.limits.max_json_depth, max_nodes=self.limits.max_json_nodes)

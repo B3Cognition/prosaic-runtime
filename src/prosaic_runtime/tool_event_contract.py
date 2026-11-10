@@ -23,6 +23,23 @@ def current_registry():
     return _registry.get()
 
 
+def tool_contract_preparation(function):
+    """Preparation binds descriptors only and cannot authorize a model delivery."""
+    @wraps(function)
+    def prepare(*args, **kwargs):
+        bindings = kwargs.get('tool_contract_bindings')
+        if bindings is not None:
+            if type(bindings) is not ToolContractBindingsV1:
+                raise ValueError('invalid tool contract bindings')
+            bindings.__post_init__()
+        token = _bindings.set(bindings)
+        try:
+            return function(*args, **kwargs)
+        finally:
+            _bindings.reset(token)
+    return prepare
+
+
 def tool_contract_entry(function):
     """Reset on every public entry, including nested calls without a grant."""
     @wraps(function)
@@ -44,7 +61,8 @@ def tool_contract_entry(function):
             result = function(*args, **kwargs)
             if registry is not None:
                 target = result.result if hasattr(result, 'result') else result
-                target.metadata['tool_contract_v1'] = registry.to_dict()
+                if not hasattr(result, 'evidence'):
+                    target.metadata['tool_contract_v1'] = registry.to_dict()
                 if registry.citations is not None:
                     target.metadata['citations_v1'] = registry.citations.to_dict()
             return result

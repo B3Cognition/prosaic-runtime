@@ -54,7 +54,7 @@ class ExecutionBackend:
         from .tool_event_contract import current_registry
         evidence_registry = current_registry()
         citation_policy = evidence_registry.bindings.citations if evidence_registry is not None else None
-        if citation_policy is not None:
+        if citation_policy is not None and initial_messages is None:
             from .citations import CITATION_INSTRUCTIONS
             messages = list(messages)
             messages.insert(0, {'role': 'system', 'content': CITATION_INSTRUCTIONS})
