@@ -373,10 +373,28 @@ class ExecutionBackend:
                             pass
                         raise
                     executed = tool_message
-                    if hooks is not None and refusal is None:
-                        # The model and history see the checked result; events,
-                        # conformance and effect evidence keep what actually ran.
-                        tool_message = hooks.after_tool(tool_call, executed)
+                    from .tool_event_contract import current_registry
+                    evidence_registry = current_registry()
+                    checked_event = None
+                    try:
+                        if hooks is not None and refusal is None:
+                            # Raw completion remains private; guards check the logical data.
+                            tool_message = hooks.after_tool(tool_call, executed)
+                        registered = getattr(registry, 'custom', {}).get(tool_name)
+                        if evidence_registry is not None and tool_message is not STOP:
+                            checked_payload = json.loads(tool_message['content'])
+                            if registered is not None and registered.result_contract is not None and refusal is None:
+                                from .tool_evidence import digest
+                                checked_payload = evidence_registry.stage(registered, json.loads(executed['content']),
+                                    checked_payload, call_id=registry.last_contract_call_id,
+                                    call_index=registry.last_contract_call_index,
+                                    arguments_sha256=digest(json.loads(tool_call['function']['arguments'])),
+                                    replayed=registry.last_outcome.replayed)
+                                tool_message = {**tool_message, 'content': json.dumps(checked_payload, ensure_ascii=False, allow_nan=False)}
+                            checked_event = checked_payload
+                    finally:
+                        if evidence_registry is not None:
+                            evidence_registry.finish_event(getattr(registry, 'last_contract_call_id', None), checked_event)
                     if turn_capture is not None and tool_message is not STOP:
                         turn_capture.tool(tool_call, tool_message)
                     tool_payload = json.loads(executed["content"])

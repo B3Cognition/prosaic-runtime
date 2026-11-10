@@ -207,34 +207,54 @@ def bounded_result(value, maximum, *, on_outcome=None):
 def execute_custom_tool(tool, raw_arguments, *, check_boundary, scope=None,
                         deadline=None, cancelled=lambda: False, call_index=0, tool_journal=None,
                         on_completion=None, accounting_context=None, on_outcome=None,
-                        on_terminal=None, tool_contract_bindings=None, _event_call_id=None, _event_exchange=0):
-    from .tool_event_contract import current_bindings, managed_events, ToolEventLifecycle
-    bindings = tool_contract_bindings or current_bindings()
+                        on_terminal=None, tool_contract_bindings=None, _event_call_id=None, _event_exchange=0,
+                        _defer_event=False):
+    from .tool_event_contract import current_bindings, current_registry, managed_events, ToolEventLifecycle, call_identity
+    bindings, registry = tool_contract_bindings or current_bindings(), current_registry()
     options = dict(check_boundary=check_boundary, scope=scope, deadline=deadline, cancelled=cancelled,
         call_index=call_index, tool_journal=tool_journal, on_completion=on_completion,
         accounting_context=accounting_context, on_outcome=on_outcome, on_terminal=on_terminal)
-    if not managed_events(tool, bindings):
+    manage = managed_events(tool, bindings)
+    capture = registry is not None and tool.result_contract is not None
+    if not manage and not capture:
         return _execute_custom_tool(tool, raw_arguments, **options)
     bindings.__post_init__()
     if scope != bindings.scope:
         raise ValueError('tool contract scope mismatch')
-    lifecycle = ToolEventLifecycle(tool, bindings, call_index, call_id=_event_call_id, exchange=_event_exchange)
+    call_id = _event_call_id or call_identity(scope, _event_exchange, call_index)
+    lifecycle = ToolEventLifecycle(tool, bindings, call_index, call_id=call_id, exchange=_event_exchange) if manage else None
+    known = [None, None]
+    queued = False
     def report(outcome):
-        lifecycle.outcome = outcome
+        if lifecycle is not None:
+            lifecycle.outcome = outcome
         if on_outcome is not None:
             on_outcome(outcome)
     def complete(outcome, status='completed', **refs):
+        known[:] = outcome, status
         # Persist known completion before a critical event sink can fail.
         if on_completion is not None:
             on_completion(outcome, status, **refs)
-        lifecycle.finish(outcome, status)
-    options.update(on_outcome=report, on_completion=complete, _before_handler=lifecycle.start)
+        if capture:
+            arguments = parse_arguments(raw_arguments, tool.parameters, tool.max_argument_bytes)
+            registry.capture_completion(tool, outcome, call_id=call_id, call_index=call_index,
+                arguments_sha256=hashlib.sha256(canonical_json(arguments).encode()).hexdigest(), status=status)
+        if lifecycle is not None and not _defer_event:
+            lifecycle.finish(outcome, status)
+    options.update(on_outcome=report, on_completion=complete,
+        _before_handler=lifecycle.start if lifecycle is not None else None)
     try:
         result = _execute_custom_tool(tool, raw_arguments, **options)
-        lifecycle.finish(result)
+        if lifecycle is not None:
+            if _defer_event and registry is not None:
+                registry._pending_events[call_id] = lifecycle
+                queued = True
+            else:
+                lifecycle.finish(result, known[1])
         return result
     finally:
-        lifecycle.finish(status='uncertain' if lifecycle.started_at is not None else None)
+        if lifecycle is not None and not queued:
+            lifecycle.finish(known[0], known[1] or ('uncertain' if lifecycle.started_at is not None else None))
 
 
 def _execute_custom_tool(tool, raw_arguments, *, check_boundary, scope=None,

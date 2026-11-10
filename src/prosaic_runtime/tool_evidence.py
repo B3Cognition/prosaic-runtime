@@ -63,6 +63,20 @@ class EvidenceRegistryV1:
         self._projections = {}
         self._tickets = {}
         self._delivered = {}
+        self._calls = {}
+        self._pending_events = {}
+
+    def capture_completion(self, tool, outcome, *, call_id, call_index, arguments_sha256, status):
+        record = dict(callId=call_id, callIndex=call_index, toolName=tool.name, toolVersion=tool.version,
+            argumentsSha256=arguments_sha256, status=status, outcome=outcome)
+        candidate = {**self._calls, call_id: record}
+        encode_owned(candidate, max_bytes=self.bindings.limits.max_evidence_bytes)
+        self._calls = owned(candidate)
+
+    def finish_event(self, call_id, checked=None):
+        event = self._pending_events.pop(call_id, None)
+        if event is not None:
+            event.finish(checked)
 
     def _authorize(self, record, purpose):
         grant = self.bindings.evidence_authorizer
@@ -198,7 +212,7 @@ class EvidenceRegistryV1:
         return EligibleEvidenceV1(document, 'runtimeObserved', _seal=_SEAL)
 
     def to_dict(self):
-        return owned(dict(version=1, records=list(self._records.values()), deliveries=self._delivered),
+        return owned(dict(version=1, records=list(self._records.values()), deliveries=self._delivered, calls=list(self._calls.values())),
             self.bindings.limits.max_evidence_bytes)
 
 

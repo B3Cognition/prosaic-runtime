@@ -12,10 +12,15 @@ from .tool_result_contract import select_pointer
 from .tool_outcomes import ToolOutcome
 
 _bindings = ContextVar('prosaic_tool_contract_bindings', default=None)
+_registry = ContextVar('prosaic_tool_evidence_registry', default=None)
 
 
 def current_bindings():
     return _bindings.get()
+
+
+def current_registry():
+    return _registry.get()
 
 
 def tool_contract_entry(function):
@@ -32,9 +37,17 @@ def tool_contract_entry(function):
                 raise ValueError('tool contract scope mismatch')
             kwargs['operation_context'] = bindings.scope
         token = _bindings.set(bindings)
+        from .tool_evidence import EvidenceRegistryV1
+        registry = EvidenceRegistryV1(bindings) if bindings is not None else None
+        registry_token = _registry.set(registry)
         try:
-            return function(*args, **kwargs)
+            result = function(*args, **kwargs)
+            if registry is not None:
+                target = result.result if hasattr(result, 'result') else result
+                target.metadata['tool_contract_v1'] = registry.to_dict()
+            return result
         finally:
+            _registry.reset(registry_token)
             _bindings.reset(token)
     return invoke
 
@@ -125,6 +138,9 @@ class ToolEventLifecycle:
         if self.finished or self.sink_failed:
             return
         self.finished = True
+        if outcome is not None:
+            self.outcome = ToolOutcome('ok' if outcome.get('status') == 'ok' else self.outcome.code,
+                status == 'replayed' or self.outcome.replayed)
         phase = ('replayed' if self.outcome.replayed else 'uncertain' if status == 'uncertain' else
                  'completed' if self.started_at is not None else 'rejected')
         data = None

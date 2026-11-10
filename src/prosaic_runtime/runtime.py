@@ -16,6 +16,8 @@ from .effort_evidence import EffortTrace, http_attempt, attach, KEY as EFFORT_KE
 from .effort import api_default_effort
 from .events import Cancelled, check_cancelled, event_context, emit
 from .tool_event_contract import tool_contract_entry
+from .tool_evidence import EvidenceUseDenied
+from .tool_result_contract import ToolResultValidationError
 from .openai_compatible import OpenAICompatibleBackend
 from .anthropic import AnthropicBackend
 from .admission import validate_execution_artifact
@@ -251,10 +253,19 @@ class _BoundedMixin:
             request.add_header("X-Client-Request-Id", call_id)
         accepted = False
         opener = urllib.request.build_opener(_NoRedirect())
+        from .tool_event_contract import current_registry
+        evidence_registry = current_registry()
+        ticket = (evidence_registry.prepare_delivery(None, encoded_bytes=request.data)
+                  if evidence_registry is not None else None)
+        delivery_id = None
         def dispatch(timeout):
+            nonlocal delivery_id
             row = http_attempt(request.data, backend=self._config.provider, profile=self.effort_profile,
                 call_id=request.get_header('X-client-request-id'), requested=self.requested_effort,
                 configured=self.configured_effort)
+            if ticket is not None:
+                delivery_id = request.get_header('X-client-request-id') or uuid4().hex
+                evidence_registry.begin_delivery(ticket, delivery_id)
             timeout = self.before_http_dispatch(timeout)
             self.effort_trace.add(row)
             return timeout
@@ -268,6 +279,8 @@ class _BoundedMixin:
             accepted = True
             with response:
                 status = response.status
+                if ticket is not None:
+                    evidence_registry.confirm_delivery(ticket, delivery_id)
                 yield response
             outcome = 'timed_out' if self._stream_timed_out else 'completed'
         except Cancelled:
@@ -1006,6 +1019,10 @@ class ProsaicRuntime:
                 if _terminal_capture.evidence is not None:
                     backend.check_boundary()
                 return result
+            except EvidenceUseDenied:
+                return Result(1, '', 'evidenceUseDenied', metadata={'failure_reason': 'evidenceUseDenied'})
+            except ToolResultValidationError:
+                return Result(1, '', 'invalidToolResult', metadata={'failure_reason': 'invalidToolResult'})
             except TurnOutputExceeded:
                 return Result(1, '', 'outputLimit', metadata={'failure_reason': 'outputLimit'})
             except InvalidToolRequest:
