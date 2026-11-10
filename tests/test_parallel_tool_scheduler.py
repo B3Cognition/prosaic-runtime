@@ -70,3 +70,29 @@ def test_declared_output_capacity_rejects_before_any_callback():
     with pytest.raises(ValueError,match='parallel result capacity'):coord.execute(calls)
     assert not seen and not dispatch.callback_threads and dispatch.budget.tool_calls==0
     assert dispatch.budget._pending_tool_calls==0
+
+
+def test_reduced_windows_release_settlement_payloads():
+    snapshots=[];calls=tuple(call(i) for i in range(4));policy=ParallelToolPolicyV1(max_concurrency=1,max_buffered_result_bytes=5632)
+    def reduce(c,s):snapshots.append(sum(len(r._encoded or b'') for r in coord._results.values()));return s.outcome
+    coord,_=coordinator({'lookup':tool('lookup',lambda a,c:'x'*3900,max_result_bytes=4096)},calls,policy=policy,reduce=reduce)
+    assert len(coord.execute(calls).messages)==4
+    assert max(snapshots)<=policy.max_buffered_result_bytes and coord._results=={}
+
+
+def test_unicode_journal_settlement_keeps_declared_encoded_bound():
+    from test_parallel_tool_recovery import Journal
+    sizes=[];calls=(call(0),);policy=ParallelToolPolicyV1(max_concurrency=1,max_buffered_result_bytes=5632)
+    coord,_=coordinator({'lookup':tool('lookup',lambda a,c:'é'*1900,max_result_bytes=4096,operation_key=lambda a,c:'key')},calls,policy=policy,journal=Journal(),reduce=lambda c,s:sizes.append(len(s._encoded)) or s.outcome)
+    assert coord.execute(calls).messages[0]['result']=='é'*1900
+    assert sizes[0]<=4096 and coord._results=={}
+
+
+def test_next_window_has_no_unneeded_previous_encoded_settlement():
+    import weakref
+    refs=[];retained=[];calls=(call(0),call(1))
+    def read(a,c):retained.append(sum(ref() is not None for ref in refs));return {'ok':True}
+    def reduce(c,s):refs.append(weakref.ref(s));return s.outcome
+    coord,_=coordinator({'lookup':tool('lookup',read)},calls,policy=ParallelToolPolicyV1(max_concurrency=1),reduce=reduce)
+    assert len(coord.execute(calls).messages)==2
+    assert retained==[0,0]

@@ -170,7 +170,7 @@ class ParallelRegistryDispatch:
         ident,call_index=self.identity(call,index)
         if options['call_index']!=call_index:raise ValueError('parallel call index mismatch')
         frame=dict(call=call,outcome=ToolOutcome('unclassified'),id=ident,index=call_index,
-            refusal=self.hooks.refusal(call) if self.hooks is not None else None,state={},manager=None)
+            refusal=self.hooks.refusal(call) if self.hooks is not None else None,state={},manager=None,owner_cancelled=options.get('cancelled',lambda:False))
         def report(outcome):frame['outcome']=outcome
         complete=options.get('on_completion')
         def capture(outcome,status='completed',**refs):
@@ -225,6 +225,8 @@ class ParallelRegistryDispatch:
         from .tool_dispatch import WorkerSettlementV1
         from .events import emit
         frame,options=self._frame(call,permit,batch_index,cancelled)
+        owner_cancelled=frame['owner_cancelled']
+        options['cancelled']=lambda:cancelled() or owner_cancelled()
         options.pop('on_outcome',None)
         options.pop('check_boundary',None)
         clone=BoundedToolRegistry(self.registry.builtin,self.custom,self.registry.allowed,self.registry.check_boundary,
@@ -256,6 +258,16 @@ class ParallelRegistryDispatch:
         self.registry.last_outcome=frame['outcome']
         self.registry.last_contract_call_id=frame['id']
         self.registry.last_contract_call_index=frame['index']
+
+    def release(self,index):
+        frame=self.frames.pop(index,None);self.options.pop(index,None)
+        if frame is not None:
+            manager=frame.get('manager')
+            if manager is not None:manager.release()
+            frame.clear()
+
+    def release_all(self):
+        for index in tuple(self.frames):self.release(index)
 
     def message(self,call,settlement):
         return dict(role='tool',tool_call_id=call['id'],content=json.dumps(settlement.outcome,allow_nan=False))

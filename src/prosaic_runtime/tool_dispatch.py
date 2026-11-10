@@ -69,8 +69,14 @@ def _complete(options, outcome, status='completed', **refs):
 
 
 def _settlement(call_id, call_index, batch_index, code, outcome=None, **kw):
-    return WorkerSettlementV1(call_id, call_index, batch_index, code,
-        json.dumps(outcome, allow_nan=False).encode() if outcome is not None else None, **kw)
+    encoded=None
+    if outcome is not None:
+        try:encoded=json.dumps(outcome,ensure_ascii=False,separators=(',',':'),allow_nan=False).encode('utf-8')
+        except UnicodeEncodeError:
+            # Legacy ordinary results may contain escaped lone surrogates; their
+            # admission already charges the ASCII encoding against the tool cap.
+            encoded=json.dumps(outcome,separators=(',',':'),allow_nan=False).encode('utf-8')
+    return WorkerSettlementV1(call_id,call_index,batch_index,code,encoded,**kw)
 
 
 def prepare_custom_tool_call(tool, raw_arguments, *, call_id, call_index, batch_index, options):

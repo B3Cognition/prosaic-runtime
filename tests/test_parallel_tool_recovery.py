@@ -203,3 +203,13 @@ def test_same_key_replay_rechecks_permission_after_owned_wait():
     result=coord.execute(calls)
     assert seen==[1] and result.messages[1]['error']=='authorization_denied'
     assert coord.evidence['calls'][1]['state']=='notStarted' and len(checks)==3
+
+
+def test_observation_fault_precedes_proven_controlled_recovery_stop():
+    from prosaic_runtime import ToolFailure
+    def event(kind,**data):
+        if kind=='tool_execution_settled':raise RuntimeError('settlement observer')
+    calls=(call(0),);coord,dispatch=coordinator({'lookup':tool('lookup',lambda a,c:ToolFailure('not_found'))},calls,event=event)
+    dispatch.bounded_recovery=True
+    with pytest.raises(RuntimeError,match='settlement observer'):coord.execute(calls)
+    assert dispatch.completed[0][2]=='completed'

@@ -90,3 +90,42 @@ def test_unmarked_barrier_unknown_result_stops_later_parallel_window():
         queue_json(fx,[wire_call('a',name='barrier',arguments='{"i":0}'),wire_call('b',arguments='{"i":1}')]);fx.queue_text('unused')
         result=fx.runtime.run(agent,policy=policy,tool_contract_bindings=bindings())
         assert result.exit_code!=0 and seen==['barrier'] and len(fx.requests)==1
+
+
+@pytest.mark.parametrize('provider',['openai-compatible','anthropic'])
+@pytest.mark.parametrize('concurrency',[1,2])
+def test_bounded_recovery_stops_after_controlled_failure_and_drains_window(provider,concurrency):
+    with ConversationFixture(provider) as fx:
+        seen=[];gate=Barrier(2)
+        def read(a,c):
+            seen.append(a['i'])
+            if concurrency==2:gate.wait(timeout=2)
+            return api.ToolFailure('not_found') if a['i']==0 else a
+        policy=configure(fx,read)
+        policy=replace(policy,bounded_tool_recovery=True,parallel_tools=api.ParallelToolPolicyV1(max_concurrency=concurrency))
+        n=2 if concurrency==1 else 3
+        queue_json(fx,[wire_call(str(i),arguments=json.dumps({'i':i})) for i in range(n)]);fx.queue_text('unused')
+        turn=fx.runtime.turn(fx.agent,message='Review',policy=policy,tool_contract_bindings=bindings())
+        assert turn.result.exit_code!=0 and sorted(seen)==list(range(concurrency)) and len(fx.requests)==1
+        calls=turn.evidence.to_dict()['parallelToolsV1']['schedule']['batches'][0]['calls']
+        assert calls[0]['state']=='completed' and calls[0]['outcomeCode']=='controlled_failure'
+        assert calls[concurrency]['state']=='notStarted'
+        assert len(turn.evidence.to_dict()['toolOutcomes'])==concurrency
+
+
+@pytest.mark.parametrize('provider',['openai-compatible','anthropic'])
+def test_unmarked_serial_barrier_observes_owner_cancellation(provider):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+    with ConversationFixture(provider) as fx:
+        entered=Event();release=Event();cancel=Event();seen=[]
+        def read(a,c):entered.set();assert release.wait(3);seen.append(c.cancelled());return a
+        policy=configure(fx,read)
+        original=fx.tools['lookup'];fx.tools['lookup']=api.CustomTool(original.name,original.description,original.parameters,read,'1',with_context=True)
+        queue_json(fx,[wire_call('a',arguments='{"i":0}')]);fx.queue_text('unused')
+        with ThreadPoolExecutor(1) as pool:
+            future=pool.submit(fx.runtime.run,fx.agent,policy=policy,tool_contract_bindings=bindings(),cancelled=cancel.is_set)
+            try:assert entered.wait(2);cancel.set()
+            finally:release.set()
+            result=future.result(timeout=4)
+        assert seen==[True] and result.exit_code!=0 and len(fx.requests)==1

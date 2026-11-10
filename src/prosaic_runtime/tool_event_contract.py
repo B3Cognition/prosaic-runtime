@@ -241,3 +241,9 @@ class ManagedToolCallV1:
         if self.lifecycle is not None and not self.queued:
             self.lifecycle.finish(None if self.parallel else self.known[0],
                 self.known[1] or ('uncertain' if self.lifecycle.started_at is not None else None))
+
+    def release(self):
+        if self.registry is not None:self.registry._pending_events.pop(self.call_id,None)
+        self.known[:]=[None,None]
+        self.options.clear();self._original.clear()
+        self.lifecycle=None;self.registry=None;self.raw=None

@@ -134,8 +134,11 @@ class ParallelToolCoordinator:
         try:settlement=self.dispatch.settle(slot.prepared,settlement)
         except BaseException as exc:self._failure(exc,slot.index)
         else:
-            if ToolOutcome(settlement.code,settlement.replayed).to_dict()['effect']=='unknown':
+            outcome=ToolOutcome(settlement.code,settlement.replayed).to_dict()
+            if outcome['effect']=='unknown':
                 self._failure(ToolEffectFailure('tool_effect_uncertain'),slot.index)
+            elif getattr(self.dispatch,'bounded_recovery',False) and outcome['recovery'] in {'stop','reconcile'}:
+                self._failure(ToolEffectFailure('tool_recovery_blocked'),slot.index)
         self._results[slot.index]=settlement
         self._record(slot.index,settlement,slot.prepared)
         if slot.prepared.operation_key is not None:
@@ -161,7 +164,7 @@ class ParallelToolCoordinator:
     def _raise_failure(self):
         def rank(item):
             index,error=item
-            priority=0 if isinstance(error,ToolEffectFailure) else 2 if isinstance(error,(Cancelled,ToolDeadlineExceeded)) else 1
+            priority=(3 if error.reason=='tool_recovery_blocked' else 0) if isinstance(error,ToolEffectFailure) else 2 if isinstance(error,(Cancelled,ToolDeadlineExceeded)) else 1
             return priority,index
         raise min(self._errors,key=rank)[1]
 
@@ -242,8 +245,12 @@ class ParallelToolCoordinator:
                         self._failure(ToolEffectFailure('tool_effect_uncertain'),index)
                     if self._errors:self._raise_failure()
                 for index in indices:
-                    result=self._results[index];self.dispatch.restore(calls[index],result)
-                    yield calls[index],result
+                    result=self._results.pop(index);self.dispatch.restore(calls[index],result)
+                    try:yield calls[index],result
+                    finally:
+                        release=getattr(self.dispatch,'release',None)
+                        if release is not None:release(index)
+                        del result
         finally:self.close()
 
     def execute(self,calls):
@@ -255,6 +262,7 @@ class ParallelToolCoordinator:
                 message=self.reduce(call,settlement)
                 if message is STOP:stopped=True;break
                 messages.append(message)
+                del settlement
         finally:iterator.close()
         return ParallelBatchResultV1(tuple(messages),stopped,None,self.evidence)
 
@@ -266,4 +274,7 @@ class ParallelToolCoordinator:
             self._drain()
         finally:
             if self._pool is not None:self._pool.shutdown(wait=True,cancel_futures=True)
+            self._results.clear()
+            release_all=getattr(self.dispatch,'release_all',None)
+            if release_all is not None:release_all()
             self.reservation.release_unstarted();self._closed=True
