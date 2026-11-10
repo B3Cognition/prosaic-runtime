@@ -417,6 +417,7 @@ class ProsaicRuntime:
     capabilities |= frozenset({'guard_input_views_v1'})
     capabilities |= frozenset({'frozen_turn_inputs_v1'})
     capabilities |= frozenset({'context_input_variants_v1'})
+    capabilities |= frozenset({'tool_events_v1', 'tool_results_v1', 'citations_v1'})
     def __init__(self, config: RuntimeConfig, *, source=".prosaic", executable="prosaic", custom_tools=None,
                  accounting=None, context_defaults=None, lifecycle=None, guards=None, allow_unbound_guards=False):
         self.lifecycle = lifecycle if lifecycle is not None else ExecutionLifecycle()
@@ -867,6 +868,11 @@ class ProsaicRuntime:
                     refuse_unenforced(artifact)
                 validate_execution_artifact(artifact, config)
                 requested = requested_tools(artifact.frontmatter.get("tools"))
+                from .tool_contracts import admit_tool_contracts
+                from .tool_event_contract import current_bindings
+                admit_tool_contracts(custom, requested, current_bindings())
+                if current_bindings() is not None and (policy.max_provider_requests is None or policy.max_tool_calls is None):
+                    raise ValueError('tool contracts require finite attempt caps')
                 admit_tool_effects(custom, requested, _operation_context, _tool_journal)
                 unsupported = requested - BUILTIN_TOOLS - custom.keys()
                 if unsupported:

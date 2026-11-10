@@ -319,3 +319,13 @@ def validate_bindings_document(value):
     if value['retained'] != []:
         raise ValueError('unverified retained imports')
     return value
+
+
+def admit_tool_contracts(tools, names, bindings, *, automatic_citations=True):
+    if bindings is not None:
+        bindings.__post_init__()
+        if bindings.citations is not None and (not automatic_citations or any(tools[n].terminal for n in names if n in tools)):
+            raise ValueError('unsupported automatic citations')
+    if any(tools[n].result_contract is not None for n in names if n in tools):
+        if bindings is None or bindings.evidence_authorizer is None:
+            raise ValueError('typed tool results require evidence bindings')

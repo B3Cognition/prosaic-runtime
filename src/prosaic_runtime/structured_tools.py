@@ -17,8 +17,9 @@ from .operation_context import InvocationScope
 from .tool_effects import admit_tool_effects, ToolEffectFailure
 from .tool_outcomes import ToolOutcome
 from .telemetry import ObserverEmitter, observation_context
-from .tool_event_contract import managed_events
-from .tool_contracts import ToolContractBindingsV1
+from .tool_event_contract import managed_events, tool_contract_session, call_identity
+from .tool_contracts import ToolContractBindingsV1, admit_tool_contracts
+from .tool_evidence import EvidenceRegistryV1, ToolInvocationEvidenceV1, digest
 from .tools import (ToolDeadlineExceeded, depth, execute_custom_tool, parse_arguments, reject_constant,
                     unique_pairs, validate_custom_tools)
 
@@ -60,6 +61,8 @@ class StructuredToolLoop:
                 raise ValueError('tool contract scope mismatch')
             operation_context = tool_contract_bindings.scope
         self.tool_contract_bindings = tool_contract_bindings
+        admit_tool_contracts(self.tools, self.allowed_tools, tool_contract_bindings, automatic_citations=False)
+        self._evidence = EvidenceRegistryV1(tool_contract_bindings) if tool_contract_bindings is not None else None
         self.operation_context = InvocationScope(str(uuid4())) if operation_context is None else operation_context
         admit_tool_effects(self.tools, self.allowed_tools, self.operation_context, tool_journal)
         self.tool_journal = tool_journal
@@ -137,7 +140,7 @@ class StructuredToolLoop:
                 self.emitter.emit('tool_completed', name=request.name, status=status,
                                   tool_outcome=terminal.to_dict())
         try:
-            with observation_context(self.emitter, self.tools), event_context(self.on_event, self.cancelled):
+            with observation_context(self.emitter, self.tools), event_context(self.on_event, self.cancelled), tool_contract_session(self.tool_contract_bindings, self._evidence):
                 outcome = execute_custom_tool(tool, raw, check_boundary=self.check_boundary,
                     scope=self.operation_context, deadline=self.deadline, cancelled=self.cancelled,
                     call_index=index, tool_journal=self.tool_journal, on_outcome=capture,
@@ -152,10 +155,24 @@ class StructuredToolLoop:
         if outcome['status'] != 'ok':
             completed('error')
             raise StructuredToolError('tool-' + outcome['error'])
+        if self._evidence is not None and tool.result_contract is not None:
+            outcome = self._evidence.stage(tool, outcome, outcome, call_id=call_identity(self.operation_context, 0, index),
+                call_index=index, arguments_sha256=digest(args), replayed=terminal.replayed)
         if not managed_event:
             self.on_event({'type': 'tool_complete', 'name': request.name})
         completed('ok')
         return {'name': request.name, 'arguments': args}, outcome['result']
+
+    @property
+    def evidence(self):
+        if self._evidence is None:
+            raise ValueError('tool contracts are disabled')
+        return ToolInvocationEvidenceV1(self._evidence)
+
+    def attest_delivery(self, attestation):
+        if self._evidence is None:
+            raise ValueError('tool contracts are disabled')
+        return self._evidence.host_attested(attestation)
 
     def turns(self, *, admit, tool_outcome=lambda name, data: None, feedback=None):
         """Yield bounded JSON arguments, accepting Runtime Results via generator.send.

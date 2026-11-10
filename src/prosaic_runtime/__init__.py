@@ -1,5 +1,5 @@
 """Execute neutral Prosaic artifacts with explicitly granted authority."""
-__version__ = '0.9.19'
+__version__ = '0.9.20.dev1'
 
 from .artifacts import ProsaicArtifact
 from .config import EndpointConfig, RuntimeConfig, RunLimits, CliSandboxConfig
@@ -84,3 +84,6 @@ from .unified import UnifiedRuntime
 __all__ += ["PoolPolicy", "UnifiedRuntimeConfig", "UnifiedRuntime"]
 from .citations import CitationsV1, CitationViolation, validate_citations
 from .tool_evidence import ToolInvocationEvidenceV1, EligibleEvidenceV1
+from .tool_evidence import HostDeliveryAttestationV1
+__all__ += ['CitationsV1', 'CitationViolation', 'validate_citations', 'ToolInvocationEvidenceV1',
+            'EligibleEvidenceV1', 'HostDeliveryAttestationV1']

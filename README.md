@@ -1,5 +1,8 @@
 # Prosaic Runtime
 
+This development branch adds [safe tool events and citations](docs/tool-events-citations.md).
+The new APIs are candidate-only; no new stable release has been published.
+
 Runtime **0.9.19** supplies [profiled context inputs](docs/context-packs.md) for
 Harness context packs: separate model and private validation views, bounded
 evidence fitting, and frozen turn restoration. Harness **0.9.13** owns named

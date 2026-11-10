@@ -18,6 +18,8 @@ from .tools import ToolDeadlineExceeded, depth, execute_custom_tool, parse_argum
 from .types import Result
 from .effort_evidence import EffortTrace, KEY as EFFORT_KEY
 from .tool_event_contract import managed_events
+from .tool_event_contract import current_bindings, current_registry, call_identity
+from .tool_contracts import admit_tool_contracts
 
 
 def run_tool(runtime, name, arguments, *, policy=None, cwd='.', on_event=None,
@@ -26,6 +28,7 @@ def run_tool(runtime, name, arguments, *, policy=None, cwd='.', on_event=None,
     # Snapshot authority before any observer or trusted callback can change it.
     config, custom, cli = runtime.config, dict(runtime._custom_tools), frozenset(runtime._cli_tools)
     grants = frozenset(config.allowed_tools)
+    admit_tool_contracts(custom, {name} if type(name) is str else (), current_bindings(), automatic_citations=False)
     policy = policy if policy is not None else RunPolicy(timeout_s=config.limits.timeout_s,
                                                         max_tool_rounds=config.limits.max_tool_rounds)
     if type(policy) is not RunPolicy:
@@ -115,6 +118,11 @@ def run_tool(runtime, name, arguments, *, policy=None, cwd='.', on_event=None,
                     deadline=deadline, cancelled=cancelled if cancelled is not None else lambda: False,
                     call_index=0, tool_journal=tool_journal, accounting_context=resolved,
                     on_outcome=record_outcome)
+                registry = current_registry()
+                if tool.result_contract is not None and registry is not None:
+                    from .tool_evidence import digest
+                    payload = registry.stage(tool, payload, payload, call_id=call_identity(scope, 0, 0),
+                        call_index=0, arguments_sha256=digest(arguments), replayed=outcome.replayed)
                 result = (finish(value=payload['result']) if payload['status'] == 'ok'
                           else finish(payload['error']))
         except Cancelled:

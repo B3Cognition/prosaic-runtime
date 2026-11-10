@@ -120,3 +120,9 @@ assertion that the requested business operation succeeded. NEVER return this typ
 for an unknown effect. ALWAYS leave generic exceptions and lost acknowledgements
 on the uncertain-effect path. Ordinary returned dictionaries remain successful
 JSON data and are not interpreted as this explicit failure contract.
+# Typed results and provenance
+
+The development result contract validates private data/source declarations before
+journal commit and revalidates replay. Later evidence authorization, event display
+or citation failures never rerun a completed effect. The journal outer frame and
+`ToolOutcome` v1 remain unchanged. See [safe tool events and citations](tool-events-citations.md).

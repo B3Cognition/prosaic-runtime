@@ -19,6 +19,22 @@ class EvidenceUseDenied(RuntimeError):
         super().__init__('evidenceUseDenied')
 
 
+@dataclass(frozen=True, init=False)
+class HostDeliveryAttestationV1:
+    scope: object
+    request_id: str
+    _encoded: bytes
+
+    def __init__(self, scope, request_id, native_payload):
+        from .operation_context import InvocationScope
+        if type(scope) is not InvocationScope:
+            raise ValueError('invalid host attestation scope')
+        scope.__post_init__(); reference(request_id)
+        object.__setattr__(self, 'scope', scope)
+        object.__setattr__(self, 'request_id', request_id)
+        object.__setattr__(self, '_encoded', encode_owned(native_payload))
+
+
 _SEAL = object()
 
 
@@ -211,6 +227,15 @@ class EvidenceRegistryV1:
             evidence_id: dict(**self._records[evidence_id], deliveries=delivery)
             for evidence_id, delivery in self._delivered.items()})
         return EligibleEvidenceV1(document, 'runtimeObserved', _seal=_SEAL)
+
+    def host_attested(self, attestation):
+        if type(attestation) is not HostDeliveryAttestationV1 or attestation.scope != self.bindings.scope:
+            raise ValueError('scoped host delivery attestation required')
+        ticket = self.prepare_delivery(None, encoded_bytes=attestation._encoded)
+        document = dict(version=1, scope=asdict(self.bindings.scope), records={evidence_id:
+            dict(**self._records[evidence_id], deliveries=[dict(requestId=attestation.request_id, inputSha256=ticket.input_sha256)])
+            for evidence_id in ticket.evidence_ids})
+        return EligibleEvidenceV1(document, 'hostAttested', _seal=_SEAL)
 
     def to_dict(self):
         return owned(dict(version=1, records=list(self._records.values()), deliveries=self._delivered, calls=list(self._calls.values())),

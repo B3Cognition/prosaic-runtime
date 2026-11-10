@@ -1,5 +1,6 @@
 """Owned, invocation-local lifecycle projections for explicitly enabled calls."""
 from contextvars import ContextVar
+from contextlib import contextmanager
 from functools import wraps
 import hashlib
 import json
@@ -21,6 +22,16 @@ def current_bindings():
 
 def current_registry():
     return _registry.get()
+
+
+@contextmanager
+def tool_contract_session(bindings, registry):
+    token, registry_token = _bindings.set(bindings), _registry.set(registry)
+    try:
+        yield
+    finally:
+        _registry.reset(registry_token)
+        _bindings.reset(token)
 
 
 def tool_contract_preparation(function):
@@ -53,6 +64,8 @@ def tool_contract_entry(function):
             if scope is not None and scope != bindings.scope:
                 raise ValueError('tool contract scope mismatch')
             kwargs['operation_context'] = bindings.scope
+            if function.__name__ == 'run_tool' and bindings.citations is not None:
+                raise ValueError('unsupported direct automatic citations')
         token = _bindings.set(bindings)
         from .tool_evidence import EvidenceRegistryV1
         registry = EvidenceRegistryV1(bindings) if bindings is not None else None
@@ -159,9 +172,11 @@ class ToolEventLifecycle:
             return
         self.finished = True
         if outcome is not None:
-            self.outcome = ToolOutcome('ok' if outcome.get('status') == 'ok' else self.outcome.code,
+            self.outcome = ToolOutcome('ok' if outcome.get('status') == 'ok' else
+                'controlled_failure' if status in {'completed', 'replayed'} and self.outcome.code == 'unclassified' else self.outcome.code,
                 status == 'replayed' or self.outcome.replayed)
-        phase = ('replayed' if self.outcome.replayed else 'uncertain' if status == 'uncertain' else
+        phase = ('replayed' if self.outcome.replayed else 'uncertain' if status == 'uncertain' or
+                 self.started_at is not None and self.outcome.to_dict()['effect'] == 'unknown' else
                  'completed' if self.started_at is not None else 'rejected')
         data = None
         if outcome is not None and outcome.get('status') == 'ok':
