@@ -283,6 +283,13 @@ def execute_custom_tool(tool, raw_arguments, *, check_boundary, scope=None,
                 on_completion(None, 'uncertain', operation_key=key, signature=signature)
             raise ToolEffectFailure('tool_effect_uncertain')
         if claim.state == 'replay':
+            if tool.result_contract is not None:
+                from .tool_result_contract import validate_tool_result_outcome
+                try:
+                    replay = validate_tool_result_outcome(tool, replay)
+                except ValueError:
+                    report('tool_journal_failed')
+                    raise ToolEffectFailure('tool_journal_failed') from None
             report('ok' if replay['status'] == 'ok' else 'controlled_failure', True)
             if on_completion is not None:
                 on_completion(replay, 'replayed', operation_key=key, signature=signature)
@@ -291,7 +298,11 @@ def execute_custom_tool(tool, raw_arguments, *, check_boundary, scope=None,
         check_boundary()
         try:
             value = invoke(tool.handler, context)
-            outcome = snapshot_outcome(failure_outcome(value), tool.max_result_bytes)
+            if tool.result_contract is not None:
+                from .tool_result_contract import normalize_tool_result
+                outcome = normalize_tool_result(tool, value)
+            else:
+                outcome = snapshot_outcome(failure_outcome(value), tool.max_result_bytes)
         except Exception:
             # Dispatch errors and unusable results cannot establish completion.
             report('tool_effect_uncertain')
@@ -331,7 +342,16 @@ def execute_custom_tool(tool, raw_arguments, *, check_boundary, scope=None,
         result = {'status': 'ok', 'result': value.output}
         report('ok')
     else:
-        result = bounded_result(value, tool.max_result_bytes, on_outcome=on_outcome)
+        if tool.result_contract is not None:
+            from .tool_result_contract import normalize_tool_result, ToolResultValidationError
+            try:
+                result = normalize_tool_result(tool, value)
+                report('ok' if result['status'] == 'ok' else 'controlled_failure')
+            except ToolResultValidationError as exc:
+                report(exc.code)
+                result = {'status': 'error', 'error': exc.code}
+        else:
+            result = bounded_result(value, tool.max_result_bytes, on_outcome=on_outcome)
     if on_completion is not None:
         on_completion(result, signature=completion_signature)
     check_boundary()
