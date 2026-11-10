@@ -14,6 +14,7 @@ from .operation_context import ToolExecutionContext, bounded_reference
 from .tool_effects import ToolEffectFailure, ToolFailure, canonical_json, snapshot_outcome, validate_claim, failure_outcome
 from .tool_outcomes import ToolOutcome
 from .terminal import TerminalCompletion, TerminalCompletionError
+from .tool_contracts import ToolResultContractV1, ToolEventPolicyV1
 
 
 class ToolDeadlineExceeded(TimeoutError):
@@ -79,10 +80,17 @@ class CustomTool:
     with_context: bool
     operation_key: Callable | None
     terminal: bool
+    result_contract: ToolResultContractV1 | None
+    event_policy: ToolEventPolicyV1 | None
 
     def __init__(self, name, description, parameters, handler, version, *,
                  max_argument_bytes=16384, max_result_bytes=65536, authorize=None,
-                 with_context=False, operation_key=None, terminal=False):
+                 with_context=False, operation_key=None, terminal=False,
+                 result_contract=None, event_policy=None):
+        if result_contract is not None and type(result_contract) is not ToolResultContractV1:
+            raise ValueError('invalid tool result contract')
+        if event_policy is not None and type(event_policy) is not ToolEventPolicyV1:
+            raise ValueError('invalid tool event policy')
         if not isinstance(name, str) or not re.fullmatch(r'[A-Za-z][A-Za-z0-9_-]{0,63}', name) or name in BUILTIN_TOOLS:
             raise ValueError('invalid or reserved custom tool name')
         for label, value, limit in [('description', description, 4096), ('version', version, 128)]:
@@ -113,7 +121,8 @@ class CustomTool:
         for key, value in dict(name=name, description=description, _schema_json=schema_json,
                                handler=handler, version=version, max_argument_bytes=max_argument_bytes,
                                max_result_bytes=max_result_bytes, authorize=authorize,
-                               with_context=with_context, operation_key=operation_key, terminal=terminal).items():
+                               with_context=with_context, operation_key=operation_key, terminal=terminal,
+                               result_contract=result_contract, event_policy=event_policy).items():
             object.__setattr__(self, key, value)
 
     @property
@@ -131,6 +140,10 @@ class CustomTool:
             descriptor['journaled'] = True
         if self.terminal:
             descriptor['terminal'] = True
+        if self.result_contract is not None:
+            descriptor['result_contract'] = self.result_contract.to_dict()
+        if self.event_policy is not None:
+            descriptor['event_policy'] = self.event_policy.to_dict()
         return descriptor
 
 
