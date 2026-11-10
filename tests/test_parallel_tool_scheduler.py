@@ -96,3 +96,12 @@ def test_next_window_has_no_unneeded_previous_encoded_settlement():
     coord,_=coordinator({'lookup':tool('lookup',read)},calls,policy=ParallelToolPolicyV1(max_concurrency=1),reduce=reduce)
     assert len(coord.execute(calls).messages)==2
     assert retained==[0,0]
+
+
+def test_serial_to_read_drops_reduced_encoded_barrier_result():
+    import weakref
+    refs=[];retained=[];calls=(call(0,'serial'),call(1))
+    def read(a,c):retained.append(refs[0]() is not None);return 'next'
+    def reduce(c,s):refs.append(weakref.ref(s));return s.outcome
+    coord,_=coordinator({'serial':tool('serial',lambda a,c:'x'*3900,parallel=False,max_result_bytes=4096),'lookup':tool('lookup',read,max_result_bytes=4096)},calls,policy=ParallelToolPolicyV1(max_concurrency=1,max_buffered_result_bytes=5632),reduce=reduce)
+    assert len(coord.execute(calls).messages)==2 and retained==[False]

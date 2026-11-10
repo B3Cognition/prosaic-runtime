@@ -243,6 +243,7 @@ class ParallelToolCoordinator:
                     self._results[index]=settlement;self._record(index,settlement)
                     if ToolOutcome(settlement.code,settlement.replayed).to_dict()['effect']=='unknown':
                         self._failure(ToolEffectFailure('tool_effect_uncertain'),index)
+                    del settlement
                     if self._errors:self._raise_failure()
                 for index in indices:
                     result=self._results.pop(index);self.dispatch.restore(calls[index],result)
