@@ -10,6 +10,10 @@ from .tool_evidence import EligibleEvidenceV1
 
 _HEX = re.compile(r'[0-9a-f]{64}\Z')
 _MARKER = re.compile(rb'\[cite:([A-Za-z0-9_-]{1,128})\]\Z')
+CITATION_INSTRUCTIONS = ('Evidence references identify captured source selections. '
+    'Cite supplied references with the exact token [cite:<id>]. Use only supplied IDs. '
+    'This syntax is reserved everywhere, including code and quoted text. '
+    'References establish provenance; they do not guarantee that a claim follows from a source.')
 
 
 class CitationViolation(RuntimeError):

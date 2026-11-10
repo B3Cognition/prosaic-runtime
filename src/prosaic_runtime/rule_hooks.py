@@ -117,7 +117,8 @@ def _same(left, right):
 
 
 class RuleHooks:
-    def __init__(self, ruleset, *, message, input_data, budget, check_boundary, authoritative_input_data=None):
+    def __init__(self, ruleset, *, message, input_data, budget, check_boundary, authoritative_input_data=None,
+                 typed_result_tools=()):
         self.ruleset = ruleset
         self.message = message
         # Encoded once per turn; each check decodes only what its guard reads, privately.
@@ -127,6 +128,8 @@ class RuleHooks:
         self.budget, self.check_boundary = budget, check_boundary
         # Results the model saw (after after_tool), each encoded once when observed.
         self.seen_results, self.seen_builtin = [], []
+        self.typed_result_tools = frozenset(typed_result_tools)
+        self.seen_contracts = []
         self.retry_used, self.retry_token, self.batch = False, None, 0
         self.refusals = {}
         self.evaluated, self.violated, self.fixed, self.faulted = set(), set(), set(), set()
@@ -167,6 +170,11 @@ class RuleHooks:
         self.evaluated.add(binding.rule_id)
         settings, paths = self._binding_facts[binding.rule_id]
         try:
+            seen_results = self.seen_results
+            if (binding.guard.name == 'value_in_tool_output' and
+                    binding.guard.version == 'value-in-tool-output-v3-tool-result-v1'):
+                seen_results = [json.dumps(json.loads(value)['data'], ensure_ascii=False, allow_nan=False)
+                    if typed else value for value, typed in zip(self.seen_results, self.seen_contracts)]
             context = GuardContext(
                 stage=stage,
                 rule_id=binding.rule_id,
@@ -176,7 +184,7 @@ class RuleHooks:
                 paths=paths,
                 user_message=self.message,
                 input_data=self._input,
-                tool_results=ToolResults(self.seen_results, self.seen_builtin),
+                tool_results=ToolResults(seen_results, self.seen_builtin),
                 authoritative_input_data=self._authoritative if binding.guard.input_access=='authoritativeAndModel' else None,
                 input_access=binding.guard.input_access,
                 **facts,
@@ -263,6 +271,16 @@ class RuleHooks:
         if cap is not None and self.budget.provider_requests >= cap:
             return False  # Never add provider requests beyond the policy.
         self.retry_used, self.retry_token = True, token
+        return True
+
+    def citation_retry(self, turn, messages):
+        """Reuse the explicit answer-rule allowance, never create another pool."""
+        if not any(b.bound and b.action == 'retry' for b in
+                self.ruleset.at('before_answer') + self.ruleset.at('final')) or not self._take_retry():
+            return False
+        messages.append({'role': 'assistant', 'content': turn.text})
+        messages.append({'role': 'user', 'content': 'The final answer failed citation validation. '
+            'Use only supplied evidence references and the reserved [cite:<id>] syntax.'})
         return True
 
     def _settle(self, bindings, stage, key, value, accept, **facts):
@@ -374,6 +392,7 @@ class RuleHooks:
         if fact is not None:
             self.seen_results.append(json.dumps(fact, ensure_ascii=False, allow_nan=False))
             self.seen_builtin.append('result' not in payload)  # Built-in results have no ``result`` key.
+            self.seen_contracts.append(name in self.typed_result_tools)
 
     def after_tool(self, call, message):
         payload = json.loads(message['content'])

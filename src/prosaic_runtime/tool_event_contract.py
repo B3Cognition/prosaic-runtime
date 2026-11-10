@@ -45,6 +45,8 @@ def tool_contract_entry(function):
             if registry is not None:
                 target = result.result if hasattr(result, 'result') else result
                 target.metadata['tool_contract_v1'] = registry.to_dict()
+                if registry.citations is not None:
+                    target.metadata['citations_v1'] = registry.citations.to_dict()
             return result
         finally:
             _registry.reset(registry_token)

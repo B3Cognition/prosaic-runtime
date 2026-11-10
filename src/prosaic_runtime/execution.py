@@ -51,6 +51,13 @@ class ExecutionBackend:
             {"role": "system", "content": self.tool_guidance()},
             {"role": "user", "content": request.prompt}
         ]
+        from .tool_event_contract import current_registry
+        evidence_registry = current_registry()
+        citation_policy = evidence_registry.bindings.citations if evidence_registry is not None else None
+        if citation_policy is not None:
+            from .citations import CITATION_INSTRUCTIONS
+            messages = list(messages)
+            messages.insert(0, {'role': 'system', 'content': CITATION_INSTRUCTIONS})
         deadline = time.monotonic() + max(0.001, request.timeout_s)
         token_usage = 0
         token_usage_details: dict[str, int] = {}
@@ -553,6 +560,21 @@ class ExecutionBackend:
                     return rule_stop()
                 if decision == RETRY:
                     continue  # Draft and unprivileged feedback were appended; budgets still apply.
+            if citation_policy is not None:
+                from .citations import citation_markers, validate_citations, CitationViolation
+                eligible = evidence_registry.eligible()
+                try:
+                    markers = citation_markers(turn.text, maximum=evidence_registry.bindings.limits.max_citations)
+                    for evidence_id in dict.fromkeys(m['evidenceId'] for m in markers):
+                        if evidence_id in eligible.ids:
+                            evidence_registry.authorize(evidence_id, 'cite')
+                    evidence_registry.citations = validate_citations(turn.text, eligible, citation_policy,
+                        limits=evidence_registry.bindings.limits)
+                except CitationViolation:
+                    if hooks is not None and hooks.citation_retry(turn, messages):
+                        continue
+                    return CliRunResult(1, '', 'citationViolation', token_usage=token_usage,
+                        metadata={'failure_reason': 'citationViolation', 'token_usage_details': token_usage_details})
             if turn_capture is not None:
                 turn_capture.assistant(turn)
             if text_withheld():

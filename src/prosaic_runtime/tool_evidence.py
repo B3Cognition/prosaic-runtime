@@ -65,6 +65,7 @@ class EvidenceRegistryV1:
         self._delivered = {}
         self._calls = {}
         self._pending_events = {}
+        self.citations = None
 
     def capture_completion(self, tool, outcome, *, call_id, call_index, arguments_sha256, status):
         record = dict(callId=call_id, callIndex=call_index, toolName=tool.name, toolVersion=tool.version,

@@ -949,8 +949,17 @@ class ProsaicRuntime:
                 backend.accounting_context = _context
                 request = Invocation(str(Path(cwd).resolve()) if cwd is not None else None,
                                      prompt, invocation_env, remaining, {"prompt_metadata": metadata})
+                from .tool_event_contract import current_bindings
+                citation_enabled = current_bindings() is not None and current_bindings().citations is not None
                 if _turn_prepared is None:
-                    result = backend.run_prompt(request)
+                    from .events import withheld_text
+                    with withheld_text(citation_enabled):
+                        if citation_enabled:
+                            from .openai_compatible import _feature_enabled
+                            result = backend._run_prompt_with_tools(request, metadata,
+                                _feature_enabled(endpoint.features, 'streaming', default=True))
+                        else:
+                            result = backend.run_prompt(request)
                 else:
                     from .openai_compatible import _feature_enabled
                     backend.turn_mode = True
@@ -964,11 +973,12 @@ class ProsaicRuntime:
                         backend.rule_hooks = _turn_prepared['_ruleHooks'] = RuleHooks(
                             ruleset, message=_turn_prepared['message'], input_data=_turn_prepared['inputData'],
                             authoritative_input_data=_turn_prepared.get('authoritativeInputData'),
-                            budget=_budget, check_boundary=backend.check_boundary)
+                            budget=_budget, check_boundary=backend.check_boundary,
+                            typed_result_tools=tuple(name for name, tool in custom.items() if tool.result_contract is not None))
                         answer_rules = any(b.bound for b in ruleset.at('before_answer') + ruleset.at('final'))
                     from .events import withheld_text
                     # A draft that answer-stage rules may refuse is never previewed or streamed early.
-                    with withheld_text(answer_rules):
+                    with withheld_text(answer_rules or citation_enabled):
                         result = backend._run_prompt_with_tools(request, metadata,
                             _feature_enabled(endpoint.features, 'streaming', default=True),
                             initial_messages=_turn_prepared['messages'],
