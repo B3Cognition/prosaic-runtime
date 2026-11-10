@@ -82,6 +82,28 @@ class EvidenceRegistryV1:
         self._calls = {}
         self._pending_events = {}
         self.citations = None
+        self._imports_ready = False
+
+    def _register_imports(self):
+        if self._imports_ready:
+            return
+        from .tool_imports import import_record
+        records, projections = {}, {}
+        for imported in self.bindings.retained:
+            descriptor = imported.to_dict()
+            record = import_record(descriptor)
+            if record['id'] in records or record['id'] in self._records:
+                raise ValueError('duplicate imported evidence')
+            self._authorize(record, 'modelUse')
+            records[record['id']] = record
+            projections[descriptor['modelViewSha256']] = (record['id'],)
+        candidate = {**self._records, **records}
+        if len(candidate) > self.bindings.limits.max_registry_items:
+            raise ValueError('evidence registry limit')
+        encode_owned(dict(records=list(candidate.values()), calls=list(self._calls.values())), max_bytes=self.bindings.limits.max_evidence_bytes)
+        self._records = candidate
+        self._projections.update(projections)
+        self._imports_ready = True
 
     def capture_completion(self, tool, outcome, *, call_id, call_index, arguments_sha256, status):
         record = dict(callId=call_id, callIndex=call_index, toolName=tool.name, toolVersion=tool.version,
@@ -173,6 +195,7 @@ class EvidenceRegistryV1:
 
     def prepare_delivery(self, native_payload, *, encoded_bytes=None):
         """Inspect the final wire body, after compaction/encoding, without trusting events."""
+        self._register_imports()
         if encoded_bytes is None:
             encoded_bytes = encode_owned(native_payload)
         if type(encoded_bytes) is not bytes:
@@ -184,8 +207,7 @@ class EvidenceRegistryV1:
         while stack:
             node = stack.pop()
             if type(node) is dict:
-                if node.get('status') == 'ok' and 'result' in node:
-                    candidates.update(self._projections.get(digest(node), ()))
+                candidates.update(self._projections.get(digest(node), ()))
                 stack.extend(node.values())
             elif type(node) is list:
                 stack.extend(node)
@@ -232,6 +254,8 @@ class EvidenceRegistryV1:
         if type(attestation) is not HostDeliveryAttestationV1 or attestation.scope != self.bindings.scope:
             raise ValueError('scoped host delivery attestation required')
         ticket = self.prepare_delivery(None, encoded_bytes=attestation._encoded)
+        for evidence_id in ticket.evidence_ids:
+            self.authorize(evidence_id, 'cite')
         document = dict(version=1, scope=asdict(self.bindings.scope), records={evidence_id:
             dict(**self._records[evidence_id], deliveries=[dict(requestId=attestation.request_id, inputSha256=ticket.input_sha256)])
             for evidence_id in ticket.evidence_ids})
@@ -255,7 +279,7 @@ class ToolInvocationEvidenceV1:
         return json.loads(self._encoded)
 
 
-def validate_invocation_evidence(document):
+def validate_invocation_evidence(document, *, imports=()):
     """Data codec only. Reading a receipt never confers delivery authority."""
     document = owned(document, 65536)
     if type(document) is not dict or set(document) != {'version', 'records', 'deliveries', 'calls'} or type(document['version']) is not int or document['version'] != 1:
@@ -274,7 +298,14 @@ def validate_invocation_evidence(document):
             raise ValueError('invalid captured completion')
         calls[call['callId']] = call
     records = {}
+    from .tool_imports import import_record
+    imported_records = {item['evidenceId']: import_record(item) for item in imports}
     for record in document['records']:
+        if type(record) is dict and record.get('originKind') in {'contextPack', 'retainedReceipt'}:
+            if imported_records.get(record.get('id')) != record or record['id'] in records:
+                raise ValueError('unbound imported source')
+            records[record['id']] = record
+            continue
         required = {'version', 'scope', 'callId', 'callIndex', 'toolName', 'toolVersion', 'argumentsSha256',
             'sourceKey', 'sourceRevision', 'locator', 'selector', 'label', 'bodySha256', 'contentSha256',
             'contentBytes', 'contentKind', 'observation', 'id'}

@@ -282,9 +282,9 @@ class TurnEvidence(_OwnedRecord):
             contract = value['toolContractV1']
             _closed(contract, {'bindings', 'evidence', 'citations'})
             from .tool_evidence import validate_invocation_evidence
-            evidence = validate_invocation_evidence(contract['evidence'])
             from .tool_contracts import validate_bindings_document
             binding = validate_bindings_document(contract['bindings'])
+            evidence = validate_invocation_evidence(contract['evidence'], imports=binding['retained'])
             if any(record['scope'] != binding['scope'] for record in evidence['records']):
                 raise ValueError('foreign evidence scope')
             if value['failureCode'] is None and binding['citations'] is not None and contract['citations'] is None:

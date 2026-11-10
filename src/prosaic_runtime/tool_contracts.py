@@ -285,15 +285,21 @@ class ToolContractBindingsV1:
             if type(self.citations) is not CitationPolicyV1 or self.evidence_authorizer is None:
                 raise ValueError('citations require an evidence authorizer')
             self.citations.__post_init__()
-        if type(self.retained) is not tuple or self.retained:
+        from .tool_imports import HostEvidenceImportV1
+        if type(self.retained) is not tuple or len(self.retained) > self.limits.max_registry_items or any(
+                type(item) is not HostEvidenceImportV1 or item.scope != self.scope for item in self.retained):
             raise ValueError('retained evidence requires verified imports')
+        if len({item.evidence_id for item in self.retained}) != len(self.retained) or sum(len(item._model_view) for item in self.retained) > 4_194_304:
+            raise ValueError('invalid retained import bounds')
+        encode_owned([item.to_dict() for item in self.retained], max_bytes=self.limits.max_evidence_bytes)
 
     def to_dict(self):
         self.__post_init__()
         return dict(version=1, identity=self.identity, bindingVersion=self.version, scope=asdict(self.scope),
             evidenceAuthorizer=None if self.evidence_authorizer is None else self.evidence_authorizer.to_dict(),
             displayAuthorizer=None if self.display_authorizer is None else self.display_authorizer.to_dict(),
-            citations=None if self.citations is None else self.citations.to_dict(), retained=[], limits=self.limits.to_dict())
+            citations=None if self.citations is None else self.citations.to_dict(),
+            retained=[item.to_dict() for item in self.retained], limits=self.limits.to_dict())
 
 
 def validate_bindings_document(value):
@@ -316,8 +322,15 @@ def validate_bindings_document(value):
                 policy['version'] != 1 or value['evidenceAuthorizer'] is None):
             raise ValueError('invalid citation descriptor')
         CitationPolicyV1(policy['mode'])
-    if value['retained'] != []:
+    if type(value['retained']) is not list or len(value['retained']) > value['limits']['max_registry_items']:
         raise ValueError('unverified retained imports')
+    from .tool_imports import validate_import_descriptor
+    ids = set()
+    for item in value['retained']:
+        item = validate_import_descriptor(item)
+        if item['scope'] != value['scope'] or item['evidenceId'] in ids:
+            raise ValueError('invalid import binding')
+        ids.add(item['evidenceId'])
     return value
 
 

@@ -56,3 +56,12 @@ retain their existing formats. Evidence is capped at 64 KiB, with 64 declaration
 per result and 256 registry entries; existing smaller input/output limits win.
 
 Parallel tool execution, MCP clients and sub-agents remain separate follow-ups.
+
+Trusted hosts adapt verified pack/retained receipts with `HostEvidenceImportV1`.
+Bind the owned imports explicitly in `ToolContractBindingsV1.retained`; a matching
+ID in history grants nothing. Each import pins the captured representation, scope,
+origin receipt digest and exact public model container. Runtime rechecks current
+model-use permission and actual submission of that container before eligibility.
+The host verifies the original receipt and tenant/actor binding; decoding its
+metadata alone never grants authority. Imported bodies stay outside the registry
+sidecar, which holds bounded hashes/references to the existing captured context.

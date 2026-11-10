@@ -51,12 +51,17 @@ def exercise(provider):
             features={'streaming': False})
         runtime = api.ProsaicRuntime(api.RuntimeConfig({'fixture': endpoint}, {}, 'fixture', frozenset({'lookup'})),
             custom_tools={'lookup': tool})
-        bindings = api.ToolContractBindingsV1('host', '1', api.InvocationScope('attempt'),
+        scope = api.InvocationScope('attempt')
+        selected = {'citationId': 'ctx_' + 'a' * 64, 'content': 'Selected captured context'}
+        imported = api.HostEvidenceImportV1(scope, api.EvidenceDraftV1('pack', 'r1', 'PRIVATE-LOCATOR', '', 'Selected'),
+            evidence_id=selected['citationId'], origin_kind='contextPack', origin_receipt_sha256='b' * 64,
+            model_view=selected, content_pointer='/content', reference_pointer='/citationId')
+        bindings = api.ToolContractBindingsV1('host', '1', scope, retained=(imported,),
             evidence_authorizer=api.EvidenceAuthorizerV1('sources', '1', lambda use: True),
             display_authorizer=api.ToolDisplayAuthorizerV1('viewer', '1', lambda use: True), citations=api.CitationPolicyV1('required'))
         agent = api.ProsaicArtifact('approved', 'subagent', {'tools': ['lookup']}, 'Answer from approved tools.')
         policy = api.RunPolicy(allowed_tools=frozenset({'lookup'}), max_provider_requests=2, max_tool_calls=1)
-        prepared = runtime.prepare_turn(agent, message='Review', policy=policy, tool_contract_bindings=bindings)
+        prepared = runtime.prepare_turn(agent, message='Review', input_data={'selected': selected}, policy=policy, tool_contract_bindings=bindings)
         frozen = prepared.export_frozen_input()
         restored = runtime.restore_turn(agent, frozen_input=frozen, policy=policy, limits=api.TurnLimits(), tool_contract_bindings=bindings)
         turn = runtime.turn(restored, tool_contract_bindings=bindings, on_event=events.append)
@@ -67,6 +72,17 @@ def exercise(provider):
         assert [e['event'] for e in events if e['event'].startswith('tool_')] == ['tool_started', 'tool_completed']
         assert 'PRIVATE-LOCATOR' not in b''.join(requests).decode() and 'PRIVATE-LOCATOR' not in json.dumps(events)
         assert {'tool_events_v1', 'tool_results_v1', 'citations_v1'} <= runtime.capabilities
+        assert selected['citationId'] in evidence['toolContractV1']['evidence']['deliveries']
+        legacy = api.CustomTool('lookup', 'Lookup', {'type': 'object', 'additionalProperties': False},
+            lambda args: {'count': 14}, '1', event_policy=tool.event_policy)
+        legacy_runtime = api.ProsaicRuntime(runtime.config, custom_tools={'lookup': legacy})
+        legacy_events = []
+        legacy_bindings = api.ToolContractBindingsV1('viewer', '1', api.InvocationScope('legacy'),
+            display_authorizer=bindings.display_authorizer)
+        direct = legacy_runtime.run_tool('lookup', {}, policy=policy, tool_contract_bindings=legacy_bindings,
+            on_event=legacy_events.append)
+        assert json.loads(direct.stdout) == {'count': 14} and len(legacy_events) == 2
+        assert direct.metadata['tool_contract_v1']['deliveries'] == {}
         return dict(provider=provider, providerRequests=len(requests), toolCallbacks=len(callbacks))
     finally:
         server.shutdown(); server.server_close(); worker.join(timeout=5)

@@ -85,5 +85,6 @@ __all__ += ["PoolPolicy", "UnifiedRuntimeConfig", "UnifiedRuntime"]
 from .citations import CitationsV1, CitationViolation, validate_citations
 from .tool_evidence import ToolInvocationEvidenceV1, EligibleEvidenceV1
 from .tool_evidence import HostDeliveryAttestationV1
+from .tool_imports import HostEvidenceImportV1
 __all__ += ['CitationsV1', 'CitationViolation', 'validate_citations', 'ToolInvocationEvidenceV1',
-            'EligibleEvidenceV1', 'HostDeliveryAttestationV1']
+            'EligibleEvidenceV1', 'HostDeliveryAttestationV1', 'HostEvidenceImportV1']
