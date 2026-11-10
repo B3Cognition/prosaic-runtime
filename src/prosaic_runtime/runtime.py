@@ -114,7 +114,7 @@ class _BoundedMixin:
         if self.budget is not None:
             self.budget._check_reported_allowance()
             cap=self.budget.policy.max_tool_calls
-            if cap is not None and self.budget.tool_calls>=cap:
+            if cap is not None and self.budget.tool_calls+self.budget._pending_tool_calls>=cap:
                 raise InvocationBudgetExceeded('tool_call_limit')
         reserve_dispatch(self.execution_budgets,tool=True)
         if self.budget is not None: self.budget.before_tool()
