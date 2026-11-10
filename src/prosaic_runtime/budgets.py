@@ -20,6 +20,7 @@ class InvocationBudget:
         self.usage_complete = True
         self._pending_tool_calls = 0
         self._lock = RLock()
+        self.parallel_batches = []
 
     @property
     def enabled(self):

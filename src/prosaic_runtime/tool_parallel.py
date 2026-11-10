@@ -1,6 +1,6 @@
 """Invocation-local handler concurrency with a single state-owning coordinator."""
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
-from contextvars import ContextVar
+from contextvars import Context, ContextVar
 from dataclasses import dataclass, field
 import json
 from queue import Queue, Empty
@@ -100,15 +100,16 @@ class ParallelToolCoordinator:
         phase=(prepared.options.get('_phase_state',{}) if prepared is not None else
             getattr(self.dispatch,'options',{}).get(index,{}).get('_phase_state',{}))
         journal='notUsed';state='notStarted';code=phase.get('code',settlement.code if settlement is not None else None)
-        entered=settlement.handler_entered if settlement is not None else False
+        entered=settlement.handler_entered if settlement is not None else bool(phase.get('handlerEntered',False))
         replayed=settlement.replayed if settlement is not None else False
         if replayed:state='replayed';journal='replayed'
-        elif phase.get('status')=='completed':state='completed';journal='committed' if prepared and prepared.operation_key else 'notUsed'
+        elif phase.get('status')=='completed':state='completed';journal='committed' if (prepared and prepared.operation_key) or phase.get('operation_key') is not None else 'notUsed'
         elif phase.get('status')=='uncertain' or prepared and prepared.operation_key or entered:
             state='uncertain';journal='claimedUncertain' if prepared and prepared.operation_key else 'notUsed'
         elif settlement is not None and code in {'ok','controlled_failure'}:state='completed'
         if prepared is None and phase.get('operation_key') is not None and state=='uncertain':journal='claimedUncertain'
-        if code not in {'ok','controlled_failure'} and entered:state='uncertain'
+        if code in {'not_granted','authorization_denied','invalid_arguments'} and not entered:state='notStarted'
+        elif code not in {'ok','controlled_failure'} and entered:state='uncertain'
         start=settlement.started_at if settlement else None;finish=settlement.finished_at if settlement else None
         ident,call_index=self._identity(self._calls[index],index)
         return dict(callId=ident,callIndex=call_index,batchIndex=index,state=state,handlerEntered=entered,
@@ -185,13 +186,14 @@ class ParallelToolCoordinator:
                     cancelled=self.cancelled.is_set,await_operation=self._await_operation)
                 if not isinstance(prepared,PreparedToolCallV1):
                     self._results[index]=prepared;self._record(index,prepared)
-                    if getattr(self.dispatch,'bounded_recovery',False) and ToolOutcome(prepared.code,prepared.replayed).to_dict()['recovery'] in {'stop','reconcile'}:
+                    if (getattr(self.dispatch,'bounded_recovery',False) and not getattr(self.dispatch,'is_rule_refusal',lambda i:False)(index)
+                            and ToolOutcome(prepared.code,prepared.replayed).to_dict()['recovery'] in {'stop','reconcile'}):
                         raise ToolEffectFailure('tool_recovery_blocked')
                     continue
                 slot=_Slot(index,call,prepared)
                 if prepared.operation_key is not None:self._inflight[(prepared.context.scope.operation_namespace,prepared.operation_key)]=slot
                 if self._pool is None:self._pool=ThreadPoolExecutor(max_workers=self.policy.max_concurrency,thread_name_prefix='prosaic-read')
-                slot.future=self._pool.submit(self._run,slot);self._pending[slot.future]=slot
+                slot.future=self._pool.submit(Context().run,self._run,slot);self._pending[slot.future]=slot
                 while not slot.ready.wait(.05):
                     self._tick()
                     if self.cancelled.is_set():break
@@ -227,8 +229,13 @@ class ParallelToolCoordinator:
                 if self._eligible(calls[indices[0]]):self._window(indices)
                 else:
                     index=indices[0];permit=self.reservation.start(index)
-                    settlement=self.dispatch.serial(calls[index],permit=permit,batch_index=index,cancelled=self.cancelled.is_set)
+                    try:settlement=self.dispatch.serial(calls[index],permit=permit,batch_index=index,cancelled=self.cancelled.is_set)
+                    except BaseException:
+                        self._record(index,None)
+                        raise
                     self._results[index]=settlement;self._record(index,settlement)
+                    if ToolOutcome(settlement.code,settlement.replayed).to_dict()['effect']=='unknown':
+                        self._failure(ToolEffectFailure('tool_effect_uncertain'),index)
                     if self._errors:self._raise_failure()
                 for index in indices:
                     result=self._results[index];self.dispatch.restore(calls[index],result)

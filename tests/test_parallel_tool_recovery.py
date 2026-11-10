@@ -174,3 +174,15 @@ def test_lost_commit_schedule_carries_journal_failure_not_worker_success():
     calls=(call(0),);coord,_=coordinator({'lookup':tool('lookup',lambda a,c:a,operation_key=lambda a,c:'key')},calls,journal=LostAck())
     with pytest.raises(ToolEffectFailure):coord.execute(calls)
     assert coord.evidence['calls'][0]['outcomeCode']=='tool_journal_failed'
+
+
+def test_every_handler_gets_a_fresh_context_even_when_thread_is_reused():
+    from contextvars import ContextVar
+    ambient=ContextVar('parallel_test_ambient',default=None);token=ambient.set('OWNER');seen=[]
+    def read(a,c):seen.append(ambient.get());ambient.set('PRIVATE-FIRST-CALL');return a
+    calls=(call(0),call(1));coord,_=coordinator({'lookup':tool('lookup',read)},calls,
+        policy=ParallelToolPolicyV1(max_concurrency=1))
+    try:
+        assert len(coord.execute(calls).messages)==2
+        assert seen==[None,None] and ambient.get()=='OWNER'
+    finally:ambient.reset(token)

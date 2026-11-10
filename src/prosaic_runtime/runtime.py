@@ -86,6 +86,7 @@ class _BoundedMixin:
         self.accounting_context = None
         self.turn_mode = False
         self.turn_capture = None
+        self.parallel_tools = budget.policy.parallel_tools if budget is not None else None
         self.terminal_capture = terminal_capture
         self.known_usage_details = {}
         self._dispatch_reservation = None
@@ -105,7 +106,7 @@ class _BoundedMixin:
         return BoundedToolRegistry(builtin,
                                    self.custom_tools, metadata.get('allowed_tools', ()), self.check_boundary,
                                    self.before_tool_dispatch,
-                                   self.tool_execution_options, index_all_calls=self.turn_mode,
+                                   self.tool_execution_options, index_all_calls=self.turn_mode or self.parallel_tools is not None,
                                    bounded_recovery=self.budget is not None and self.budget.policy.bounded_tool_recovery,
                                    terminal_capture=self.terminal_capture,
                                    terminal_tools=self.budget.policy.allowed_terminal_tools if self.budget is not None else ())
@@ -835,6 +836,10 @@ class ProsaicRuntime:
                 result.metadata['token_usage_status']='unknown'
         if budget.enabled or strict or policy.allowed_terminal_tools:
             result.metadata['invocation_budgets_v1'] = budget.metadata()
+        if policy.parallel_tools is not None:
+            from .conversation import encode_owned
+            result.metadata['parallel_tools_v1']=json.loads(encode_owned(dict(version=1,
+                policy=policy.parallel_tools.to_dict(),batches=budget.parallel_batches),max_bytes=65536))
         return attach(result, trace)
 
     def _run(self, artifact: str | ProsaicArtifact, arguments: str = "", *,
@@ -871,6 +876,11 @@ class ProsaicRuntime:
                 from .tool_contracts import admit_tool_contracts
                 from .tool_event_contract import current_bindings
                 admit_tool_contracts(custom, requested, current_bindings())
+                from .tool_parallel_contracts import admit_parallel_execution
+                admit_parallel_execution(policy,current_bindings(),metadata_limit=_turn_capture.limits.max_metadata_bytes if _turn_capture is not None else 65536)
+                from .tool_event_contract import current_registry
+                if policy.parallel_tools is not None:
+                    current_registry().parallel_order=True
                 if current_bindings() is not None and (policy.max_provider_requests is None or policy.max_tool_calls is None):
                     raise ValueError('tool contracts require finite attempt caps')
                 admit_tool_effects(custom, requested, _operation_context, _tool_journal)
@@ -976,6 +986,7 @@ class ProsaicRuntime:
                     backend.context_guard = _turn_prepared.get('_contextGuard')
                     backend.turn_capture = _turn_capture
                     _turn_capture.backend = backend
+                    _turn_capture.parallel_order = policy.parallel_tools is not None
                     ruleset = _turn_prepared.get('_ruleSet')
                     answer_rules = False
                     if ruleset is not None and any(binding.bound for binding in ruleset.bindings):

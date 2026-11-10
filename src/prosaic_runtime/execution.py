@@ -1,5 +1,6 @@
 """Shared bounded conversation loop; adapters own encoding and HTTP only."""
 import json
+from contextlib import nullcontext
 import time
 from collections.abc import Mapping
 from pathlib import Path
@@ -233,7 +234,7 @@ class ExecutionBackend:
                             **_transcript_metadata(transcript),
                         },
                     )
-                if initial_messages is not None or getattr(registry, 'terminal_tools', ()):
+                if initial_messages is not None or getattr(registry, 'terminal_tools', ()) or getattr(self,'parallel_tools',None) is not None:
                     if turn.finish_reason not in {'tool_calls', 'tool_use'}:
                         return CliRunResult(1, '', 'incomplete tool batch', token_usage=token_usage,
                             metadata={'provider': self.name, 'streamed': turn.streamed,
@@ -333,124 +334,129 @@ class ExecutionBackend:
                     identical_tool_rounds = 1
                 tool_started = time.monotonic()
                 registry.turn = turn_number
-                for tool_call in turn.tool_calls:
-                    tool_call_count += 1
-                    tool_name = _tool_call_name(tool_call)
-                    tool_summary = self.tool_call_summary(tool_call)
-                    _progress(f"tool {tool_name}: {tool_summary}")
-                    transcript.write(
-                        "tool_call",
-                        turn=turn_number,
-                        tool_name=tool_name,
-                        tool_summary=tool_summary,
-                    )
-                    call_id = str(tool_call.get("id") or "")
-                    call_started = time.monotonic()
-                    from .tool_event_contract import managed_events
-                    managed_event = managed_events(getattr(registry, 'custom', {}).get(tool_name))
-                    if not managed_event:
-                        emit("tool_started", name=tool_name, call_id=call_id, turn=turn_number,
-                             **self.tool_event_metadata(tool_name),
-                             **({'argumentsSha256': content_digest(json.loads(tool_call['function']['arguments']))}
-                                if getattr(registry, 'terminal_tools', ()) else {}))
-                    from .tool_effects import ToolEffectFailure
-                    from .tool_outcomes import ToolOutcome
-                    refusal = hooks.refusal(tool_call) if hooks is not None else None
-                    try:
-                        tool_message = (registry.refuse_message(tool_call, refusal) if refusal is not None
-                                        else registry.execute_message(tool_call))
-                    except (Cancelled, ToolDeadlineExceeded):
-                        terminal = getattr(registry, 'terminal_capture', None)
-                        if terminal is not None and terminal.evidence is not None:
-                            emit_tool_completion(name=tool_name, call_id=call_id, turn=turn_number,
-                                status='ok', duration_ms=round((time.monotonic()-call_started)*1000, 3),
-                                read_receipts=[], tool_outcome=ToolOutcome('ok').to_dict(),
-                                terminalCompletion=binding(terminal.evidence), **self.tool_event_metadata(tool_name))
-                        raise
-                    except ToolEffectFailure:
-                        outcome = getattr(registry, 'last_outcome', ToolOutcome('unclassified')).to_dict()
+                from .tool_registry import ParallelBatchCursor
+                parallel_context=(ParallelBatchCursor(registry,self,hooks,turn.tool_calls)
+                    if getattr(self,'parallel_tools',None) is not None else nullcontext())
+                with parallel_context as parallel_cursor:
+                    for tool_call in turn.tool_calls:
+                        tool_call_count += 1
+                        tool_name = _tool_call_name(tool_call)
+                        tool_summary = self.tool_call_summary(tool_call)
+                        _progress(f"tool {tool_name}: {tool_summary}")
+                        transcript.write(
+                            "tool_call",
+                            turn=turn_number,
+                            tool_name=tool_name,
+                            tool_summary=tool_summary,
+                        )
+                        call_id = str(tool_call.get("id") or "")
+                        call_started = time.monotonic()
+                        from .tool_event_contract import managed_events
+                        managed_event = managed_events(getattr(registry, 'custom', {}).get(tool_name))
+                        if not managed_event and parallel_cursor is None:
+                            emit("tool_started", name=tool_name, call_id=call_id, turn=turn_number,
+                                 **self.tool_event_metadata(tool_name),
+                                 **({'argumentsSha256': content_digest(json.loads(tool_call['function']['arguments']))}
+                                    if getattr(registry, 'terminal_tools', ()) else {}))
+                        from .tool_effects import ToolEffectFailure
+                        from .tool_outcomes import ToolOutcome
+                        refusal = hooks.refusal(tool_call) if hooks is not None else None
                         try:
-                            if not managed_event:
-                                emit('tool_completed', name=tool_name, call_id=call_id, turn=turn_number,
-                                     status='error', duration_ms=round((time.monotonic()-call_started)*1000, 3),
-                                     read_receipts=[], tool_outcome=outcome, **self.tool_event_metadata(tool_name))
-                        except Cancelled:
-                            # Terminal journal uncertainty takes precedence over a
-                            # later cancellation boundary; neither permits replay.
-                            pass
-                        raise
-                    executed = tool_message
-                    from .tool_event_contract import current_registry
-                    evidence_registry = current_registry()
-                    checked_event = None
-                    try:
-                        if hooks is not None and refusal is None:
-                            # Raw completion remains private; guards check the logical data.
-                            tool_message = hooks.after_tool(tool_call, executed)
-                        registered = getattr(registry, 'custom', {}).get(tool_name)
-                        if evidence_registry is not None and tool_message is not STOP:
-                            checked_payload = json.loads(tool_message['content'])
-                            if registered is not None and registered.result_contract is not None and refusal is None:
-                                from .tool_evidence import digest
-                                checked_payload = evidence_registry.stage(registered, json.loads(executed['content']),
-                                    checked_payload, call_id=registry.last_contract_call_id,
-                                    call_index=registry.last_contract_call_index,
-                                    arguments_sha256=digest(json.loads(tool_call['function']['arguments'])),
-                                    replayed=registry.last_outcome.replayed)
-                                tool_message = {**tool_message, 'content': json.dumps(checked_payload, ensure_ascii=False, allow_nan=False)}
-                            checked_event = checked_payload
-                    finally:
-                        if evidence_registry is not None:
-                            evidence_registry.finish_event(getattr(registry, 'last_contract_call_id', None), checked_event)
-                    if turn_capture is not None and tool_message is not STOP:
-                        turn_capture.tool(tool_call, tool_message)
-                    tool_payload = json.loads(executed["content"])
-                    from .conformance import _record_tool_result
-                    _record_tool_result(tool_name, tool_payload)
-                    status = tool_payload.get("status", "unknown")
-                    read_receipts = []
-                    if tool_name == "read_file" and status == "ok":
-                        read_receipts = [{key: tool_payload[key] for key in
-                                          ("path", "sha256", "offset", "lines_read", "line_count")}]
-                    terminal = getattr(registry, 'terminal_capture', None)
-                    completion = terminal.evidence if terminal is not None else None
-                    if not managed_event:
-                        emit("tool_completed", name=tool_name, call_id=call_id, turn=turn_number,
-                             status=status, duration_ms=round((time.monotonic() - call_started) * 1000, 3),
-                             read_receipts=read_receipts,
-                             tool_outcome=getattr(registry, 'last_outcome', ToolOutcome('ok' if status=='ok' else 'unclassified')).to_dict(),
-                             **self.tool_event_metadata(tool_name),
-                             **({'terminalCompletion': binding(completion)} if completion is not None else {}))
-                    if completion is not None:
-                        self.check_boundary()
-                        return CliRunResult(0, json.dumps(tool_payload['result'], ensure_ascii=False,
-                            allow_nan=False), '', token_usage=token_usage,
-                            metadata={'provider': self.name, 'finish_reason': turn.finish_reason,
-                                'completion_source': 'host', 'tool_call_count': tool_call_count,
-                                'tool_rounds': tool_rounds, 'token_usage_details': token_usage_details,
-                                **_transcript_metadata(transcript)})
-                    if hooks is not None and tool_message is STOP:
-                        return rule_stop()
-                    tool_result = _tool_result_status(tool_message)
-                    _progress(
-                        f"tool {tool_name} result: "
-                        f"{tool_result}"
-                    )
-                    transcript.write(
-                        "tool_result",
-                        turn=turn_number,
-                        tool_name=tool_name,
-                        tool_result=tool_result,
-                    )
-                    messages.append(turn_capture.wire_tool(tool_message) if turn_capture is not None else tool_message)
-                    if acquiring and status != 'ok':
-                        return CliRunResult(
-                            exit_code=1, stdout='', stderr='required acquisition tool failed',
-                            token_usage=token_usage, metadata={
-                                'provider': self.name, 'failure_reason': 'acquisition_failed',
-                                'provider_error_code': 'acquisition_failed', 'tool_call_count': tool_call_count,
-                                'tool_rounds': tool_rounds, 'token_usage_details': token_usage_details,
-                                **_transcript_metadata(transcript)})
+                            tool_message = (parallel_cursor.execute_message(tool_call) if parallel_cursor is not None else
+                                registry.refuse_message(tool_call, refusal) if refusal is not None else registry.execute_message(tool_call))
+                            if parallel_cursor is not None:tool_call_count=self.budget.tool_calls
+                        except (Cancelled, ToolDeadlineExceeded):
+                            terminal = getattr(registry, 'terminal_capture', None)
+                            if terminal is not None and terminal.evidence is not None:
+                                emit_tool_completion(name=tool_name, call_id=call_id, turn=turn_number,
+                                    status='ok', duration_ms=round((time.monotonic()-call_started)*1000, 3),
+                                    read_receipts=[], tool_outcome=ToolOutcome('ok').to_dict(),
+                                    terminalCompletion=binding(terminal.evidence), **self.tool_event_metadata(tool_name))
+                            raise
+                        except ToolEffectFailure:
+                            outcome = getattr(registry, 'last_outcome', ToolOutcome('unclassified')).to_dict()
+                            try:
+                                if not managed_event and parallel_cursor is None:
+                                    emit('tool_completed', name=tool_name, call_id=call_id, turn=turn_number,
+                                         status='error', duration_ms=round((time.monotonic()-call_started)*1000, 3),
+                                         read_receipts=[], tool_outcome=outcome, **self.tool_event_metadata(tool_name))
+                            except Cancelled:
+                                # Terminal journal uncertainty takes precedence over a
+                                # later cancellation boundary; neither permits replay.
+                                pass
+                            raise
+                        executed = tool_message
+                        from .tool_event_contract import current_registry
+                        evidence_registry = current_registry()
+                        checked_event = None
+                        try:
+                            if hooks is not None and refusal is None:
+                                # Raw completion remains private; guards check the logical data.
+                                tool_message = hooks.after_tool(tool_call, executed)
+                            registered = getattr(registry, 'custom', {}).get(tool_name)
+                            if evidence_registry is not None and tool_message is not STOP:
+                                checked_payload = json.loads(tool_message['content'])
+                                if registered is not None and registered.result_contract is not None and refusal is None:
+                                    from .tool_evidence import digest
+                                    checked_payload = evidence_registry.stage(registered, json.loads(executed['content']),
+                                        checked_payload, call_id=registry.last_contract_call_id,
+                                        call_index=registry.last_contract_call_index,
+                                        arguments_sha256=digest(json.loads(tool_call['function']['arguments'])),
+                                        replayed=registry.last_outcome.replayed)
+                                    tool_message = {**tool_message, 'content': json.dumps(checked_payload, ensure_ascii=False, allow_nan=False)}
+                                checked_event = checked_payload
+                        finally:
+                            if evidence_registry is not None:
+                                evidence_registry.finish_event(getattr(registry, 'last_contract_call_id', None), checked_event)
+                        if turn_capture is not None and tool_message is not STOP:
+                            turn_capture.tool(tool_call, tool_message)
+                        tool_payload = json.loads(executed["content"])
+                        from .conformance import _record_tool_result
+                        _record_tool_result(tool_name, tool_payload)
+                        status = tool_payload.get("status", "unknown")
+                        read_receipts = []
+                        if tool_name == "read_file" and status == "ok":
+                            read_receipts = [{key: tool_payload[key] for key in
+                                              ("path", "sha256", "offset", "lines_read", "line_count")}]
+                        terminal = getattr(registry, 'terminal_capture', None)
+                        completion = terminal.evidence if terminal is not None else None
+                        if not managed_event:
+                            emit("tool_completed", name=tool_name, call_id=call_id, turn=turn_number,
+                                 status=status, duration_ms=round((time.monotonic() - call_started) * 1000, 3),
+                                 read_receipts=read_receipts,
+                                 tool_outcome=getattr(registry, 'last_outcome', ToolOutcome('ok' if status=='ok' else 'unclassified')).to_dict(),
+                                 **self.tool_event_metadata(tool_name),
+                                 **({'terminalCompletion': binding(completion)} if completion is not None else {}))
+                        if completion is not None:
+                            self.check_boundary()
+                            return CliRunResult(0, json.dumps(tool_payload['result'], ensure_ascii=False,
+                                allow_nan=False), '', token_usage=token_usage,
+                                metadata={'provider': self.name, 'finish_reason': turn.finish_reason,
+                                    'completion_source': 'host', 'tool_call_count': tool_call_count,
+                                    'tool_rounds': tool_rounds, 'token_usage_details': token_usage_details,
+                                    **_transcript_metadata(transcript)})
+                        if hooks is not None and tool_message is STOP:
+                            return rule_stop()
+                        tool_result = _tool_result_status(tool_message)
+                        _progress(
+                            f"tool {tool_name} result: "
+                            f"{tool_result}"
+                        )
+                        transcript.write(
+                            "tool_result",
+                            turn=turn_number,
+                            tool_name=tool_name,
+                            tool_result=tool_result,
+                        )
+                        messages.append(turn_capture.wire_tool(tool_message) if turn_capture is not None else tool_message)
+                        if acquiring and status != 'ok':
+                            return CliRunResult(
+                                exit_code=1, stdout='', stderr='required acquisition tool failed',
+                                token_usage=token_usage, metadata={
+                                    'provider': self.name, 'failure_reason': 'acquisition_failed',
+                                    'provider_error_code': 'acquisition_failed', 'tool_call_count': tool_call_count,
+                                    'tool_rounds': tool_rounds, 'token_usage_details': token_usage_details,
+                                    **_transcript_metadata(transcript)})
                 if acquiring:
                     messages.append({'role': 'user', 'content': prompt_metadata['final_prompt']})
                     emit('acquisition_completed', tool=initial_tool, turn=turn_number)

@@ -53,7 +53,7 @@ def emit(event: str, **data):
     if bridge is not None:
         bridge({'event': event, **data})
         return
-    if event in {'tool_started', 'tool_completed'}:
+    if event in {'tool_started', 'tool_completed', 'tool_execution_settled'}:
         observe(event, **data)
     sink = _sink.get()
     if sink is not None:
@@ -113,3 +113,10 @@ def worker_event_context(bridge, cancelled, *, withheld=False):
     try:yield
     finally:
         _withheld.reset(withheld_token);_cancel.reset(cancel_token);_worker_sink.reset(worker_token)
+
+
+def emit_after_completion(event,**data):
+    """Known settlement is observable after cancellation without granting more work."""
+    token=_cancel.set(None)
+    try:emit(event,**data)
+    finally:_cancel.reset(token)

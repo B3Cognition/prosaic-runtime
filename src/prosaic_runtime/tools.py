@@ -213,67 +213,43 @@ def execute_custom_tool(tool, raw_arguments, *, check_boundary, scope=None,
                         deadline=None, cancelled=lambda: False, call_index=0, tool_journal=None,
                         on_completion=None, accounting_context=None, on_outcome=None,
                         on_terminal=None, tool_contract_bindings=None, _event_call_id=None, _event_exchange=0,
-                        _defer_event=False):
-    from .tool_event_contract import current_bindings, current_registry, managed_events, ToolEventLifecycle, call_identity
-    bindings, registry = tool_contract_bindings or current_bindings(), current_registry()
-    options = dict(check_boundary=check_boundary, scope=scope, deadline=deadline, cancelled=cancelled,
-        call_index=call_index, tool_journal=tool_journal, on_completion=on_completion,
-        accounting_context=accounting_context, on_outcome=on_outcome, on_terminal=on_terminal)
-    manage = managed_events(tool, bindings)
-    capture = registry is not None and tool.result_contract is not None
-    if not manage and not capture:
-        return _execute_custom_tool(tool, raw_arguments, **options)
-    bindings.__post_init__()
-    if scope != bindings.scope:
-        raise ValueError('tool contract scope mismatch')
-    call_id = _event_call_id or call_identity(scope, _event_exchange, call_index)
-    lifecycle = ToolEventLifecycle(tool, bindings, call_index, call_id=call_id, exchange=_event_exchange) if manage else None
-    known = [None, None]
-    queued = False
-    def report(outcome):
-        if lifecycle is not None:
-            lifecycle.outcome = outcome
-        if on_outcome is not None:
-            on_outcome(outcome)
-    def complete(outcome, status='completed', **refs):
-        known[:] = outcome, status
-        # Persist known completion before a critical event sink can fail.
-        if on_completion is not None:
-            on_completion(outcome, status, **refs)
-        if capture:
-            arguments = parse_arguments(raw_arguments, tool.parameters, tool.max_argument_bytes)
-            registry.capture_completion(tool, outcome, call_id=call_id, call_index=call_index,
-                arguments_sha256=hashlib.sha256(canonical_json(arguments).encode()).hexdigest(), status=status)
-        if lifecycle is not None and not _defer_event:
-            lifecycle.finish(outcome, status)
-    options.update(on_outcome=report, on_completion=complete,
-        _before_handler=lifecycle.start if lifecycle is not None else None)
+                        _defer_event=False, _parallel_mode=False, _phase_state=None):
+    from .tool_parallel import assert_not_parallel_worker
+    from .tool_event_contract import ManagedToolCallV1
+    assert_not_parallel_worker()
+    options=dict(check_boundary=check_boundary,scope=scope,deadline=deadline,cancelled=cancelled,
+        call_index=call_index,tool_journal=tool_journal,on_completion=on_completion,
+        accounting_context=accounting_context,on_outcome=on_outcome,on_terminal=on_terminal,
+        _parallel_mode=_parallel_mode,_phase_state=_phase_state if _phase_state is not None else {})
+    managed=ManagedToolCallV1(tool,raw_arguments,options,bindings=tool_contract_bindings,
+        call_id=_event_call_id,exchange=_event_exchange,defer_event=_defer_event,parallel=_parallel_mode)
     try:
-        result = _execute_custom_tool(tool, raw_arguments, **options)
-        if lifecycle is not None:
-            if _defer_event and registry is not None:
-                registry._pending_events[call_id] = lifecycle
-                queued = True
-            else:
-                lifecycle.finish(result, known[1])
+        result=_execute_custom_tool(tool,raw_arguments,**managed.options)
+        managed.finish(result)
         return result
-    finally:
-        if lifecycle is not None and not queued:
-            lifecycle.finish(known[0], known[1] or ('uncertain' if lifecycle.started_at is not None else None))
+    finally:managed.close()
 
 
 def _execute_custom_tool(tool, raw_arguments, *, check_boundary, scope=None,
                         deadline=None, cancelled=lambda: False, call_index=0, tool_journal=None,
                         on_completion=None, accounting_context=None, on_outcome=None,
-                        on_terminal=None, _before_handler=None):
+                        on_terminal=None, _before_handler=None, _parallel_mode=False, _phase_state=None):
     from .tool_dispatch import (prepare_custom_tool_call, PreparedToolCallV1,
         start_prepared_tool, invoke_prepared_tool, settle_custom_tool_call)
     call = prepare_custom_tool_call(tool, raw_arguments, call_id=str(call_index), call_index=call_index,
         batch_index=call_index, options=dict(check_boundary=check_boundary, scope=scope, deadline=deadline,
         cancelled=cancelled, tool_journal=tool_journal, on_completion=on_completion,
         accounting_context=accounting_context, on_outcome=on_outcome, on_terminal=on_terminal,
-        _before_handler=_before_handler))
+        _before_handler=_before_handler, _parallel_mode=_parallel_mode,
+        _phase_state=_phase_state if _phase_state is not None else {}))
     if not isinstance(call, PreparedToolCallV1):
         return call.outcome
-    start_prepared_tool(call)
+    try:start_prepared_tool(call)
+    except BaseException as exc:
+        if _parallel_mode and call.operation_key is not None:
+            from .tool_dispatch import WorkerSettlementV1
+            settle_custom_tool_call(call,WorkerSettlementV1(call.call_id,call.call_index,call.batch_index,
+                'tool_effect_uncertain',exception=exc))
+        raise
+    call.options['_phase_state']['handlerEntered']=True
     return settle_custom_tool_call(call, invoke_prepared_tool(call)).outcome
