@@ -74,6 +74,8 @@ class FrozenTurnInput(_OwnedRecord):
         bindings=document['bindings']
         _closed(bindings,{'agent','policy','limits','profile','endpoint','tools','cliSandbox'},
                 {'rules','contextPolicy','counterDescriptor','toolRequestCorrection'} | ({'toolContractV1'} if document['version']>=2 else set()) | ({'parallelToolsV1'} if document['version']==3 else set()))
+        if 'toolRequestCorrection' in bindings and bindings['toolRequestCorrection'] is not True:
+            raise ValueError('invalid tool request correction binding')  # Present only when on.
         if document['version']>=2:
             from .tool_contracts import validate_bindings_document
             validate_bindings_document(bindings.get('toolContractV1'))

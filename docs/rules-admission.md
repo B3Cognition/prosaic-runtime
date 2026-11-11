@@ -170,6 +170,9 @@ turns do not support (see Terminal completion).
   budgets and feedback as a `retry` binding; with no retry left the turn fails
   with `ruleViolation`. A decline is not a guard fault. A repair of the wrong
   type, too large, not strictly encodable or outside the tool schema still is.
+  This is the default from this release: a turn prepared or frozen earlier has
+  the same bytes but retries a declined repair when executed now. Bind the rule
+  with `on_violation=fail` to stop the turn at once instead.
 - **retry** happens at most `rule_retries` times per turn (default 1), across
   all stages, within the existing deadline and `RunPolicy` budgets. When no
   provider request remains it fails instead; a retry never adds a request beyond
@@ -180,7 +183,10 @@ turns do not support (see Terminal completion).
   like the guards themselves (not a YAML key); other values are refused when the
   runtime is constructed. A value other than 1 is part of the prepared turn's
   identity, so a turn prepared under one allowance is refused with
-  `bindingMismatch` under another; the rules fingerprint is unchanged.
+  `bindingMismatch` under another; the rules fingerprint is unchanged. A retry
+  still runs under the turn's deadline and token budget; if either runs out
+  during it, the turn fails with `timeout` or `budgetExceeded`, which then
+  stands in for the violation that prompted the retry.
 - **fail** returns a safe failed `TurnResult` with failure code `ruleViolation`.
 
 `before_tool` rewrites are recorded as what ran: the wire message, the tool

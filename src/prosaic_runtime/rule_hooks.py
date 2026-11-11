@@ -4,7 +4,8 @@ Hooks never raise a guard's exception into the loop: a raise there would look
 like a provider or observation failure. Every guard fault, invalid verdict,
 unusable repair or exhausted retry becomes RuleStop, which the loop returns as a
 safe ``ruleViolation`` result. A fix guard that declines (a violation without a
-repair) takes the retry path instead. One retry per turn; three fix passes.
+repair) takes the retry path instead. Up to ``rule_retries`` retries per turn
+(default 1); three fix passes.
 """
 
 import json
@@ -101,6 +102,15 @@ def _text_repair(fixed):
         return type(fixed) is str and len(fixed.encode('utf-8')) <= MAX_REPAIR_BYTES
     except UnicodeError:
         return False
+
+
+def _admissible(registry, call):
+    """Whether batch admission accepts ``call`` on its own."""
+    try:
+        registry.validate_batch([call])
+    except Exception:  # Any refusal: the call is not admissible alone.
+        return False
+    return True
 
 
 def _declined(binding, verdict):
@@ -410,15 +420,19 @@ class RuleHooks:
                     ]
                 turn.tool_calls = list(registry.validate_batch(turn.tool_calls))
             except Exception as error:  # A repair outside the tool schema is a guard fault.
-                # The batch was admitted before these repairs, so a refused call is a rewritten one: fault the
-                # rules that rewrote it (every rewriting rule when admission cannot name the call).
+                # The batch was admitted before these repairs, so a refused call is a rewritten one: fault only
+                # the rules that rewrote it. When admission cannot name the call, each rewritten call is checked
+                # on its own, so a rule whose repair is admissible is never blamed.
                 index = getattr(error, 'index', None)
                 calls = turn.tool_calls
-                named = calls[index]['id'] if type(index) is int and 0 <= index < len(calls) else None
-                culprits = {rule_id for call_id in ([named] if named in rewritten else rewritten)
-                            for rule_id in repairers[call_id]}
-                self.faulted.update(culprits)
-                self.fixed.difference_update(culprits - fixed_before)  # An unused repair repaired nothing.
+                if type(index) is int and 0 <= index < len(calls) and calls[index]['id'] in rewritten:
+                    refused_calls = [calls[index]['id']]
+                else:
+                    refused_calls = [call['id'] for call in calls
+                                     if call['id'] in rewritten and not _admissible(registry, call)]
+                self.faulted.update(rule_id for call_id in refused_calls for rule_id in repairers[call_id])
+                # The batch never runs, so every repair recorded for it repaired nothing, the innocent ones too.
+                self.fixed.intersection_update(fixed_before)
                 return STOP
         return None
 
@@ -463,7 +477,7 @@ class RuleHooks:
         return {**message, 'content': json.dumps(value, ensure_ascii=False, allow_nan=False)}
 
     def answer(self, turn, messages):
-        """Check the raw draft, then final rules; fix, retry once, or stop."""
+        """Check the raw draft, then final rules; fix, retry within the allowance, or stop."""
         bindings = self.ruleset.at('before_answer') + self.ruleset.at('final')
         if not bindings:
             return None

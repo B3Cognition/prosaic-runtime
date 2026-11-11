@@ -286,3 +286,138 @@ def prepared_limits():
     from prosaic_runtime import TurnLimits
 
     return TurnLimits()
+
+
+def wire_roles(fx, index):
+    """Role sequence of request ``index`` on its own wire (system instructions excluded)."""
+    payload = json.loads(fx.raw_requests[index])
+    return [m['role'] for m in payload['messages'] if m['role'] != 'system']
+
+
+def strictly_alternating(roles):
+    """User (or a run of tool results) and assistant alternate; a tool-result run is followed by an assistant."""
+    collapsed = [role for i, role in enumerate(roles) if not (role == 'tool' and i and roles[i - 1] == 'tool')]
+    sides = ['user' if role in ('user', 'tool') else role for role in collapsed]
+    return sides[:1] == ['user'] and all(a != b for a, b in zip(sides, sides[1:]))
+
+
+@pytest.mark.parametrize('provider', PROVIDERS)
+def test_a_correction_after_the_prompt_keeps_roles_strictly_alternating(provider):
+    with ConversationFixture(provider) as fx:
+        lookup_fixture(fx)
+        queue_json(fx, [SCHEMA_INVALID])
+        fx.queue_text('High water at noon.')
+        turn = corrected(fx).turn(fx.agent, message='When is high water?', policy=fx.policy)
+        roles = wire_roles(fx, 1)
+        placeholder = json.loads(fx.raw_requests[1])['messages'][-2]
+    assert turn.result.exit_code == 0
+    assert roles == ['user', 'assistant', 'user'] and strictly_alternating(roles)
+    # The refused response is replaced by a fixed neutral placeholder: no model text, no tool calls.
+    assert 'tool_calls' not in placeholder and 'QA-999' not in json.dumps(placeholder)
+
+
+@pytest.mark.parametrize('provider', PROVIDERS)
+def test_a_correction_after_a_tool_round_keeps_roles_strictly_alternating(provider):
+    with ConversationFixture(provider) as fx:
+        effects, _ = lookup_fixture(fx)
+        queue_json(fx, [wire_call('a')])
+        queue_json(fx, [SCHEMA_INVALID | {'id': 'b'}])
+        fx.queue_text('High water at noon.')
+        turn = corrected(fx).turn(fx.agent, message='When is high water?', policy=fx.policy)
+        roles = wire_roles(fx, 2)
+    expected = (
+        ['user', 'assistant', 'tool', 'assistant', 'user']
+        if provider == 'openai-compatible'
+        else ['user', 'assistant', 'user', 'assistant', 'user']
+    )  # Anthropic carries tool results as user.
+    assert turn.result.exit_code == 0 and effects == [{}]
+    assert roles == expected and strictly_alternating(roles)
+
+
+def test_the_correction_request_is_labelled_apart_in_progress_lines(monkeypatch):
+    import prosaic_runtime.execution as execution
+
+    lines = []  # Recorded where the loop writes them; turns drop progress events before observers.
+    monkeypatch.setattr(execution, '_progress', lines.append)
+    with ConversationFixture('openai-compatible') as fx:
+        lookup_fixture(fx)
+        queue_json(fx, [SCHEMA_INVALID])
+        fx.queue_text('High water at noon.')
+        corrected(fx).turn(fx.agent, message='When is high water?', policy=fx.policy)
+    err = '\n'.join(lines)
+    assert err.count('turn 1: request') == 1 and err.count('turn 1 (correction): request') == 1
+    assert 'turn 1 (correction): response' in err
+
+
+def test_a_frozen_turn_accepts_the_switch_only_as_true():
+    from prosaic_runtime.frozen_turns import FrozenTurnInput
+
+    with ConversationFixture('openai-compatible') as fx:
+        lookup_fixture(fx)
+        prepared = corrected(fx).prepare_turn(
+            fx.agent, message='Current', input_data={'selected': 'x'}, input_profile='pack-v1', policy=fx.policy
+        )
+        document = prepared.export_frozen_input().to_dict()
+    for value in (False, 1, 'true', None):
+        tampered = json.loads(json.dumps(document))
+        tampered['bindings']['toolRequestCorrection'] = value
+        with pytest.raises(ValueError):
+            FrozenTurnInput.from_dict(tampered)
+    assert FrozenTurnInput.from_dict(document).to_dict() == document
+
+
+def stop_with_tool_calls(fx, streaming):
+    """A response that carries tool calls but declares it stopped: an incomplete batch, not a malformed call."""
+    call = {'id': 'a', 'type': 'function', 'function': {'name': 'lookup', 'arguments': '{}'}}
+    if fx.provider == 'anthropic':
+        fx.queue(
+            {
+                'type': 'message',
+                'id': 'native',
+                'model': 'fixture-model',
+                'role': 'assistant',
+                'content': [{'type': 'tool_use', 'id': 'a', 'name': 'lookup', 'input': {}}],
+                'stop_reason': 'end_turn',
+                'usage': {'input_tokens': 2, 'output_tokens': 3},
+            }
+        )
+    elif streaming:
+        fx.streaming = True
+        events = [
+            {'choices': [{'index': 0, 'delta': {'tool_calls': [{**call, 'index': 0}]}, 'finish_reason': None}]},
+            {
+                'choices': [{'index': 0, 'delta': {}, 'finish_reason': 'stop'}],
+                'usage': {'prompt_tokens': 2, 'completion_tokens': 3, 'total_tokens': 5},
+            },
+        ]
+        body = ''.join(f'data: {json.dumps(event)}\n\n' for event in events) + 'data: [DONE]\n\n'
+        fx.responses.append((200, 'text/event-stream', body.encode()))
+    else:
+        fx.queue(
+            {
+                'choices': [
+                    {'message': {'role': 'assistant', 'content': '', 'tool_calls': [call]}, 'finish_reason': 'stop'}
+                ],
+                'usage': {'prompt_tokens': 2, 'completion_tokens': 3, 'total_tokens': 5},
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    'provider,streaming,code',
+    [
+        ('openai-compatible', False, 'incompleteGeneration'),
+        ('openai-compatible', True, 'incompleteGeneration'),
+        # The native parser refuses tool use that disagrees with the stop reason: response-level, also terminal.
+        ('anthropic', False, 'invalidToolRequest'),
+    ],
+)
+def test_tool_calls_with_a_stop_finish_reason_are_not_corrected(provider, streaming, code):
+    """Documented gap: the correction covers batch admission only, not an incomplete or unparsable batch."""
+    with ConversationFixture(provider) as fx:
+        effects, _ = lookup_fixture(fx)
+        stop_with_tool_calls(fx, streaming)
+        fx.queue_text('Should not be reached')
+        turn = corrected(fx).turn(fx.agent, message='When is high water?', policy=fx.policy)
+        assert len(fx.requests) == 1
+    assert effects == [] and failure(turn) == code and turn.tool_request_corrections == ()

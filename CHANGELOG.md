@@ -2,10 +2,13 @@
 
 ## Unreleased
 
-- A `fix` guard that declines to repair (a violation with `fixed=None`) now takes the rule retry path instead of
-  failing the turn as a guard fault. One extra provider request is possible, within `RunPolicy` budgets; the rule is
-  reported in the new `TurnResult.rules_declined` instead of `rules_faulted`. `TurnResult.rules_retried` lists rules
-  answered with a granted retry. Unusable repairs and raising guards remain faults.
+- **Behaviour change, on by default:** a `fix` guard that declines to repair (a violation with `fixed=None`) no
+  longer stops the turn as a guard fault; it takes the rule retry path. Such a turn may now spend one more provider
+  request (always within `RunPolicy` budgets) and may succeed; the rule is reported in the new
+  `TurnResult.rules_declined` instead of `rules_faulted`. Authors who want a declined repair to stop the turn at once
+  should bind the rule with `on_violation=fail`. A turn prepared or frozen under 0.9.21 keeps identical bytes but
+  follows the new behaviour when executed by this release. `TurnResult.rules_retried` lists rules answered with a
+  granted retry. Unusable repairs and raising guards remain faults.
 - Add opt-in `ProsaicRuntime(..., correct_malformed_tool_calls=True)` (default off): a conversation turn may ask the
   model once to resend a tool call that batch admission refused, with a closed-code envelope and within the request
   budget, instead of failing with `invalidToolRequest`. `TurnResult.tool_request_corrections` reports it.
@@ -13,9 +16,13 @@
 - Add `ProsaicRuntime(..., rule_retries=1)` (default 1, the previous single retry; 0 to 3, other values refused when
   the runtime is constructed): the per-turn rule retry allowance, shared by retries, declined repairs and citation
   repairs and always within `RunPolicy` budgets. `TurnResult.rule_retries_used` reports the retries spent. A value
-  other than 1 enters the prepared-turn identity; default turns keep their bytes.
-- Fix: a `before_tool` repair that the tool schema refuses now lists the repairing rule in `rules_faulted` (and not in
-  `rules_fixed`), as documented; it already stopped the turn with `ruleViolation`.
+  other than 1 enters the prepared-turn identity; default turns keep their bytes. A retry or correction still runs
+  under the turn's deadline and token budget: if either runs out during the extra request, the turn fails with
+  `timeout` or `budgetExceeded`, which then stands in for the `ruleViolation` or `invalidToolRequest` that prompted
+  it, as for retries before.
+- Fix: a `before_tool` repair that the tool schema refuses now lists the repairing rule in `rules_faulted`, as
+  documented; it already stopped the turn with `ruleViolation`. Since the refused batch never runs, no repair recorded
+  for it stays in `rules_fixed`.
 
 ## 0.9.21 — 2026-11-11
 

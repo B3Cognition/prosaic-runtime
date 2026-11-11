@@ -153,6 +153,12 @@ like `guards`, so it is not a YAML key):
 - The correction is a provider request inside the existing `RunPolicy` budget:
   with none left, the turn fails as before. A second malformed batch fails the
   turn with `invalidToolRequest`. It is separate from the rule retry allowance.
+  Like a rule retry, it runs under the turn's deadline and token budget: if
+  either runs out during it, the turn fails with `timeout` or `budgetExceeded`,
+  which then stands in for the original `invalidToolRequest`.
+- On the wire, the refused response is replaced by a fixed assistant
+  placeholder (no model text, no tool calls) before the envelope, so roles stay
+  strictly alternating on providers and chat templates that require it.
 - `TurnResult.tool_request_corrections` lists the issue code of the correction
   taken; `providerAttempts` counts its request.
 - A provider response that cannot be parsed (for example duplicate envelope keys,
