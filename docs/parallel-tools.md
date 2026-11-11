@@ -1,6 +1,6 @@
 # Parallel read tools
 
-This development candidate adds opt-in concurrency to API `run` and role-aware
+Runtime 0.9.21 adds opt-in concurrency to API `run` and role-aware
 `turn`/prepared-turn execution on OpenAI-compatible and Anthropic providers.
 The default remains sequential. Direct `run_tool`, native/CLI backends and the
 external structured loop do not support a parallel policy. MCP clients and
@@ -52,7 +52,7 @@ journal formats are unchanged.
 
 Build once from a committed head using `scripts/release_artifacts.py build
 --ref <commit> --output <new-directory> --expect
-b3-prosaic-runtime=0.9.21.dev1`. Keep its original artifacts and receipt. Install
+b3-prosaic-runtime=0.9.21`. Keep its original artifacts and receipt. Install
 that wheel into an isolated environment with Core 0.5.0 and test dependencies,
 then run `python -I -m pytest -o pythonpath=tests
  tests/test_parallel_tool_installed.py` and `python -I

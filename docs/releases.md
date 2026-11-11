@@ -1,5 +1,7 @@
 # Releases and compatibility
 
+Runtime 0.9.21 adds [parallel read tools](release-0.9.21.md) and pairs with Harness 0.9.15, store 0.4.4 and Lab 0.9.14.
+
 Runtime 0.9.20 adds [safe events and captured citations](release-0.9.20.md).
 The tools train pairs it with Harness 0.9.14 / store 0.4.3 and Lab 0.9.13;
 Core 0.5.0 and recorder 0.3.0 are unchanged. Publication is confirmed by the

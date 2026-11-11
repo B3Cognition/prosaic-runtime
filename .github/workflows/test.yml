@@ -83,7 +83,7 @@ jobs:
       - name: Require installed context-pack APIs
         run: |
           python -m venv "$RUNNER_TEMP/runtime-context-packs"
-          "$RUNNER_TEMP/runtime-context-packs/bin/python" -m pip install dist/b3_prosaic_runtime-0.9.21.dev1-py3-none-any.whl 'b3-prosaic-runtime-postgres==0.3.0' pytest
+          "$RUNNER_TEMP/runtime-context-packs/bin/python" -m pip install dist/b3_prosaic_runtime-0.9.21-py3-none-any.whl 'b3-prosaic-runtime-postgres==0.3.0' pytest
           "$RUNNER_TEMP/runtime-context-packs/bin/python" -m pip check
           "$RUNNER_TEMP/runtime-context-packs/bin/python" -I scripts/context_pack_wheel_smoke.py
           "$RUNNER_TEMP/runtime-context-packs/bin/python" -I scripts/tool_contract_smoke.py
@@ -130,7 +130,7 @@ jobs:
           python -m build adapters/postgres
       - name: Install release wheels
         run: |
-          python -m pip install dist/b3_prosaic_runtime-0.9.21.dev1-py3-none-any.whl
+          python -m pip install dist/b3_prosaic_runtime-0.9.21-py3-none-any.whl
           python -m pip install adapters/postgres/dist/b3_prosaic_runtime_postgres-0.3.0-py3-none-any.whl
       - name: Use the immutable published recorder 0.3.0 for PostgreSQL compatibility
         run: python -m pip install --force-reinstall --no-deps 'https://files.pythonhosted.org/packages/4f/95/39d4602749df2e83a8d7afc4f9f68819e0dea48c2f688d824f8a07ed1aae/b3_prosaic_runtime_postgres-0.3.0-py3-none-any.whl#sha256=5f29ce5b0a1cb3ce4ee41f44c50e322b5b1af73cbe186ecadc428f81ccc7b5ca'
