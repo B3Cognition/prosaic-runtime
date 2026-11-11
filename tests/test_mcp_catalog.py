@@ -100,3 +100,14 @@ def test_destination_rejects_ambient_credentials_and_non_https(endpoint):
 def test_ambiguous_endpoint_paths_are_rejected(path):
     with pytest.raises(ValueError, match="invalid MCP endpoint"):
         McpServerV1("catalog", "r1", "https://catalog.invalid" + path, "2026-07-28")
+
+
+def test_oversized_unselected_schema_cannot_be_bound():
+    from prosaic_runtime.mcp import McpLimitsV1
+
+    host = client(limits=McpLimitsV1(max_schema_bytes=128))
+    catalog = snapshot(host, {**SCHEMA, "properties": {
+        "name": {"type": "string", "enum": ["x" * 128]}}})
+    assert catalog.to_dict()["tools"][0]["name"] == "find"
+    with pytest.raises(ValueError):
+        host.bind_tools(catalog, [spec()])
