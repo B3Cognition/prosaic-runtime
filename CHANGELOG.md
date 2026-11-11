@@ -14,6 +14,8 @@
   the runtime is constructed): the per-turn rule retry allowance, shared by retries, declined repairs and citation
   repairs and always within `RunPolicy` budgets. `TurnResult.rule_retries_used` reports the retries spent. A value
   other than 1 enters the prepared-turn identity; default turns keep their bytes.
+- Fix: a `before_tool` repair that the tool schema refuses now lists the repairing rule in `rules_faulted` (and not in
+  `rules_fixed`), as documented; it already stopped the turn with `ruleViolation`.
 
 ## 0.9.21 — 2026-11-11
 

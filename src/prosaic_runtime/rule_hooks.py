@@ -146,6 +146,7 @@ class RuleHooks:
         self.refusals = {}
         self.evaluated, self.violated, self.fixed, self.faulted = set(), set(), set(), set()
         self.declined, self.retried = set(), set()
+        self.last_repairers = []
 
     # Reporting ---------------------------------------------------------------
     def report(self):
@@ -317,6 +318,7 @@ class RuleHooks:
         """
         encoded = {name: encode_fact(fact) for name, fact in facts.items()}  # Once per settle, not per check.
         current = encode_fact(value)
+        self.last_repairers = repairers = []  # Rules whose repair shaped the settled value, in order.
         for number in range(1, FIX_PASSES + 2):
             violations, changed = [], False
             for binding in bindings:
@@ -339,6 +341,7 @@ class RuleHooks:
                         value = verdict.fixed if type(verdict.fixed) is str else json.loads(current.text)
                         self.violated.add(binding.rule_id)  # A repaired violation is a real violation.
                         self.fixed.add(binding.rule_id)
+                        repairers.append(binding.rule_id)
             if not violations:
                 return value, []
             if changed and number <= FIX_PASSES:
@@ -369,7 +372,7 @@ class RuleHooks:
         bindings = self.ruleset.at('before_tool')
         if not bindings:
             return None
-        rewritten, refused = {}, []
+        rewritten, refused, repairers, fixed_before = {}, [], {}, set(self.fixed)
         for call in turn.tool_calls:
             name = call['function']['name']
             arguments = json.loads(call['function']['arguments'])
@@ -380,7 +383,7 @@ class RuleHooks:
             if blocking:
                 refused.append((call['id'], blocking))
             elif not _same(value, arguments):
-                rewritten[call['id']] = value
+                rewritten[call['id']], repairers[call['id']] = value, self.last_repairers
         if refused:
             if not self._take_retry(('tools', self.batch), [pair for _, blocking in refused for pair in blocking]):
                 return STOP
@@ -406,7 +409,16 @@ class RuleHooks:
                         for block in turn.continuation
                     ]
                 turn.tool_calls = list(registry.validate_batch(turn.tool_calls))
-            except Exception:  # A repair outside the tool schema is a guard fault.
+            except Exception as error:  # A repair outside the tool schema is a guard fault.
+                # The batch was admitted before these repairs, so a refused call is a rewritten one: fault the
+                # rules that rewrote it (every rewriting rule when admission cannot name the call).
+                index = getattr(error, 'index', None)
+                calls = turn.tool_calls
+                named = calls[index]['id'] if type(index) is int and 0 <= index < len(calls) else None
+                culprits = {rule_id for call_id in ([named] if named in rewritten else rewritten)
+                            for rule_id in repairers[call_id]}
+                self.faulted.update(culprits)
+                self.fixed.difference_update(culprits - fixed_before)  # An unused repair repaired nothing.
                 return STOP
         return None
 
