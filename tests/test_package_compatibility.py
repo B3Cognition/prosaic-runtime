@@ -17,7 +17,7 @@ def test_wheel_metadata():
 
     for package, name, version in (
             (prosaic, "b3-prosaic", "0.5.0"),
-            (prosaic_runtime, "b3-prosaic-runtime", "0.9.21"),
+            (prosaic_runtime, "b3-prosaic-runtime", "0.9.22.dev1"),
             (prosaic_runtime_postgres, "b3-prosaic-runtime-postgres", "0.3.0")):
         owner = metadata.distribution(name)
         assert owner.version == package.__version__ == version
