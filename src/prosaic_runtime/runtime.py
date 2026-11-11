@@ -406,7 +406,7 @@ class _BoundedAnthropicBackend(_BoundedMixin, AnthropicBackend):
 
 
 class ProsaicRuntime:
-    capabilities = frozenset({'conformance_v1', 'invocation_budgets_v1', 'observer_v1', 'accounting_v1', 'read_receipts_v1', 'initial_tool_v1', 'initial_tool_enforcement_v1', 'acquisition_v1', 'custom_tools_v1', 'cli_tools_v1', 'cli_sandbox_v1'})
+    capabilities = frozenset({'conformance_v1', 'invocation_budgets_v1', 'observer_v1', 'accounting_v1', 'read_receipts_v1', 'initial_tool_v1', 'initial_tool_enforcement_v1', 'acquisition_v1', 'custom_tools_v1', 'cli_tools_v1', 'cli_sandbox_v1', 'mcp_client_v1'})
     capabilities |= frozenset({'tool_context_v1', 'tool_journal_v1'})
     capabilities |= frozenset({'conversation_turn_v1'})
     capabilities |= frozenset({'context_assembly_v1', 'http_correlation_v1', 'execution_lifecycle_v1'})
@@ -574,7 +574,12 @@ class ProsaicRuntime:
         scope = InvocationScope(str(uuid4())) if operation_context is None else operation_context
         # Static effect admission precedes callbacks/observation as well as I/O.
         try:
-            admit_tool_effects(self._custom_tools, requested_tools(approved.frontmatter.get('tools')), scope, tool_journal)
+            from .mcp import admit_mcp_tools
+            requested = requested_tools(approved.frontmatter.get('tools'))
+            admit_mcp_tools(self._custom_tools, requested, surface="api", policy=policy,
+                            scope=scope, journal=tool_journal, contracts=tool_contract_bindings,
+                            initial_tool=policy.initial_tool, execution=True)
+            admit_tool_effects(self._custom_tools, requested, scope, tool_journal)
         except (ValueError, TypeError, AttributeError) as exc:
             raise TurnAdmissionError('invalidPolicy') from exc
         capture, budget = TurnCapture(owned['message'], scope, limits), InvocationBudget(policy)
@@ -875,6 +880,11 @@ class ProsaicRuntime:
                 requested = requested_tools(artifact.frontmatter.get("tools"))
                 from .tool_contracts import admit_tool_contracts
                 from .tool_event_contract import current_bindings
+                from .mcp import admit_mcp_tools
+                admit_mcp_tools(custom, requested, surface="api", policy=policy,
+                                scope=_operation_context, journal=_tool_journal,
+                                contracts=current_bindings(), initial_tool=policy.initial_tool,
+                                execution=True)
                 admit_tool_contracts(custom, requested, current_bindings())
                 from .tool_parallel_contracts import admit_parallel_execution
                 admit_parallel_execution(policy,current_bindings(),metadata_limit=_turn_capture.limits.max_metadata_bytes if _turn_capture is not None else 65536)
@@ -912,6 +922,7 @@ class ProsaicRuntime:
                     refuse_unenforced(acquisition)
                     validate_execution_artifact(artifact, config, acquisition=acquisition)
                     acquisition_tools = requested_tools(acquisition.frontmatter.get('tools'))
+                    admit_mcp_tools(custom, acquisition_tools, surface="acquisition")
                     if acquisition_tools - requested or policy.initial_tool not in acquisition_tools:
                         raise ValueError('acquisition requires an explicit initial_tool and tools granted by final prose, runtime and host')
                     acquisition_tools &= tools

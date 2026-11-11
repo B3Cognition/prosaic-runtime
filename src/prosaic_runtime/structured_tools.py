@@ -61,6 +61,8 @@ class StructuredToolLoop:
                 raise ValueError('tool contract scope mismatch')
             operation_context = tool_contract_bindings.scope
         self.tool_contract_bindings = tool_contract_bindings
+        from .mcp import admit_mcp_tools
+        admit_mcp_tools(self.tools, self.allowed_tools, surface="structured")
         admit_tool_contracts(self.tools, self.allowed_tools, tool_contract_bindings, automatic_citations=False)
         self._evidence = EvidenceRegistryV1(tool_contract_bindings) if tool_contract_bindings is not None else None
         self.operation_context = InvocationScope(str(uuid4())) if operation_context is None else operation_context

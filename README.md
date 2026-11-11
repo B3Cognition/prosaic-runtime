@@ -859,3 +859,33 @@ See [execution correlation and graceful drain](docs/execution-lifecycle.md) for 
 The next development candidate supports opt-in, bounded **parallel read tools**
 on both API provider wires, with ordered guards and evidence. See
 [parallel read policy, events and compatibility](docs/parallel-tools.md).
+
+### MCP read tools
+
+Use the optional `b3-prosaic-runtime[mcp]` extra and import the host API from
+`prosaic_runtime.mcp`. Configure `McpServerV1` for an approved HTTPS
+Streamable HTTP endpoint and select protocol `2026-07-28` or `2025-11-25`.
+`McpClientV1` receives host callbacks for destination approval, resource-bound
+bearer credentials, access scope and per-call authorization. Credential-free
+loopback HTTP requires explicit fixture opt-in.
+
+Enter the client as a context manager and call
+`client.discover(access_scope=scope)` during host onboarding. Save the private
+`catalog.to_dict()` document and pin `catalog.sha256` independently. Restore it
+with `client.restore_catalog(document, access_scope=scope, expected_sha256=sha)`.
+Bind each reviewed tool with `McpToolSpecV1`, including its local alias, literal
+`read_only=True`, typed result contract and result projector. Review the remote
+schema and supply a closed argument schema for an open remote input schema.
+
+Pass the generated registrations as `custom_tools`. API runs and turns need
+finite provider and tool attempt caps, an invocation scope with an explicit
+operation namespace, a tool journal and `ToolContractBindingsV1` with an
+evidence authorizer. The model sees the approved alias. The client relists before
+a fresh dispatch and compares the selected schema with its approved snapshot.
+Completed journal entries replay under current authorization. A changed
+catalogue requires review and rebinding for new work. An ambiguous response
+after the tool POST requires journal reconciliation.
+
+MCP registrations run serially in parallel tool batches. Existing local tools
+use the base install. The MCP extra is needed when opening a client or executing
+a selected MCP alias.
