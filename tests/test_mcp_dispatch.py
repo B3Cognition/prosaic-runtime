@@ -247,7 +247,7 @@ def test_copy_cannot_drop_mcp_journaling_or_serial_dispatch(tmp_path):
                     handler=tool.handler, version=tool.version, with_context=True, authorize=tool.authorize,
                     max_argument_bytes=tool.max_argument_bytes, max_result_bytes=tool.max_result_bytes,
                     result_contract=tool.result_contract)
-        for options in ({}, {"parallel_read": True}):
+        for options in ({}, {"parallel_read": True, "operation_key": tool.operation_key}):
             fx.tools = {"lookup": CustomTool(**base, **options)}
             with pytest.raises(TurnAdmissionError):
                 fx.runtime.turn(fx.agent, message="Review", policy=fx.policy,
