@@ -74,7 +74,7 @@ def _unique_pairs(pairs):
     return value
 
 
-def _response_object(raw, request_id, *, notifications=False):
+def _response_object(raw, request_id, *, notifications=False, tool_call=False):
     try:
         frame = json.loads(raw, object_pairs_hook=_unique_pairs, parse_constant=reject_constant)
     except (ValueError, RecursionError, UnicodeError):
@@ -86,12 +86,18 @@ def _response_object(raw, request_id, *, notifications=False):
     if ("method" in frame or "id" not in frame or type(frame["id"]) is not type(request_id)
             or frame["id"] != request_id or ("result" in frame) == ("error" in frame)):
         raise _ProtocolError()
+    if tool_call and "result" in frame:
+        result = frame["result"]
+        if (type(result) is not dict or type(result.get("isError", False)) is not bool
+                or result.get("resultType", "complete") != "complete"):
+            raise _ProtocolError()
     return frame
 
 
 class _BoundedStream(httpx2.AsyncByteStream):
-    def __init__(self, stream, transport, request_id, *, sse):
+    def __init__(self, stream, transport, request_id, *, sse, tool_call):
         self.stream, self.transport, self.request_id, self.sse = stream, transport, request_id, sse
+        self.tool_call = tool_call
 
     async def __aiter__(self):
         if not self.sse:
@@ -99,7 +105,7 @@ class _BoundedStream(httpx2.AsyncByteStream):
             async for chunk in self.stream:
                 self.transport.consume(len(chunk))
                 parts.extend(chunk)
-            _response_object(parts, self.request_id)
+            _response_object(parts, self.request_id, tool_call=self.tool_call)
             yield bytes(parts)
             return
         event = bytearray()
@@ -126,7 +132,8 @@ class _BoundedStream(httpx2.AsyncByteStream):
                             if item.startswith(b"data:")]
                     event.clear()
                     if data and any(data):
-                        frame = _response_object(b"\n".join(data), self.request_id, notifications=True)
+                        frame = _response_object(b"\n".join(data), self.request_id,
+                                                 notifications=True, tool_call=self.tool_call)
                         if frame is not None:
                             # Only a matching terminal frame reaches the SDK.
                             # Strip server resumption tokens and retry directives.
@@ -192,7 +199,7 @@ class _Transport(httpx2.AsyncBaseTransport):
         if request.method == "GET":
             return httpx2.Response(405)
         request.headers.pop("cookie", None)
-        request_id = None
+        request_id = method = None
         if request.method == "DELETE":
             if not self.legacy or self.session_id is None or self.delete_sent:
                 raise _ProtocolError()
@@ -231,7 +238,7 @@ class _Transport(httpx2.AsyncBaseTransport):
                 if mime not in ("application/json", "text/event-stream"):
                     raise _ProtocolError()
                 response.stream = _BoundedStream(response.stream, self, request_id,
-                                                  sse=mime == "text/event-stream")
+                                                  sse=mime == "text/event-stream", tool_call=method == "tools/call")
             else:
                 await response.aclose()
                 return httpx2.Response(response.status_code)

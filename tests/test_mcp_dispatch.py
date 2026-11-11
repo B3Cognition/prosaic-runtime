@@ -65,7 +65,7 @@ def test_journal_replay_has_zero_mcp_io_and_checks_current_grant(provider, tmp_p
         assert methods(requests) == ["tools/list", "tools/list", "tools/call"]
 
 
-@pytest.mark.parametrize("fault", ["revocation", "drift", "remote-error", "wrong-id", "input-required", "header-mismatch"])
+@pytest.mark.parametrize("fault", ["revocation", "drift", "remote-error", "wrong-id", "input-required", "header-mismatch", "coerced-success"])
 def test_fault_dispatch_count_and_replay_fence(fault, tmp_path):
     grant = [True]
     listed = [0]
@@ -83,6 +83,9 @@ def test_fault_dispatch_count_and_replay_fence(fault, tmp_path):
         if fault == "remote-error":
             status, headers, value = completion()
             return status, headers, {**value, "isError": True}
+        if fault == "coerced-success":
+            status, headers, value = completion()
+            return status, headers, {**value, "isError": "false"}
         if fault == "wrong-id":
             return 200, {"Content-Type": "application/json"}, b'{"jsonrpc":"2.0","id":"wrong","result":{}}'
         if fault == "input-required":
@@ -207,3 +210,48 @@ def test_replay_rechecks_grant_after_a_blocking_claim(tmp_path):
         followup = json.dumps(fx.requests[-1])
         assert "71649" not in followup and "authorization_denied" in followup
         assert methods(requests).count("tools/call") == 1
+
+
+def test_run_and_turn_share_invocation_wide_slot_after_builtin(tmp_path):
+    from prosaic_runtime import ProsaicArtifact, ProsaicRuntime
+
+    def answer(request):
+        return listing() if request["method"] == "tools/list" else completion()
+
+    with endpoint(answer) as (url, requests), opened(url) as host, ConversationFixture("openai-compatible") as fx:
+        fx.tools = host.bind_tools(host.discover(access_scope="scope-1"), [spec()])
+        allowed = frozenset({"lookup", "read_file"})
+        runtime = ProsaicRuntime(replace(fx.runtime.config, allowed_tools=allowed), custom_tools=fx.tools)
+        agent = ProsaicArtifact("approved", "subagent", {"tools": sorted(allowed)}, "Read approved material.")
+        options = dict(policy=replace(fx.policy, allowed_tools=allowed, read_roots=(str(tmp_path),)),
+                       tool_journal=SqliteJournal(tmp_path / "calls.sqlite"), tool_contract_bindings=bindings())
+        (tmp_path / "fixture.txt").write_text("synthetic lookup")
+        for entrypoint in ("run", "turn"):
+            fx.queue_calls([{"name": "read_file", "id": "read1", "arguments": '{"path":"fixture.txt"}'},
+                            {"name": "lookup", "id": "lookup1", "arguments": '{"name":"svc"}'}])
+            fx.queue_text("done")
+            if entrypoint == "run":
+                result = runtime.run(agent, cwd=tmp_path, **options)
+            else:
+                result = runtime.turn(agent, message="Review", workspace=tmp_path, **options).result
+            assert result.exit_code == 0, result
+        assert methods(requests).count("tools/call") == 1
+
+
+def test_copy_cannot_drop_mcp_journaling_or_serial_dispatch(tmp_path):
+    from prosaic_runtime import CustomTool, TurnAdmissionError
+
+    with endpoint(lambda _: listing()) as (url, requests), opened(url) as host, ConversationFixture("anthropic") as fx:
+        tool = host.bind_tools(host.discover(access_scope="scope-1"), [spec()])["lookup"]
+        base = dict(name=tool.name, description=tool.description, parameters=tool.parameters,
+                    handler=tool.handler, version=tool.version, with_context=True, authorize=tool.authorize,
+                    max_argument_bytes=tool.max_argument_bytes, max_result_bytes=tool.max_result_bytes,
+                    result_contract=tool.result_contract)
+        for options in ({}, {"parallel_read": True}):
+            fx.tools = {"lookup": CustomTool(**base, **options)}
+            with pytest.raises(TurnAdmissionError):
+                fx.runtime.turn(fx.agent, message="Review", policy=fx.policy,
+                                tool_journal=SqliteJournal(tmp_path / "calls.sqlite"),
+                                tool_contract_bindings=bindings())
+        assert fx.requests == []
+        assert methods(requests) == ["tools/list"]

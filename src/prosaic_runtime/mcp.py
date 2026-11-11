@@ -62,6 +62,25 @@ class _McpHandler:
     binding: str
     schemas: bytes
 
+    def version(self, parameters):
+        return "mcp-v1." + digest({
+            "catalogBinding": self.binding, "remoteName": self.spec.remote_name,
+            "schemas": json.loads(self.schemas), "arguments": parameters, "mode": self.spec.result_mode,
+            "result": self.spec.result_contract.to_dict(),
+            "event": self.spec.event_policy.to_dict() if self.spec.event_policy is not None else None,
+            "version": self.spec.binding_version, "limits": vars(self.client.limits),
+        })
+
+    def validate_registration(self, tool):
+        if (tool.name != self.spec.alias or tool.description != self.spec.description
+                or not tool.with_context or tool.terminal or tool.parallel_read
+                or tool.operation_key is not _operation_key or tool.authorize != self.authorize
+                or tool.result_contract != self.spec.result_contract or tool.event_policy != self.spec.event_policy
+                or tool.max_argument_bytes != self.client.limits.max_argument_bytes
+                or tool.max_result_bytes != self.client.limits.max_result_bytes
+                or tool.version != self.version(tool.parameters)):
+            raise ValueError("MCP registration differs from its host binding")
+
     def authorize(self, arguments, context):
         try:
             scope = self.client._scope_key(context)
@@ -89,6 +108,9 @@ def admit_mcp_tools(tools, selected, *, surface, policy=None, scope=None, journa
     if (type(contracts) is not ToolContractBindingsV1 or policy is None
             or policy.max_provider_requests is None or policy.max_tool_calls is None):
         raise ValueError("MCP requires tool contracts and finite invocation budgets")
+    for name in names:
+        tool = tools[name]
+        tool.handler.validate_registration(tool)
     if execution:
         if scope != contracts.scope or scope.operation_namespace is None or journal is None:
             raise ValueError("MCP requires an owned scope and tool journal")
@@ -155,15 +177,8 @@ class McpClientV1:
                                     self.limits.max_schema_bytes, input_schema=True, closed=True)
             schemas = {"inputSchema": remote_input, "outputSchema": remote_output}
             handler = _McpHandler(self, spec, document["binding"], canonical(schemas))
-            identity = digest({
-                "catalogBinding": document["binding"], "remoteName": spec.remote_name,
-                "schemas": schemas, "arguments": local, "mode": spec.result_mode,
-                "result": spec.result_contract.to_dict(),
-                "event": spec.event_policy.to_dict() if spec.event_policy is not None else None,
-                "version": spec.binding_version, "limits": vars(self.limits),
-            })
             registry[spec.alias] = CustomTool(
-                spec.alias, spec.description, local, handler, "mcp-v1." + identity,
+                spec.alias, spec.description, local, handler, handler.version(local),
                 with_context=True, authorize=handler.authorize, operation_key=_operation_key,
                 max_argument_bytes=self.limits.max_argument_bytes,
                 max_result_bytes=self.limits.max_result_bytes,

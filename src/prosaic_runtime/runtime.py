@@ -103,10 +103,14 @@ class _BoundedMixin:
 
     def make_registry(self, cwd, features, metadata):
         builtin = DisabledBuiltinRegistry() if cwd is None else super().make_registry(cwd, features, metadata)
+        from .mcp import is_mcp_tool
+        allowed_tools = metadata.get('allowed_tools', ())
+        index_all_calls = (self.turn_mode or self.parallel_tools is not None
+                           or any(is_mcp_tool(self.custom_tools.get(name)) for name in allowed_tools))
         return BoundedToolRegistry(builtin,
-                                   self.custom_tools, metadata.get('allowed_tools', ()), self.check_boundary,
+                                   self.custom_tools, allowed_tools, self.check_boundary,
                                    self.before_tool_dispatch,
-                                   self.tool_execution_options, index_all_calls=self.turn_mode or self.parallel_tools is not None,
+                                   self.tool_execution_options, index_all_calls=index_all_calls,
                                    bounded_recovery=self.budget is not None and self.budget.policy.bounded_tool_recovery,
                                    terminal_capture=self.terminal_capture,
                                    terminal_tools=self.budget.policy.allowed_terminal_tools if self.budget is not None else ())
