@@ -6,6 +6,10 @@
   failing the turn as a guard fault. One extra provider request is possible, within `RunPolicy` budgets; the rule is
   reported in the new `TurnResult.rules_declined` instead of `rules_faulted`. `TurnResult.rules_retried` lists rules
   answered with a granted retry. Unusable repairs and raising guards remain faults.
+- Add opt-in `ProsaicRuntime(..., correct_malformed_tool_calls=True)` (default off): a conversation turn may ask the
+  model once to resend a tool call that batch admission refused, with a closed-code envelope and within the request
+  budget, instead of failing with `invalidToolRequest`. `TurnResult.tool_request_corrections` reports it.
+  Response-level malformation stays terminal. Default turns keep their prepared-turn bytes.
 
 ## 0.9.21 — 2026-11-11
 

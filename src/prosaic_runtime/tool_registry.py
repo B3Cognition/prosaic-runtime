@@ -8,9 +8,14 @@ from .tool_effects import ToolEffectFailure
 
 
 class InvalidToolRequest(ValueError):
-    """A model batch failed pure admission; no partial dispatch is permitted."""
-    def __init__(self):
+    """A model batch failed pure admission; no partial dispatch is permitted.
+
+    Batch admission names the call-level ``issue`` with a closed code, the call's position and, only
+    when the call named a granted tool, that tool; nothing model-supplied. Other sources leave them unset.
+    """
+    def __init__(self, issue=None, index=None, tool=None):
         super().__init__('invalidToolRequest')
+        self.issue, self.index, self.tool = issue, index, tool
 
 
 class DisabledBuiltinRegistry:
@@ -59,30 +64,45 @@ class BoundedToolRegistry:
         """Validate the entire wire batch without effect hooks or counters."""
         schemas = {s['function']['name']: s['function']['parameters'] for s in self.openai_tools()}
         ids, admitted = set(), []
+        issue, index, tool = 'batchShape', None, None  # Closed codes: see tool_request_correction.ISSUES.
         try:
             if type(calls) not in (list, tuple):
                 raise ValueError('batch shape')
             if len(calls) > 1 and any(type(c) is dict and type(c.get('function')) is dict
                     and c['function'].get('name') in self.terminal_tools for c in calls):
+                issue = 'terminalBatch'
                 raise ValueError('terminal tools require a singleton batch')
-            for call in calls:
+            for index, call in enumerate(calls):
+                issue = 'callShape'
                 if type(call) is not dict or set(call) != {'id', 'type', 'function'}:
                     raise ValueError('call shape')
+                issue = 'callIdentity'
                 if not bounded_reference(call['id'], 128) or call['id'] in ids or call['type'] != 'function':
                     raise ValueError('call identity or type')
+                issue = 'functionShape'
                 function = call['function']
                 if type(function) is not dict or set(function) != {'name', 'arguments'}:
                     raise ValueError('function shape')
+                issue = 'toolNotGranted'
                 name = function['name']
                 if type(name) is not str or name not in self.allowed or name not in schemas:
                     raise ValueError('ungranted tool')
+                tool, issue = name, 'argumentsMalformed'
                 maximum = self.custom[name].max_argument_bytes if name in self.custom else 16_384
-                parse_arguments(function['arguments'], schemas[name], maximum)
+                raw = function['arguments']
+                if type(raw) is str and len(raw.encode('utf-8', 'surrogatepass')) > maximum:
+                    issue = 'argumentsTooLarge'
+                try:
+                    parse_arguments(raw, schemas[name], maximum)
+                except ValidationError:
+                    issue = 'argumentsSchema'
+                    raise
                 ids.add(call['id'])
                 admitted.append({'id': call['id'], 'type': 'function',
                                  'function': dict(function)})
+                tool = None
         except (ValueError, TypeError, KeyError, RecursionError, OverflowError, UnicodeError, ValidationError):
-            raise InvalidToolRequest() from None
+            raise InvalidToolRequest(issue, index, tool) from None
         return tuple(admitted)
 
     def _admit_attempt(self, tool_call):

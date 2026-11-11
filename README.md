@@ -637,6 +637,11 @@ rather than running it unchecked. Without tags nothing changes, byte for byte. S
 [rule admission](docs/rules-admission.md); guarded Harness conversations need a
 companion Harness release.
 
+`ProsaicRuntime(config, correct_malformed_tool_calls=True)` lets a conversation turn ask
+the model once to resend a tool call that batch admission refused, within the
+request budget, instead of failing with `invalidToolRequest`. It is off by
+default; see [conversation turns](docs/conversations.md).
+
 ## Limits and events
 
 Default invocation limits: 120 seconds, 8 tool rounds, 256 KiB input. Endpoint defaults: 4,096 output tokens per turn and 8 MiB captured response per turn. Conversation requests are checked against the input limit before tool-loop turns; oversized responses fail. Old tool results can be compacted. Repeated identical tool rounds disable tools for a final answer.

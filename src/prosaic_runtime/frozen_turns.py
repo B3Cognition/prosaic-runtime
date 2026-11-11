@@ -73,7 +73,7 @@ class FrozenTurnInput(_OwnedRecord):
             raise ValueError('unexpected optional input view')
         bindings=document['bindings']
         _closed(bindings,{'agent','policy','limits','profile','endpoint','tools','cliSandbox'},
-                {'rules','contextPolicy','counterDescriptor'} | ({'toolContractV1'} if document['version']>=2 else set()) | ({'parallelToolsV1'} if document['version']==3 else set()))
+                {'rules','contextPolicy','counterDescriptor','toolRequestCorrection'} | ({'toolContractV1'} if document['version']>=2 else set()) | ({'parallelToolsV1'} if document['version']==3 else set()))
         if document['version']>=2:
             from .tool_contracts import validate_bindings_document
             validate_bindings_document(bindings.get('toolContractV1'))

@@ -241,7 +241,17 @@ class ExecutionBackend:
                                       'failure_reason': 'incomplete_response',
                                       'token_usage_details': token_usage_details})
                     # No model field may opt into or out of this boundary.
-                    turn.tool_calls = list(registry.validate_batch(turn.tool_calls))
+                    from .tool_registry import InvalidToolRequest
+                    try:
+                        turn.tool_calls = list(registry.validate_batch(turn.tool_calls))
+                    except InvalidToolRequest as error:
+                        correction = getattr(self, 'tool_request_correction', None)
+                        envelope = correction.take(error) if correction is not None else None
+                        if envelope is None:
+                            raise
+                        _progress(f'turn {turn_number}: malformed tool request ({error.issue}); one correction')
+                        messages.append(envelope)
+                        continue  # Nothing in the batch ran; the batch and envelope stay out of history.
                 if tools_disabled:
                     return CliRunResult(
                         exit_code=1,
