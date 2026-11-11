@@ -1,5 +1,6 @@
 """Invocation authority supplied by the host, never elevated by prose."""
 from dataclasses import dataclass
+from .tool_parallel_contracts import ParallelToolPolicyV1
 
 READ_TOOLS = frozenset({"read_file", "read_many_files", "sha256_file", "list_files", "list_tree_with_sizes", "grep_files", "grep_context"})
 WRITE_TOOLS = frozenset({"write_file", "edit_file"})
@@ -22,7 +23,13 @@ class RunPolicy:
     bounded_tool_recovery: bool = False
     allowed_terminal_tools: frozenset[str] = frozenset()
 
+    parallel_tools: ParallelToolPolicyV1 | None = None
+
     def __post_init__(self):
+        if self.parallel_tools is not None:
+            if type(self.parallel_tools) is not ParallelToolPolicyV1:
+                raise ValueError('invalid parallel tool policy')
+            self.parallel_tools.__post_init__()
         if type(self.allowed_terminal_tools) not in (frozenset, set, tuple, list):
             raise ValueError('invalid terminal grants')
         if any(type(name) is not str or not name for name in self.allowed_terminal_tools):

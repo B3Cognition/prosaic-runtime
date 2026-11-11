@@ -11,7 +11,7 @@ from .policy import BUILTIN_TOOLS
 
 _EVENTS = {
     'runtime': frozenset({'invocation_started', 'invocation_completed', 'provider_request_started',
-                         'provider_request_completed', 'tool_started', 'tool_completed'}),
+                         'provider_request_completed', 'tool_started', 'tool_completed', 'tool_execution_settled'}),
     'harness': frozenset({'run_started', 'transition_committed', 'waiting_committed',
                          'recovery_committed', 'blocked_committed', 'run_completed'}),
 }

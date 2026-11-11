@@ -19,13 +19,18 @@ def policy_document(policy):
     if policy.allowed_terminal_tools:
         raise ValueError('terminal tools are unsupported in conversation turns')
     return {**{f.name: getattr(policy, f.name) for f in fields(policy)
-               if f.name != 'allowed_terminal_tools'},
+               if f.name not in {'allowed_terminal_tools', 'parallel_tools'}},
+            **({'parallel_tools': policy.parallel_tools.to_dict()} if policy.parallel_tools is not None else {}),
             'allowed_tools': sorted(policy.allowed_tools),
             'read_roots': list(policy.read_roots), 'write_paths': list(policy.write_paths),
             'forbidden_roots': list(policy.forbidden_roots)}
 
 
 def policy_from_document(document):
+    document = dict(document)
+    if 'parallel_tools' in document:
+        from .tool_parallel_contracts import ParallelToolPolicyV1
+        document['parallel_tools'] = ParallelToolPolicyV1.from_dict(document['parallel_tools'])
     return RunPolicy(**{**document, 'allowed_tools': frozenset(document['allowed_tools']),
                         'read_roots': tuple(document['read_roots']),
                         'write_paths': tuple(document['write_paths']),
@@ -191,6 +196,10 @@ def prepare_turn(runtime, artifact, *, message, history=(), input_data=None, pol
         names = requested & runtime.config.allowed_tools & policy.allowed_tools
         from .tool_contracts import admit_tool_contracts
         admit_tool_contracts(runtime._custom_tools, names, tool_contract_bindings)
+        from .tool_parallel_contracts import admit_parallel_execution
+        admit_parallel_execution(policy,tool_contract_bindings,metadata_limit=limits.max_metadata_bytes)
+        if policy.parallel_tools is not None and limits.max_evidence_bytes < (1024 + tool_contract_bindings.limits.max_evidence_bytes + tool_contract_bindings.limits.max_citation_bytes + len(encode_owned(tool_contract_bindings.to_dict())) + policy.max_tool_calls*2560):
+            raise ValueError('parallel evidence headroom required')
         from .terminal import admit_terminal_tools
         admit_terminal_tools(runtime._custom_tools, names, policy.allowed_terminal_tools, supported=False)
         if names != requested or requested - BUILTIN_TOOLS - runtime.tool_descriptors.keys():
@@ -315,6 +324,9 @@ def prepare_turn(runtime, artifact, *, message, history=(), input_data=None, pol
             material['rules'] = ruleset.material()
         if tool_contract_bindings is not None:
             material['toolContractV1'] = tool_contract_bindings.to_dict()
+            if policy.parallel_tools is not None:
+                from .tool_parallel_contracts import parallel_binding
+                material['parallelToolsV1']=parallel_binding(policy.parallel_tools)
             material['nativePayloadDigest'] = native_digest
         if views is not None:
             material.update(views)
@@ -346,7 +358,7 @@ def prepare_turn(runtime, artifact, *, message, history=(), input_data=None, pol
             max_bytes=ownership_cap,
             max_depth=limits.max_json_depth, max_nodes=limits.max_json_nodes)).hexdigest()
         prepared = PreparedTurn._create(encoded, identity, input_bytes,
-            encoding_version='conversation-turn-v4' if tool_contract_bindings is not None else (
+            encoding_version='conversation-turn-v5' if policy.parallel_tools is not None else 'conversation-turn-v4' if tool_contract_bindings is not None else (
                 'conversation-turn-v3' if views is not None else ('conversation-turn-v2' if context_policy is not None else 'conversation-turn-v1')),
             context_work=work)
         # Private compiled rules, reused by execution; never serialized or compared.

@@ -55,6 +55,11 @@ def tool_contract_entry(function):
     """Reset on every public entry, including nested calls without a grant."""
     @wraps(function)
     def invoke(*args, **kwargs):
+        from .tool_parallel import assert_not_parallel_worker
+        assert_not_parallel_worker()
+        policy=kwargs.get('policy')
+        if function.__name__=='run_tool' and getattr(policy,'parallel_tools',None) is not None:
+            raise ValueError('unsupported direct parallel tools')
         bindings = kwargs.get('tool_contract_bindings')
         if bindings is not None:
             if type(bindings) is not ToolContractBindingsV1:
@@ -183,3 +188,62 @@ class ToolEventLifecycle:
         if outcome is not None and outcome.get('status') == 'ok':
             data = outcome['result']['data'] if self.tool.result_contract is not None else outcome['result']
         self.send(phase, data)
+
+
+class ManagedToolCallV1:
+    """Owner-thread lifecycle/capture shared by sequential and parallel dispatch."""
+    def __init__(self,tool,raw_arguments,options,*,bindings=None,call_id=None,exchange=0,defer_event=False,parallel=False):
+        self.tool,self.raw,self.options=tool,raw_arguments,dict(options)
+        self._original=dict(options)
+        self.bindings=bindings or current_bindings();self.registry=current_registry()
+        self.manage=managed_events(tool,self.bindings)
+        self.capture=self.registry is not None and tool.result_contract is not None
+        self.active=self.manage or self.capture
+        self.defer_event,self.parallel=defer_event,parallel
+        self.known=[None,None];self.queued=False;self.lifecycle=None
+        self.call_id=call_id
+        if not self.active:return
+        self.bindings.__post_init__()
+        if options.get('scope')!=self.bindings.scope:raise ValueError('tool contract scope mismatch')
+        self.call_id=call_id or call_identity(self.bindings.scope,exchange,options.get('call_index',0))
+        if self.manage:self.lifecycle=ToolEventLifecycle(tool,self.bindings,options.get('call_index',0),call_id=self.call_id,exchange=exchange)
+        self.options.update(on_outcome=self.report,on_completion=self.complete,
+            _before_handler=self.lifecycle.start if self.lifecycle is not None else options.get('_before_handler'))
+
+    def report(self,outcome):
+        if self.lifecycle is not None:self.lifecycle.outcome=outcome
+        callback=self.original_options.get('on_outcome')
+        if callback is not None:callback(outcome)
+
+    @property
+    def original_options(self):return self._original
+
+    def complete(self,outcome,status='completed',**refs):
+        self.known[:]=outcome,status
+        callback=self.original_options.get('on_completion')
+        if callback is not None:callback(outcome,status,**refs)
+        if self.capture:
+            from .tools import parse_arguments
+            from .tool_effects import canonical_json
+            arguments=parse_arguments(self.raw,self.tool.parameters,self.tool.max_argument_bytes)
+            self.registry.capture_completion(self.tool,outcome,call_id=self.call_id,
+                call_index=self.original_options.get('call_index',0),
+                arguments_sha256=hashlib.sha256(canonical_json(arguments).encode()).hexdigest(),status=status)
+        if self.lifecycle is not None and not self.defer_event:self.lifecycle.finish(outcome,status)
+
+    def finish(self,result):
+        if self.lifecycle is not None:
+            if self.defer_event and self.registry is not None:
+                self.registry._pending_events[self.call_id]=self.lifecycle;self.queued=True
+            else:self.lifecycle.finish(result,self.known[1])
+
+    def close(self):
+        if self.lifecycle is not None and not self.queued:
+            self.lifecycle.finish(None if self.parallel else self.known[0],
+                self.known[1] or ('uncertain' if self.lifecycle.started_at is not None else None))
+
+    def release(self):
+        if self.registry is not None:self.registry._pending_events.pop(self.call_id,None)
+        self.known[:]=[None,None]
+        self.options.clear();self._original.clear()
+        self.lifecycle=None;self.registry=None;self.raw=None

@@ -34,6 +34,7 @@ class ExecutionBudget:
         self._deadline=time.monotonic()+timeout_s
         self._provider_cap,self._tool_cap=max_provider_requests,max_tool_calls
         self._provider_requests=self._tool_calls=self._reported_tokens=0
+        self._pending_tool_calls=0
         self._token_cap=max_reported_tokens
         self._usage_complete=True
         self._token_counter=token_counter
@@ -146,7 +147,7 @@ def reserve_dispatch(budgets, *, tool=False, reserve=True, token_reservations=No
             if (not tool and budget._token_cap is not None and
                     budget._reported_tokens+budget._reserved_tokens+amount>budget._token_cap):
                 raise InvocationBudgetExceeded('token_limit')
-            count=budget._tool_calls if tool else budget._provider_requests
+            count=budget._tool_calls+budget._pending_tool_calls if tool else budget._provider_requests
             cap=budget._tool_cap if tool else budget._provider_cap
             if count>=cap:
                 raise InvocationBudgetExceeded('tool_call_limit' if tool else 'provider_request_limit')
@@ -179,3 +180,84 @@ def record_shared_usage(budgets, usage, *, reservation=None):
         for budget in budgets: budget._check_tokens()
     finally:
         for budget in reversed(ordered): budget._lock.release()
+
+
+class ToolAttemptPermitV1:
+    """Internal one-use link to an already consumed admitted attempt."""
+    def __init__(self, reservation, index):
+        self._reservation, self.call_index, self._used = reservation, index, False
+
+    def consume(self, invocation):
+        with invocation._lock:
+            if (invocation is not self._reservation.invocation or self._used or
+                    self._reservation._issued.get(self.call_index) is not self):
+                raise ValueError('invalid tool attempt permit')
+            self._used = True
+
+
+class ToolBatchReservationV1:
+    """Pending allowances never masquerade as actual tool dispatch attempts."""
+    def __init__(self, invocation, enclosing, size):
+        self.invocation, self.enclosing = invocation, enclosing
+        self._states = ['pending'] * size
+        self._issued = {}
+        self._ordered = sorted((invocation, *enclosing), key=id)
+
+    @property
+    def admitted(self): return len(self._states)
+    @property
+    def consumed(self): return self._states.count('started')
+    @property
+    def released(self): return self._states.count('released')
+
+    def _enter(self):
+        for budget in self._ordered: budget._lock.acquire()
+    def _exit(self):
+        for budget in reversed(self._ordered): budget._lock.release()
+
+    def start(self, index):
+        self._enter()
+        try:
+            if type(index) is not int or not 0 <= index < len(self._states) or self._states[index] != 'pending':
+                raise ValueError('invalid tool attempt permit')
+            self._states[index] = 'started'
+            for budget in self._ordered:
+                budget._pending_tool_calls -= 1
+                if budget is self.invocation: budget.tool_calls += 1
+                else: budget._tool_calls += 1
+            permit = ToolAttemptPermitV1(self,index)
+            self._issued[index] = permit
+            return permit
+        finally: self._exit()
+
+    def release_unstarted(self):
+        self._enter()
+        try:
+            count=self._states.count('pending')
+            self._states=['released' if state=='pending' else state for state in self._states]
+            for budget in self._ordered: budget._pending_tool_calls -= count
+        finally: self._exit()
+
+
+def reserve_tool_batch(invocation, enclosing, size):
+    """Atomically hold a complete batch against local and enclosing tool caps."""
+    from .budgets import InvocationBudget
+    if (type(invocation) is not InvocationBudget or type(size) is not int or size < 0 or
+            any(type(b) is not ExecutionBudget for b in enclosing)):
+        raise ValueError('invalid tool batch reservation')
+    enclosing=tuple(dict.fromkeys(enclosing))
+    check_budgets(enclosing)
+    reservation=ToolBatchReservationV1(invocation,enclosing,size)
+    reservation._enter()
+    try:
+        invocation._check_reported_allowance()
+        cap=invocation.policy.max_tool_calls
+        if cap is None or invocation.tool_calls+invocation._pending_tool_calls+size>cap:
+            raise InvocationBudgetExceeded('tool_call_limit')
+        for budget in enclosing:
+            budget._check_tokens(dispatch=True)
+            if budget._tool_calls+budget._pending_tool_calls+size>budget._tool_cap:
+                raise InvocationBudgetExceeded('tool_call_limit')
+        for budget in reservation._ordered: budget._pending_tool_calls += size
+        return reservation
+    finally: reservation._exit()

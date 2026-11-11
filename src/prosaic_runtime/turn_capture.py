@@ -83,11 +83,18 @@ class TurnCapture:
 
     def event(self, event, sink):
         kind = event.get('event')
-        if kind not in {'started', 'completed', 'text', 'text_delta', 'tool_started', 'tool_completed'}:
+        if kind not in {'started', 'completed', 'text', 'text_delta', 'tool_started', 'tool_completed', 'tool_execution_settled'}:
             return
         owned = {'event': kind, 'provisional': True}
         if kind in {'text', 'text_delta'}:
             owned['text'] = event.get('text', '')
+        elif kind=='tool_execution_settled':
+            from .tool_parallel_contracts import validate_parallel_event
+            record=validate_parallel_event(event.get('parallelToolV1'))
+            if (record['callId'] not in self.call_ids.values() or
+                    self.tool_indices.get(record['callIndex'],{}).get('callId')!=record['callId']):
+                raise TurnOutputExceeded()
+            owned['parallelToolV1']=record
         elif kind in {'tool_started', 'tool_completed'}:
             owned['name'] = event.get('name')
             if 'toolEventV1' in event:
@@ -202,6 +209,7 @@ class TurnCapture:
         return known, complete
 
     def finish(self, result, budget):
+        if getattr(self,'parallel_order',False):self.tool_outcomes.sort(key=lambda item:item.get('callIndex',-1))
         code = failure_code(result)
         if self.evidence_overflow:
             code = code or 'outputLimit'
@@ -229,6 +237,10 @@ class TurnCapture:
             document.update(version=3, inputViews=self.input_views, toolContractV1=dict(
                 bindings=registry.bindings.to_dict(), evidence=registry.to_dict(),
                 citations=registry.citations.to_dict() if registry.citations is not None else None))
+        if budget.policy.parallel_tools is not None:
+            from .tool_parallel_contracts import parallel_binding
+            binding=parallel_binding(budget.policy.parallel_tools)
+            document.update(version=4,parallelToolsV1=dict(bindings=binding,schedule=dict(**binding,batches=budget.parallel_batches)))
         try:
             encode_owned(document, max_bytes=self.limits.max_evidence_bytes,
                          max_depth=self.limits.max_json_depth, max_nodes=self.limits.max_json_nodes)

@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from .telemetry import observe, critical_hook_failed
 
+_worker_sink = ContextVar('prosaic_worker_event_sink', default=None)
 _sink = ContextVar("prosaic_event_sink", default=None)
 _cancel = ContextVar("prosaic_cancel", default=None)
 # Set while answer-stage rules are bound: draft text is not shown until a rule check accepts it.
@@ -48,7 +49,11 @@ def emit(event: str, **data):
     check_cancelled()
     if event in {'text', 'text_delta'} and _withheld.get():
         return
-    if event in {'tool_started', 'tool_completed'}:
+    bridge = _worker_sink.get()
+    if bridge is not None:
+        bridge({'event': event, **data})
+        return
+    if event in {'tool_started', 'tool_completed', 'tool_execution_settled'}:
         observe(event, **data)
     sink = _sink.get()
     if sink is not None:
@@ -77,6 +82,10 @@ def print(*values, **kwargs):
     check_cancelled()
     if not kwargs.get("file") and _withheld.get():
         return  # Model text awaiting answer-stage rule checks.
+    bridge = _worker_sink.get()
+    if bridge is not None:
+        bridge({'event': 'progress' if kwargs.get('file') else 'text', 'text': ' '.join(map(str, values))})
+        return
     sink = _sink.get()
     if sink is None:
         builtins.print(*values, **kwargs)
@@ -93,3 +102,21 @@ def event_context(sink, cancelled=None):
     finally:
         _sink.reset(token)
         _cancel.reset(cancellation)
+
+
+@contextmanager
+def worker_event_context(bridge, cancelled, *, withheld=False):
+    """Fresh worker context: enqueue before observers/sinks, never copy owner state."""
+    worker_token=_worker_sink.set(bridge)
+    cancel_token=_cancel.set(cancelled)
+    withheld_token=_withheld.set(withheld)
+    try:yield
+    finally:
+        _withheld.reset(withheld_token);_cancel.reset(cancel_token);_worker_sink.reset(worker_token)
+
+
+def emit_after_completion(event,**data):
+    """Known settlement is observable after cancellation without granting more work."""
+    token=_cancel.set(None)
+    try:emit(event,**data)
+    finally:_cancel.reset(token)

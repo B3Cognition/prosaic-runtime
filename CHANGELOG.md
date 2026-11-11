@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.21 — 2026-11-11
+
+- Add bounded, opt-in parallel execution for trusted custom read tools on both supported API wires.
+- Preserve ordered guards, evidence, citations and journal outcomes with cooperative cancellation.
+- See [release notes](docs/release-0.9.21.md).
+
 ## 0.9.20 — 2026-11-10
 
 - Add opt-in safe scalar tool events, typed private tool results and actual-delivery evidence.

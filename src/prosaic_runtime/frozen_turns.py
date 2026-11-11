@@ -43,7 +43,7 @@ class FrozenTurnInput(_OwnedRecord):
             'authoritativeInputLimits','inputViews','inputVariantSelection','sourceHistoryDigest','selectedHistoryDigest',
             'bindings','contextSelection','contextReport','initialContextWork','contextWork',
             'nativePayloadDigest','workspaceDigest','executionAttempt'})
-        if type(document['version']) is not int or (document['version'], document['encodingVersion']) not in ((1, 'conversation-turn-v3'), (2, 'conversation-turn-v4')):
+        if type(document['version']) is not int or (document['version'], document['encodingVersion']) not in ((1, 'conversation-turn-v3'), (2, 'conversation-turn-v4'), (3, 'conversation-turn-v5')):
             raise ValueError('invalid frozen version')
         for name in ('contextIdentity','messageDigest','sourceHistoryDigest','selectedHistoryDigest','nativePayloadDigest','workspaceDigest'):
             _hash(document[name])
@@ -73,10 +73,17 @@ class FrozenTurnInput(_OwnedRecord):
             raise ValueError('unexpected optional input view')
         bindings=document['bindings']
         _closed(bindings,{'agent','policy','limits','profile','endpoint','tools','cliSandbox'},
-                {'rules','contextPolicy','counterDescriptor'} | ({'toolContractV1'} if document['version']==2 else set()))
-        if document['version']==2:
+                {'rules','contextPolicy','counterDescriptor'} | ({'toolContractV1'} if document['version']>=2 else set()) | ({'parallelToolsV1'} if document['version']==3 else set()))
+        if document['version']>=2:
             from .tool_contracts import validate_bindings_document
             validate_bindings_document(bindings.get('toolContractV1'))
+        if document['version']==3:
+            from .tool_parallel_contracts import validate_parallel_binding
+            validate_parallel_binding(bindings.get('parallelToolsV1'))
+            if bindings['parallelToolsV1']['policy'] != bindings['policy'].get('parallel_tools'):
+                raise ValueError('parallel frozen policy drift')
+        elif 'parallel_tools' in bindings['policy']:
+            raise ValueError('legacy parallel policy')
         limits=TurnLimits(**bindings['limits'])
         encode_owned(document['selectedInputData'],max_bytes=limits.max_input_bytes,
             max_depth=limits.max_json_depth,max_nodes=limits.max_json_nodes)
@@ -102,13 +109,13 @@ def _monotone(before,after):
 
 
 def export_frozen(prepared):
-    if prepared.encoding_version not in ('conversation-turn-v3', 'conversation-turn-v4'): raise TurnAdmissionError('unsupportedCapability')
+    if prepared.encoding_version not in ('conversation-turn-v3', 'conversation-turn-v4', 'conversation-turn-v5'): raise TurnAdmissionError('unsupportedCapability')
     value=json.loads(prepared._encoded)
     excluded={'history','selectedHistory','messages','message','inputData','workspace','inputProfile',
         'authoritativeInputData','authoritativeInputProfile','authoritativeInputLimits','inputViews',
         'inputVariantSelection','nativePayloadDigest','contextSelection','contextReport'}
     work=prepared.context_work.to_dict() if prepared.context_work is not None else None
-    record=dict(version=2 if prepared.encoding_version=='conversation-turn-v4' else 1,encodingVersion=prepared.encoding_version,contextIdentity=prepared.context_identity,
+    record=dict(version=3 if prepared.encoding_version=='conversation-turn-v5' else 2 if prepared.encoding_version=='conversation-turn-v4' else 1,encodingVersion=prepared.encoding_version,contextIdentity=prepared.context_identity,
         inputBytes=prepared.input_bytes,message=value['message'],messageDigest=hashlib.sha256(value['message'].encode('utf-8')).hexdigest(),
         selectedInputData=value['inputData'],inputProfile=value.get('inputProfile'),
         authoritativeInputData=value.get('authoritativeInputData'),authoritativeInputProfile=value.get('authoritativeInputProfile'),

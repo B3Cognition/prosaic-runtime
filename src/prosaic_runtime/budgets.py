@@ -1,4 +1,5 @@
 """Invocation-local allowances; counts are dispatch attempts, not estimates."""
+from threading import RLock
 
 
 class InvocationBudgetExceeded(Exception):
@@ -17,6 +18,9 @@ class InvocationBudget:
         self.policy = policy
         self.provider_requests = self.tool_calls = self.reported_tokens = 0
         self.usage_complete = True
+        self._pending_tool_calls = 0
+        self._lock = RLock()
+        self.parallel_batches = []
 
     @property
     def enabled(self):
@@ -49,8 +53,12 @@ class InvocationBudget:
         self._reserve('provider_requests', self.policy.max_provider_requests, 'provider_request_limit')
 
     def before_tool(self):
-        self._check_reported_allowance()
-        self._reserve('tool_calls', self.policy.max_tool_calls, 'tool_call_limit')
+        with self._lock:
+            self._check_reported_allowance()
+            cap = self.policy.max_tool_calls
+            if cap is not None and self.tool_calls + self._pending_tool_calls >= cap:
+                raise InvocationBudgetExceeded('tool_call_limit')
+            self.tool_calls += 1
 
     def record_usage(self, usage):
         if type(usage) is not int or usage < 0:

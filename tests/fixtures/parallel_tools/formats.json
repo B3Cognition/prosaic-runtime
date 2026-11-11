@@ -1,0 +1,1 @@
+{"version":1,"disabled":{"ordinary":{"encoding":"conversation-turn-v1","evidence":1},"toolContract":{"encoding":"conversation-turn-v4","frozen":2,"evidence":3}},"enabled":{"encoding":"conversation-turn-v5","frozen":3,"evidence":4,"scheduler":"independent-read-windows-v1"}}

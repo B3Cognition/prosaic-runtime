@@ -83,6 +83,7 @@ class EvidenceRegistryV1:
         self._pending_events = {}
         self.citations = None
         self._imports_ready = False
+        self.parallel_order = False
         self._snapshot()  # Refuse an unrepresentable host budget before execution.
 
     def _snapshot(self, *, records=None, calls=None, deliveries=None):
@@ -90,6 +91,9 @@ class EvidenceRegistryV1:
         document=dict(version=1,records=list((self._records if records is None else records).values()),
             calls=list((self._calls if calls is None else calls).values()),
             deliveries=self._delivered if deliveries is None else deliveries)
+        if self.parallel_order:
+            document['calls'].sort(key=lambda item:item['callIndex'])
+            document['records'].sort(key=lambda item:(item.get('callIndex',-1),item['id']))
         try:
             return owned(document,self.bindings.limits.max_evidence_bytes)
         except ValueError:
