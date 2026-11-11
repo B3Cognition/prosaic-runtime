@@ -156,6 +156,14 @@ Identical record replay is safe; conflicting final content is rejected. The MVP
 does not expose an evidence-revision or manual-resolution API. Operator incident
 handling preserves unresolved evidence until supported reconciliation is available.
 
+## oMLX usage extensions
+
+Runtime accepts `input_tokens` and `output_tokens` as aliases when each
+exactly matches its corresponding OpenAI token count. Recognized oMLX
+performance fields must be finite, bounded, nonnegative numbers. They do
+not contribute to token usage. Conflicts or invalid values make the
+usage untrusted.
+
 ## Supported scope
 
 Platform-paid OpenAI-compatible text calls are supported after the host verifies

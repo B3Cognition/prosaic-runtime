@@ -39,6 +39,7 @@ from prosaic_runtime.openai_compatible_transcript import (
 from prosaic_runtime.execution import ExecutionBackend
 from prosaic_runtime.provider_types import ProviderTurn
 from prosaic_runtime.config import EndpointConfig, completion_token_parameter
+from prosaic_runtime.response_headers import header_signals, strict_schema_requested
 from prosaic_runtime.events import print, emit, check_cancelled
 from prosaic_runtime.effort import EFFORTS, api_default_effort, api_effort_capabilities, api_effort_format, resolve_effort
 
@@ -244,6 +245,8 @@ class OpenAICompatibleBackend(ExecutionBackend):
         payload.update(_generation_parameters(llm, prompt_metadata))
         if _feature_enabled(llm.features, "json_mode", default=False):
             payload["response_format"] = {"type": "json_object"}
+        if 'response_format' in prompt_metadata:
+            payload['response_format'] = prompt_metadata['response_format']
         payload.update(_request_reasoning_parameters(prompt_metadata, llm))
         if streaming:
             payload["stream"] = True
@@ -272,26 +275,38 @@ class OpenAICompatibleBackend(ExecutionBackend):
             method="POST",
         )
         deadline = time.monotonic() + max(0.001, request.timeout_s)
+        header_metadata = {}
         try:
             with self.open_http(
                 http_request, timeout=request.timeout_s
             ) as response:
-                if streaming and _is_sse_response(response):
-                    return self._read_sse_response(
-                        response, deadline, request_model=request_model
-                    )
                 http_status = _http_status(response)
                 raw_response_headers = _raw_response_headers(response)
+                signals = header_signals(response)
+                signal_metadata = ({'response_header_signals_v1': signals}
+                    if signals['warning_present'] or _feature_enabled(llm.features, 'transport_diagnostics', default=False) else {})
+                header_metadata = {'http_status': http_status, 'raw_response_headers': raw_response_headers, **signal_metadata}
+                if strict_schema_requested(payload) and signals['schema_enforcement'] == 'unavailable':
+                    return CliRunResult(exit_code=1, stdout='', stderr='endpoint did not enforce strict response schema',
+                        metadata={'provider': self.name, 'provider_error_code': 'schema_enforcement_unavailable', **header_metadata})
+                if streaming and _is_sse_response(response):
+                    result = self._read_sse_response(response, deadline, request_model=request_model)
+                    result.metadata.update(header_metadata)
+                    return result
                 body = self.read_response(response)
         except TimeoutError as exc:
-            return _timeout_result(self.name, str(exc))
+            return _timeout_result(self.name, str(exc), metadata=header_metadata)
         except socket.timeout as exc:
-            return _timeout_result(self.name, str(exc))
+            return _timeout_result(self.name, str(exc), metadata=header_metadata)
         except urllib.error.HTTPError as exc:
+            header_metadata = {'http_status': int(exc.code), 'raw_response_headers': _raw_response_headers(exc)}
+            signals = header_signals(exc)
+            if signals['warning_present'] or _feature_enabled(llm.features, 'transport_diagnostics', default=False):
+                header_metadata['response_header_signals_v1'] = signals
             try:
                 body = self.read_response(exc)
             except (TimeoutError, socket.timeout) as read_error:
-                return _timeout_result(self.name, str(read_error))
+                return _timeout_result(self.name, str(read_error), metadata=header_metadata)
             finally:
                 exc.close()
             return CliRunResult(
@@ -300,8 +315,7 @@ class OpenAICompatibleBackend(ExecutionBackend):
                 stderr=body or str(exc),
                 metadata={
                     "provider": self.name,
-                    "http_status": int(exc.code),
-                    "raw_response_headers": _raw_response_headers(exc),
+                    **header_metadata,
                     "provider_error_code": "http_error",
                 },
             )
@@ -343,6 +357,7 @@ class OpenAICompatibleBackend(ExecutionBackend):
             "streamed": False,
             "http_status": http_status,
             "raw_response_headers": raw_response_headers,
+            **signal_metadata,
             "finish_reason": _finish_reason(parsed),
             "token_usage_details": self.usage_details(parsed),
             "raw_response_metadata": _raw_response_metadata(parsed),
@@ -1707,6 +1722,7 @@ def _raw_response_headers(response: object) -> dict[str, str]:
         "openai-request-id",
         "request-id",
         "x-request-id",
+        "x-omlx-request-id",
     }
     headers = getattr(response, "headers", None)
     if headers is None:
@@ -1717,7 +1733,7 @@ def _raw_response_headers(response: object) -> dict[str, str]:
         if not isinstance(key, str) or not isinstance(value, str):
             continue
         normalized = key.strip().lower()
-        if normalized in allowlist:
+        if normalized in allowlist and len(value.strip()) <= (1024 if normalized == 'content-type' else 256):
             result[normalized] = value.strip()
     return result
 
@@ -2407,13 +2423,13 @@ def _constrained_failure(
     )
 
 
-def _timeout_result(provider: str, message: str) -> CliRunResult:
+def _timeout_result(provider: str, message: str, *, metadata=None) -> CliRunResult:
     return CliRunResult(
         exit_code=-1,
         stdout="",
         stderr=message,
         timed_out=True,
-        metadata={"provider": provider, "provider_error_code": "timeout"},
+        metadata={"provider": provider, "provider_error_code": "timeout", **(metadata or {})},
     )
 
 
