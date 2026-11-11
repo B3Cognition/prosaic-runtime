@@ -170,11 +170,17 @@ turns do not support (see Terminal completion).
   budgets and feedback as a `retry` binding; with no retry left the turn fails
   with `ruleViolation`. A decline is not a guard fault. A repair of the wrong
   type, too large, not strictly encodable or outside the tool schema still is.
-- **retry** happens at most once per turn, across all stages, within the existing
-  deadline and `RunPolicy` budgets. When no provider request remains it fails
-  instead; a retry never adds a request beyond the policy. All refusals of one
-  tool batch, before or after its calls, share that one retry, because their
-  feedback returns in the same next request.
+- **retry** happens at most `rule_retries` times per turn (default 1), across
+  all stages, within the existing deadline and `RunPolicy` budgets. When no
+  provider request remains it fails instead; a retry never adds a request beyond
+  the policy. All refusals of one tool batch, before or after its calls, share
+  one retry, because their feedback returns in the same next request. Declined
+  repairs and citation repairs draw on the same allowance. The host sets it from
+  0 (never retry) to 3 with `ProsaicRuntime(config, guards=..., rule_retries=2)`,
+  like the guards themselves (not a YAML key); other values are refused when the
+  runtime is constructed. A value other than 1 is part of the prepared turn's
+  identity, so a turn prepared under one allowance is refused with
+  `bindingMismatch` under another; the rules fingerprint is unchanged.
 - **fail** returns a safe failed `TurnResult` with failure code `ruleViolation`.
 
 `before_tool` rewrites are recorded as what ran: the wire message, the tool
@@ -277,7 +283,8 @@ turn with `ruleViolation`, like a violation, and its rule id is also listed in
 `rules_faulted`, so a guard bug can be told apart from a rule the model broke.
 `rules_declined` lists fix rules whose guard declined to repair (never also a
 fault on that account); `rules_retried` lists rules whose violation was answered
-with a granted retry, whether bound as `retry` or declined as `fix`.
+with a granted retry, whether bound as `retry` or declined as `fix`;
+`rule_retries_used` counts the retries the turn spent, citation repairs included.
 `rules_violated` lists rules whose violation decided an outcome: a repair, a
 retry, a failure, or the last pass before stopping. A verdict made stale by a
 later repair in the same pass is not reported. The

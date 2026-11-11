@@ -354,6 +354,7 @@ class TurnResult:
     # path; and rules whose violation was answered with a granted retry. Ids only, like the above.
     rules_declined: tuple = ()
     rules_retried: tuple = ()
+    rule_retries_used: int = 0  # Retries granted from the runtime's rule_retries, citation repairs included.
     # Closed issue codes of malformed tool calls the model was asked to correct (at most one per turn).
     tool_request_corrections: tuple = ()
 

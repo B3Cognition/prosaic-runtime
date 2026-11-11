@@ -10,6 +10,10 @@
   model once to resend a tool call that batch admission refused, with a closed-code envelope and within the request
   budget, instead of failing with `invalidToolRequest`. `TurnResult.tool_request_corrections` reports it.
   Response-level malformation stays terminal. Default turns keep their prepared-turn bytes.
+- Add `ProsaicRuntime(..., rule_retries=1)` (default 1, the previous single retry; 0 to 3, other values refused when
+  the runtime is constructed): the per-turn rule retry allowance, shared by retries, declined repairs and citation
+  repairs and always within `RunPolicy` budgets. `TurnResult.rule_retries_used` reports the retries spent. A value
+  other than 1 enters the prepared-turn identity; default turns keep their bytes.
 
 ## 0.9.21 — 2026-11-11
 

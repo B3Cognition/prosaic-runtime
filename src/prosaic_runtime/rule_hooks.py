@@ -15,6 +15,7 @@ from .rule_facts import tool_facts
 from .rule_types import encode_fact
 
 FIX_PASSES = 3
+MAX_RULE_RETRIES = 3  # Each retry is a provider request; raising the bound later breaks no host.
 MAX_REFUSED_VALUES = 64
 MAX_VALUE_CHARS = 2048
 MAX_INT_BITS = 6804  # Every integer of up to 2,048 digits fits; the digit count is then checked exactly.
@@ -129,7 +130,7 @@ def _same(left, right):
 
 class RuleHooks:
     def __init__(self, ruleset, *, message, input_data, budget, check_boundary, authoritative_input_data=None,
-                 typed_result_tools=()):
+                 typed_result_tools=(), retries=1):
         self.ruleset = ruleset
         self.message = message
         # Encoded once per turn; each check decodes only what its guard reads, privately.
@@ -141,7 +142,7 @@ class RuleHooks:
         self.seen_results, self.seen_builtin = [], []
         self.typed_result_tools = frozenset(typed_result_tools)
         self.seen_contracts = []
-        self.retry_used, self.retry_token, self.batch = False, None, 0
+        self.retry_allowance, self.retries_used, self.retry_token, self.batch = retries, 0, None, 0
         self.refusals = {}
         self.evaluated, self.violated, self.fixed, self.faulted = set(), set(), set(), set()
         self.declined, self.retried = set(), set()
@@ -160,6 +161,7 @@ class RuleHooks:
             rules_faulted=pick(self.faulted),
             rules_declined=pick(self.declined),
             rules_retried=pick(self.retried),
+            rule_retries_used=self.retries_used,
             rules_fingerprint=self.ruleset.rules_fingerprint(),
         )
 
@@ -278,17 +280,19 @@ class RuleHooks:
         return envelope(entries, omitted)['ruleFeedback']
 
     def _take_retry(self, token=None, violations=()):
-        """One retry per turn. All refusals of one tool batch share it (``token``).
+        """Up to ``retry_allowance`` retries per turn. All refusals of one tool batch share one (``token``).
 
         ``violations`` are the (binding, verdict) pairs the retry answers; a granted retry reports them.
         """
-        if self.retry_used:
-            granted = token is not None and token == self.retry_token
+        if token is not None and token == self.retry_token:
+            granted = True  # This batch already holds a retry; its feedback returns in the same next request.
+        elif self.retries_used >= self.retry_allowance:
+            granted = False
         else:
             cap = self.budget.policy.max_provider_requests if self.budget is not None else None
             granted = cap is None or self.budget.provider_requests < cap  # Never add requests beyond the policy.
             if granted:
-                self.retry_used, self.retry_token = True, token
+                self.retries_used, self.retry_token = self.retries_used + 1, token
         if granted:
             self.retried.update(binding.rule_id for binding, _ in violations)
         return granted
