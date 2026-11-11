@@ -350,6 +350,10 @@ class TurnResult:
     rules_fixed: tuple = ()
     rules_faulted: tuple = ()  # Guards that raised or returned an unusable verdict or repair.
     rules_fingerprint: str | None = None
+    # Fix rules whose guard declined to repair (a violation without a repair) and so took the retry
+    # path; and rules whose violation was answered with a granted retry. Ids only, like the above.
+    rules_declined: tuple = ()
+    rules_retried: tuple = ()
 
 
 @dataclass(frozen=True, init=False)

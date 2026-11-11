@@ -2,8 +2,9 @@
 
 Hooks never raise a guard's exception into the loop: a raise there would look
 like a provider or observation failure. Every guard fault, invalid verdict,
-failed repair or exhausted retry becomes RuleStop, which the loop returns as a
-safe ``ruleViolation`` result. One retry per turn; three fix passes.
+unusable repair or exhausted retry becomes RuleStop, which the loop returns as a
+safe ``ruleViolation`` result. A fix guard that declines (a violation without a
+repair) takes the retry path instead. One retry per turn; three fix passes.
 """
 
 import json
@@ -101,6 +102,16 @@ def _text_repair(fixed):
         return False
 
 
+def _declined(binding, verdict):
+    """A fix guard that returns a violation without a repair declines; it does not offer an unusable one."""
+    return binding.action == 'fix' and not verdict.ok and verdict.fixed is None
+
+
+def _effective_action(binding, verdict):
+    """A declined repair falls back to the retry path: retry outranks fix, so this never weakens a rule."""
+    return 'retry' if _declined(binding, verdict) else binding.action
+
+
 def _canonical(value):
     # Round-trip first, so keys become JSON strings before sorting (e.g. {1: ..} equals {'1': ..}).
     return json.dumps(json.loads(json.dumps(value, allow_nan=False)), sort_keys=True)
@@ -133,6 +144,7 @@ class RuleHooks:
         self.retry_used, self.retry_token, self.batch = False, None, 0
         self.refusals = {}
         self.evaluated, self.violated, self.fixed, self.faulted = set(), set(), set(), set()
+        self.declined, self.retried = set(), set()
 
     # Reporting ---------------------------------------------------------------
     def report(self):
@@ -146,6 +158,8 @@ class RuleHooks:
             rules_violated=pick(self.violated),
             rules_fixed=pick(self.fixed),
             rules_faulted=pick(self.faulted),
+            rules_declined=pick(self.declined),
+            rules_retried=pick(self.retried),
             rules_fingerprint=self.ruleset.rules_fingerprint(),
         )
 
@@ -263,15 +277,21 @@ class RuleHooks:
             entries[index]['refusedCount'] = len(values[index])
         return envelope(entries, omitted)['ruleFeedback']
 
-    def _take_retry(self, token=None):
-        """One retry per turn. All refusals of one tool batch share it (``token``)."""
+    def _take_retry(self, token=None, violations=()):
+        """One retry per turn. All refusals of one tool batch share it (``token``).
+
+        ``violations`` are the (binding, verdict) pairs the retry answers; a granted retry reports them.
+        """
         if self.retry_used:
-            return token is not None and token == self.retry_token
-        cap = self.budget.policy.max_provider_requests if self.budget is not None else None
-        if cap is not None and self.budget.provider_requests >= cap:
-            return False  # Never add provider requests beyond the policy.
-        self.retry_used, self.retry_token = True, token
-        return True
+            granted = token is not None and token == self.retry_token
+        else:
+            cap = self.budget.policy.max_provider_requests if self.budget is not None else None
+            granted = cap is None or self.budget.provider_requests < cap  # Never add requests beyond the policy.
+            if granted:
+                self.retry_used, self.retry_token = True, token
+        if granted:
+            self.retried.update(binding.rule_id for binding, _ in violations)
+        return granted
 
     def citation_retry(self, turn, messages):
         """Reuse the explicit answer-rule allowance, never create another pool."""
@@ -303,6 +323,8 @@ class RuleHooks:
                     continue
                 violations.append((binding, verdict))
                 if binding.action == 'fix':
+                    if _declined(binding, verdict):
+                        continue  # Decided below as a retry: a guard that cannot repair is not a broken guard.
                     if not accept(verdict.fixed):
                         self.violated.add(binding.rule_id)
                         self.faulted.add(binding.rule_id)  # An unusable repair is a guard bug.
@@ -319,7 +341,8 @@ class RuleHooks:
                 continue  # Verdicts in this pass may predate a repair: recheck every rule.
             # Stable (or final) pass: these verdicts decide the outcome, so they are reported.
             self.violated.update(binding.rule_id for binding, _ in violations)
-            if changed or any(binding.action != 'retry' for binding, _ in violations):
+            self.declined.update(binding.rule_id for binding, verdict in violations if _declined(binding, verdict))
+            if changed or any(_effective_action(binding, verdict) != 'retry' for binding, verdict in violations):
                 return STOP  # Still repairing after the bounded passes, a fail, or a fix that could not repair.
             return value, violations
         return STOP
@@ -355,7 +378,7 @@ class RuleHooks:
             elif not _same(value, arguments):
                 rewritten[call['id']] = value
         if refused:
-            if not self._take_retry(('tools', self.batch)):
+            if not self._take_retry(('tools', self.batch), [pair for _, blocking in refused for pair in blocking]):
                 return STOP
             for call_id, blocking in refused:
                 self.refusals[call_id] = {
@@ -415,7 +438,7 @@ class RuleHooks:
         value, blocking = outcome
         if blocking:
             # Feedback for every refusal in this batch goes back in the same next request.
-            if not self._take_retry(('tools', self.batch)):
+            if not self._take_retry(('tools', self.batch), blocking):
                 return STOP
             value = {'status': 'error', 'error': 'rule_refused', 'ruleFeedback': self._feedback(blocking)}
         self._observe(name, value)
@@ -440,7 +463,7 @@ class RuleHooks:
             return STOP
         text, blocking = outcome
         if blocking:
-            if not self._take_retry():
+            if not self._take_retry(violations=blocking):
                 return STOP
             rejected = {'role': 'assistant', 'content': draft}
             if turn.continuation is not None:

@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- A `fix` guard that declines to repair (a violation with `fixed=None`) now takes the rule retry path instead of
+  failing the turn as a guard fault. One extra provider request is possible, within `RunPolicy` budgets; the rule is
+  reported in the new `TurnResult.rules_declined` instead of `rules_faulted`. `TurnResult.rules_retried` lists rules
+  answered with a granted retry. Unusable repairs and raising guards remain faults.
+
 ## 0.9.21 — 2026-11-11
 
 - Add bounded, opt-in parallel execution for trusted custom read tools on both supported API wires.
