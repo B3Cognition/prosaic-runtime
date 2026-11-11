@@ -178,3 +178,32 @@ def test_close_drains_inflight_io_and_fences_the_dispatched_slot(tmp_path):
             assert methods(requests).count("tools/call") == 1
         finally:
             release.set()
+
+
+def test_replay_rechecks_grant_after_a_blocking_claim(tmp_path):
+    grant = [True]
+
+    class RevokingJournal(SqliteJournal):
+        def claim(self, *args):
+            claim = super().claim(*args)
+            if claim.state == "replay":
+                grant[0] = False
+            return claim
+
+    def answer(request):
+        return listing() if request["method"] == "tools/list" else completion(71649)
+
+    with endpoint(answer) as (url, requests), opened(url, authorize=lambda *_: grant[0]) as host, ConversationFixture("openai-compatible") as fx:
+        fx.tools = host.bind_tools(host.discover(access_scope="scope-1"), [spec()])
+        options = dict(message="Review", policy=fx.policy,
+                       tool_journal=RevokingJournal(tmp_path / "calls.sqlite"),
+                       tool_contract_bindings=bindings())
+        runtime = fx.runtime
+        queue(fx)
+        assert runtime.turn(fx.agent, **options).result.exit_code == 0
+        assert "71649" in json.dumps(fx.requests[-1])
+        queue(fx)
+        assert runtime.turn(fx.agent, **options).result.exit_code == 0
+        followup = json.dumps(fx.requests[-1])
+        assert "71649" not in followup and "authorization_denied" in followup
+        assert methods(requests).count("tools/call") == 1
