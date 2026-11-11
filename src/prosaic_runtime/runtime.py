@@ -26,7 +26,7 @@ from .types import Invocation, Result
 from .tools import validate_custom_tools, custom_descriptors, ToolDeadlineExceeded, ToolExecutionError
 from .cli_tools import load_cli_tools, cli_tool_context
 from .tool_registry import BoundedToolRegistry, DisabledBuiltinRegistry, InvalidToolRequest
-from .accounting import AccountingError, resolve_context
+from .accounting import AccountingError, omlx_usage_extensions, resolve_context
 from .accounting_capture import Capture, InvalidEvidence, strict_json
 from .lifecycle import ExecutionLifecycle, tracked
 from .http_bounds import LimitExceeded, set_response_timeout, BoundedNativeStream
@@ -39,6 +39,7 @@ from .terminal import TerminalCapture, TerminalCompletionError, admit_terminal_t
 from .execution_budget import active_budgets, check_budgets, reserve_dispatch, record_shared_usage, token_reservations
 from .context_execution import ContextExecutionFailure
 from .rules import check_required_pins, refuse_unenforced, required_guard_specs, validate_guards
+from .response_schema import own_response_schema, schema_digest, schema_format, schema_order_metadata
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -142,6 +143,9 @@ class _BoundedMixin:
                        for key in details.keys() & self._previous_usage_details.keys()):
                     self._turn_usage_unknown = True
                 self._previous_usage_details.update(details)
+                if (self._config.provider == 'openai-compatible' and type(usage) is dict
+                        and omlx_usage_extensions(usage) is None):
+                    self._turn_usage_unknown = True
                 fields = ('prompt_tokens', 'completion_tokens', 'total_tokens')
                 if (not isinstance(usage, dict) or any(type(usage[k]) is not int or usage[k] < 0
                         for k in fields if k in usage)):
@@ -253,6 +257,11 @@ class _BoundedMixin:
             request.add_header("X-Client-Request-Id", call_id)
         accepted = False
         opener = urllib.request.build_opener(_NoRedirect())
+        trace = None
+        if self._config.features.get('transport_diagnostics') is True:
+            from .transport_diagnostics import TransportTrace, DiagnosticOpener
+            trace = TransportTrace(started)
+            opener = DiagnosticOpener(opener, trace)
         from .tool_event_contract import current_registry
         evidence_registry = current_registry()
         ticket = (evidence_registry.prepare_delivery(None, encoded_bytes=request.data)
@@ -304,8 +313,15 @@ class _BoundedMixin:
                 self._prework_capacity_failure = 'unavailable'
             raise
         finally:
+            transport = {}
+            if trace is not None:
+                import sys
+                error = sys.exc_info()[1]
+                if error is not None and not isinstance(error, urllib.error.HTTPError):
+                    trace.failed(error)
+                transport['transport'] = trace.summary()
             observe('provider_request_completed', outcome=outcome, http_status=status,
-                    duration_ms=(time.monotonic() - started) * 1000)
+                    duration_ms=(time.monotonic() - started) * 1000, **transport)
 
     def read_response(self, response):
         self.check_boundary()
@@ -418,6 +434,7 @@ class ProsaicRuntime:
     capabilities |= frozenset({'frozen_turn_inputs_v1'})
     capabilities |= frozenset({'context_input_variants_v1'})
     capabilities |= frozenset({'tool_events_v1', 'tool_results_v1', 'citations_v1'})
+    capabilities |= frozenset({'json_schema_v1', 'json_schema_order_v1'})
     def __init__(self, config: RuntimeConfig, *, source=".prosaic", executable="prosaic", custom_tools=None,
                  accounting=None, context_defaults=None, lifecycle=None, guards=None, allow_unbound_guards=False):
         self.lifecycle = lifecycle if lifecycle is not None else ExecutionLifecycle()
@@ -738,9 +755,16 @@ class ProsaicRuntime:
             on_event=None, cancelled=None, env=None,
             acquisition: str | ProsaicArtifact | None = None, context=None, accounting=None,
             observer=None, operation_context: InvocationScope | None = None, tool_journal=None, request_headers=None,
-            tool_contract_bindings=None) -> Result:
+            tool_contract_bindings=None, response_schema: dict | None = None,
+            response_schema_order: str = 'canonical') -> Result:
         from .request_headers import snapshot_headers
         owned_headers = snapshot_headers(request_headers)
+        response_schema = own_response_schema(response_schema, order=response_schema_order)
+        if response_schema is not None:
+            if acquisition is not None:
+                raise ValueError('response_schema does not support acquisition')
+            if tool_contract_bindings is not None and tool_contract_bindings.citations is not None:
+                raise ValueError('response_schema does not support a Runtime citation policy')
         scope = InvocationScope(str(uuid4())) if operation_context is None else operation_context
         emitter = ObserverEmitter(observer, source='runtime', scope=scope)
         started = time.monotonic()
@@ -752,7 +776,8 @@ class ProsaicRuntime:
                 result = self._run_accounted(artifact, arguments, cwd=cwd, policy=policy,
                     on_event=on_event, cancelled=cancelled, env=env, acquisition=acquisition,
                     context=context, accounting=accounting, operation_context=scope, tool_journal=tool_journal,
-                    _request_headers=owned_headers)
+                    _request_headers=owned_headers,
+                    response_schema=response_schema, response_schema_order=response_schema_order)
                 if result.metadata.get('failure_reason') == 'cancelled':
                     outcome = 'cancelled'
                 elif result.timed_out:
@@ -780,7 +805,8 @@ class ProsaicRuntime:
             on_event=None, cancelled=None, env=None,
             acquisition: str | ProsaicArtifact | None = None, context=None, accounting=None,
             operation_context=None, tool_journal=None, _turn_prepared=None, _turn_capture=None, _budget=None,
-            _turn_snapshot=None, _turn_accounting=None, _request_headers=(), _effort_trace=None) -> Result:
+            _turn_snapshot=None, _turn_accounting=None, _request_headers=(), _effort_trace=None,
+            response_schema=None, response_schema_order='canonical') -> Result:
         policy = policy or RunPolicy(timeout_s=self.config.limits.timeout_s,
                                      max_tool_rounds=self.config.limits.max_tool_rounds)
         budget = _budget if _budget is not None else InvocationBudget(policy)
@@ -802,7 +828,8 @@ class ProsaicRuntime:
                                cancelled=cancelled, env=env, acquisition=acquisition,
                                _operation_context=operation_context, _tool_journal=tool_journal,
                                _turn_prepared=_turn_prepared, _turn_capture=_turn_capture, _turn_snapshot=_turn_snapshot,
-                               _terminal_capture=terminal, _request_headers=_request_headers, _effort_trace=trace)
+                               _terminal_capture=terminal, _request_headers=_request_headers, _effort_trace=trace,
+                               response_schema=response_schema, response_schema_order=response_schema_order)
         except AccountingError:
             result = Result(1, '', 'accounting persistence failed; do not retry the provider automatically',
                             token_usage=budget.reported_tokens if budget.usage_complete and budget.provider_requests else None,
@@ -842,7 +869,8 @@ class ProsaicRuntime:
             on_event=None, cancelled=None, env=None,
             acquisition: str | ProsaicArtifact | None = None, _recorder=None, _context=None, _capture_ref=None,
             _budget=None, _operation_context=None, _tool_journal=None,
-            _turn_prepared=None, _turn_capture=None, _turn_snapshot=None, _terminal_capture=None, _request_headers=(), _effort_trace=None) -> Result:
+            _turn_prepared=None, _turn_capture=None, _turn_snapshot=None, _terminal_capture=None, _request_headers=(), _effort_trace=None,
+            response_schema=None, response_schema_order='canonical') -> Result:
         config, custom, cli = _turn_snapshot if _turn_snapshot is not None else (self.config, self._custom_tools, self._cli_tools)
         policy = policy or RunPolicy(timeout_s=self.config.limits.timeout_s,
                                      max_tool_rounds=self.config.limits.max_tool_rounds)
@@ -910,6 +938,8 @@ class ProsaicRuntime:
                 endpoint = config.profiles[profile]
                 if _request_headers and endpoint.provider != 'openai-compatible':
                     raise ValueError('request_headers require an OpenAI-compatible endpoint')
+                if response_schema is not None and (requested or acquisition is not None or endpoint.provider != 'openai-compatible'):
+                    raise ValueError('response_schema requires tool-free OpenAI-compatible run without acquisition')
                 if _recorder is not None and _recorder.provider_id != endpoint.provider:
                     raise ValueError('accounting provider_id must match endpoint provider')
                 features = {**endpoint.features, "tool_calls": bool(tools), "max_tool_rounds": policy.max_tool_rounds,
@@ -919,6 +949,8 @@ class ProsaicRuntime:
                             "tool_read_roots": list(policy.read_roots),
                             "tool_write_paths": list(policy.write_paths),
                             "tool_forbidden_roots": list(policy.forbidden_roots)}
+                if response_schema is not None:
+                    metadata['response_format'] = schema_format(response_schema)
                 if policy.initial_tool is not None:
                     metadata['initial_tool'] = policy.initial_tool
                 effort = artifact.frontmatter.get("effort")
@@ -1026,6 +1058,10 @@ class ProsaicRuntime:
                     result.metadata["failure_reason"] = "incomplete_response"
                 result.metadata.update(artifact_id=artifact.id, artifact_sha256=artifact.digest, profile=profile,
                                        cost_status="unavailable")
+                if response_schema is not None:
+                    result.metadata['response_schema_v1'] = {'schema_sha256': schema_digest(response_schema), 'strict': True}
+                    if response_schema_order == 'declared':
+                        result.metadata['response_schema_order_v1'] = schema_order_metadata(response_schema)
                 if capture is not None:
                     result.metadata['accounting_v1'] = {'context': _context.to_dict(), 'namespace': _recorder.namespace,
                         'environment': _recorder.environment, 'provider_call_ids': list(capture.call_ids)}

@@ -5,6 +5,7 @@ from decimal import Decimal, localcontext, ROUND_HALF_EVEN, InvalidOperation
 from collections.abc import Mapping
 import hashlib
 import json
+import math
 import re
 import uuid
 
@@ -143,6 +144,24 @@ def _quantity(value):
     return type(value) is int and 0 <= value <= 2**63 - 1
 
 
+def omlx_usage_extensions(raw):
+    """Return recognized usage keys, or None for contradictory extensions."""
+    extensions = set()
+    for alias, source in (('input_tokens', 'prompt_tokens'), ('output_tokens', 'completion_tokens')):
+        if alias in raw:
+            if source not in raw or not _quantity(raw[alias]) or raw[alias] != raw[source]:
+                return None
+            extensions.add(alias)
+    metrics = {'time_to_first_token', 'total_time', 'prompt_eval_duration',
+               'generation_duration', 'prompt_tokens_per_second', 'generation_tokens_per_second'}
+    for name in metrics & set(raw):
+        value = raw[name]
+        if type(value) not in (int, float) or not 0 <= value <= 2**63 - 1 or not math.isfinite(value):
+            return None
+        extensions.add(name)
+    return extensions
+
+
 def normalize_usage(raw):
     """OpenAI text snapshot semantics; detail availability is never guessed."""
     names = ('input_tokens', 'output_tokens', 'total_tokens', 'cached_input_tokens', 'reasoning_output_tokens')
@@ -180,7 +199,11 @@ def normalize_usage(raw):
         if result[detail] is not None and result[parent] is not None and result[detail] > result[parent]:
             result['status'] = 'untrusted'
             return result
-    known = {'prompt_tokens', 'completion_tokens', 'total_tokens', 'prompt_tokens_details', 'completion_tokens_details'}
+    extensions = omlx_usage_extensions(raw)
+    if extensions is None:
+        result['status'] = 'untrusted'
+        return result
+    known = {'prompt_tokens', 'completion_tokens', 'total_tokens', 'prompt_tokens_details', 'completion_tokens_details'} | extensions
     if set(raw) - known or result['status'] == 'unsupported':
         result['status'] = 'unsupported'
     elif result['total_tokens'] is not None:

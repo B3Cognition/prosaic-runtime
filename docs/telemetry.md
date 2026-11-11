@@ -75,3 +75,13 @@ must stop execution. Optional observation is best effort, without durable delive
 retries or an outbox; it supplies no authorization, persistence or billing proof.
 Pure `validate_execution_artifact` never constructs an observer or executes a
 callback.
+
+### Optional HTTP transport diagnostics
+
+Set `features.transport_diagnostics: true` for bounded transport data on
+`provider_request_completed`. The event records timings, byte counts and
+digests, normalized framing, timeout stage, and a hashed server request ID
+when available. The diagnostics preserve a normalized strict-schema warning
+signal across a body timeout. Response text and arbitrary header values stay
+outside the observer event. For HTTP error statuses, the event records the
+received headers before the backend handles the error body.

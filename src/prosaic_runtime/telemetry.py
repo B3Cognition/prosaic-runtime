@@ -69,7 +69,12 @@ class ObserverEmitter:
         record = {'version': 1, 'sequence': self.sequence, 'source': self.source,
                   'event': event, **self._scope}
         for key, value in fields.items():
-            if key == 'tool_outcome' and self.source == 'runtime' and event == 'tool_completed':
+            if key == 'transport' and self.source == 'runtime' and event == 'provider_request_completed':
+                from .transport_diagnostics import safe_summary
+                summary = safe_summary(value)
+                if summary is not None:
+                    record[key] = summary
+            elif key == 'tool_outcome' and self.source == 'runtime' and event == 'tool_completed':
                 from .tool_outcomes import ToolOutcome
                 try:
                     record[key] = ToolOutcome.from_dict(value).to_dict()
