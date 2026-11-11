@@ -5,6 +5,7 @@ from hashlib import sha256
 import ipaddress
 import json
 import math
+import re
 from urllib.parse import urlsplit, urlunsplit
 
 from jsonschema import Draft202012Validator
@@ -73,7 +74,9 @@ class McpServerV1:
             raise ValueError("invalid MCP endpoint")
         try:
             url = urlsplit(self.endpoint)
-            if url.hostname is None or url.username is not None or not url.path.startswith("/"):
+            if (url.hostname is None or url.username is not None
+                    or re.fullmatch(r"/[A-Za-z0-9_./~-]*", url.path) is None
+                    or any(segment in {".", ".."} for segment in url.path.split("/"))):
                 raise ValueError
             port = url.port
             host = url.hostname

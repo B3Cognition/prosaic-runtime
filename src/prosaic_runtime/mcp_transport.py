@@ -172,6 +172,8 @@ class _Operation:
 class _Transport(httpx2.AsyncBaseTransport):
     def __init__(self, server, limits, operation):
         self.url = httpx2.URL(server.endpoint)
+        if str(self.url) != server.endpoint:
+            raise _ProtocolError()
         self.legacy = server.protocol_version == LEGACY
         self.limits, self.operation = limits, operation
         self.transport = httpx2.AsyncHTTPTransport(retries=0, trust_env=False)
@@ -185,7 +187,7 @@ class _Transport(httpx2.AsyncBaseTransport):
             raise _ProtocolError()
 
     async def handle_async_request(self, request):
-        if request.url != self.url:
+        if request.url != self.url or request.url.raw_path != self.url.raw_path:
             raise _ProtocolError()
         if request.method == "GET":
             return httpx2.Response(405)

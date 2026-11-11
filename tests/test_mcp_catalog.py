@@ -92,3 +92,11 @@ def test_seal_tracks_policy_and_requires_read_only():
 def test_destination_rejects_ambient_credentials_and_non_https(endpoint):
     with pytest.raises(ValueError):
         McpServerV1("catalog", "r1", endpoint, "2026-07-28")
+
+
+@pytest.mark.parametrize("path", ["/allowed/../different", "/allowed/./different",
+                                 "/allowed/%2e%2e/different", "/allowed/%2Fhidden",
+                                 "/quotes\""])
+def test_ambiguous_endpoint_paths_are_rejected(path):
+    with pytest.raises(ValueError, match="invalid MCP endpoint"):
+        McpServerV1("catalog", "r1", "https://catalog.invalid" + path, "2026-07-28")

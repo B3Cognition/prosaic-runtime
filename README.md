@@ -867,7 +867,8 @@ Use the optional `b3-prosaic-runtime[mcp]` extra and import the host API from
 Streamable HTTP endpoint and select protocol `2026-07-28` or `2025-11-25`.
 `McpClientV1` receives host callbacks for destination approval, resource-bound
 bearer credentials, access scope and per-call authorization. Credential-free
-loopback HTTP requires explicit fixture opt-in.
+loopback HTTP requires explicit fixture opt-in. Use a canonical path with
+unreserved URL characters and slash separators.
 
 Enter the client as a context manager and call
 `client.discover(access_scope=scope)` during host onboarding. Save the private
