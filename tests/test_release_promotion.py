@@ -26,7 +26,7 @@ def test_public_workflows_use_current_version_and_check_tool_consumer():
     from packaging.version import Version
     if Version(version).is_devrelease:
         # A development SDK does not authorize a publication-train update.
-        assert 'b3_prosaic_runtime-0.9.21-py3-none-any.whl' in publication
+        assert 'b3_prosaic_runtime-0.9.22-py3-none-any.whl' in publication
         assert f'b3_prosaic_runtime-{version}-py3-none-any.whl' not in publication
     else:
         assert f'b3_prosaic_runtime-{version}-py3-none-any.whl' in publication

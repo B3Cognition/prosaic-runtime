@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.22 — 2026-11-11
+
+- Add the optional MCP client for host-approved read tools with bounded Streamable HTTP and journaled dispatch.
+- Recheck current authorization before dispatch and replay. Support offline receipt adoption through Harness.
+- See [release notes](docs/release-0.9.22.md).
+
 ## 0.9.21 — 2026-11-11
 
 - Add bounded, opt-in parallel execution for trusted custom read tools on both supported API wires.
