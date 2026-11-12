@@ -625,7 +625,8 @@ class ProsaicRuntime:
             except (TypeError, ValueError):
                 raise TurnAdmissionError('invalidPolicy') from None
             delegation = DelegationExecution(sub_agent_frame, sub_agent_access, self,
-                snapshot[0], recorder, policy, cancelled, env, owned_headers)
+                snapshot[0], recorder, policy, cancelled, env, owned_headers,
+                route={'profile': owned['profile'], 'endpoint': owned['endpoint']})
             if not delegation.owner_valid():
                 raise TurnAdmissionError('invalidPolicy')
         if 'contextPolicy' in owned:

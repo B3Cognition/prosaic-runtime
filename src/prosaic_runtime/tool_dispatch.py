@@ -131,7 +131,7 @@ def prepare_custom_tool_call(tool, raw_arguments, *, call_id, call_index, batch_
         if signature is None:
             signature=hashlib.sha256(canonical_json(dict(tool_name=tool.name,tool_version=tool.version,arguments=arguments)).encode()).hexdigest()
         if delegation is not None:
-            signature = digest([signature, delegation.frame.identity])
+            signature = digest([signature, delegation.journal_binding])
         refs = dict(operation_key=key,signature=signature)
         if options.get('_await_operation') is not None:
             waited=options['_await_operation'](context.scope.operation_namespace,key,signature)

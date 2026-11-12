@@ -1,7 +1,7 @@
 """Serial child execution and private journal settlement for admitted delegates."""
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 import json
 
 from jsonschema import Draft202012Validator, ValidationError
@@ -31,10 +31,11 @@ class ChildResult:
 
 
 class DelegationExecution:
-    def __init__(self, frame, access, runtime, config, recorder, policy, cancelled, env, request_headers):
+    def __init__(self, frame, access, runtime, config, recorder, policy, cancelled, env, request_headers, *, route):
         self.frame, self.access, self.runtime = frame, access, runtime
         self.config, self.recorder = config, recorder
         self._env, self._headers = env, dict(request_headers)
+        self.journal_binding = digest({'frame': frame.identity, 'route': route})
         self.launches = 0
         self.records = []
         self._exposed = []
@@ -202,7 +203,7 @@ class DelegationExecution:
         return ToolResultV1(data={'finding': finding, 'observations': observations}, evidence=declarations)
 
     def proof(self):
-        return dict(version=1, frameSha256=digest(self.frame.to_dict()), launches=self.launches,
+        return dict(version=1, frameSha256=self.frame.identity, scope=asdict(self.frame.scope), launches=self.launches,
                     providerRequests=self.root.provider_requests, toolCalls=self.root.tool_calls,
                     reportedTokens=self.root.reported_tokens, usageComplete=self.root.usage_complete,
                     receipts=json.loads(encode_owned(self.records)))
@@ -223,7 +224,7 @@ def encode_receipt(execution, context, tool, child):
     outcome = normalize_tool_result(tool, child.value)
     refs = source_references(child.sources)
     encode_owned(refs, max_bytes=PROVENANCE_BYTES)
-    document = dict(version=1, frameSha256=digest(execution.frame.to_dict()),
+    document = dict(version=1, bindingSha256=execution.journal_binding,
                     childInvocationId=child_identity(context), sources=refs, outcome=outcome)
     return snapshot_outcome({'status': 'ok', 'result': {'subAgentReceiptV1': document}}, JOURNAL_BYTES)
 
@@ -234,9 +235,9 @@ def decode_receipt(execution, context, tool, envelope):
         if envelope['status'] != 'ok' or set(envelope['result']) != {'subAgentReceiptV1'}:
             raise ValueError('invalid child receipt envelope')
         document = envelope['result']['subAgentReceiptV1']
-        if (set(document) != {'version', 'frameSha256', 'childInvocationId', 'sources', 'outcome'}
+        if (set(document) != {'version', 'bindingSha256', 'childInvocationId', 'sources', 'outcome'}
                 or type(document['version']) is not int or document['version'] != 1
-                or document['frameSha256'] != digest(execution.frame.to_dict())
+                or document['bindingSha256'] != execution.journal_binding
                 or document['childInvocationId'] != child_identity(context)
                 or source_references(document['sources']) != document['sources']):
             raise ValueError('invalid child receipt identity')
