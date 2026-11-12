@@ -15,11 +15,14 @@ class ConversationFixture:
         self.provider = provider
         self.requests, self.raw_requests, self.responses, self.tools = [], [], [], {}
         self.streaming = False
+        self.observe_request_headers = None
 
     def __enter__(self):
         fixture = self
         class Handler(BaseHTTPRequestHandler):
             def do_POST(self):
+                if fixture.observe_request_headers is not None:
+                    fixture.observe_request_headers(self.headers)
                 raw = self.rfile.read(int(self.headers['Content-Length']))
                 fixture.raw_requests.append(raw)
                 fixture.requests.append(json.loads(raw))

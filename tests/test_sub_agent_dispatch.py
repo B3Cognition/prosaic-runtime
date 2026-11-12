@@ -140,3 +140,58 @@ def test_denied_frozen_sources_do_not_claim_the_slot(tmp_path):
         fixture.queue_text('Reviewed')
         assert runner.turn(parent, **options).result.stdout == 'Reviewed'
         assert len(claims) == 1
+
+
+
+@pytest.mark.parametrize('provider', ['openai-compatible', 'anthropic'])
+def test_child_uses_the_owned_parent_route_credentials(provider, tmp_path):
+    from dataclasses import replace
+    observed = []
+    with ConversationFixture(provider) as fixture:
+        fixture.observe_request_headers = lambda headers: observed.append(
+            (headers.get('Authorization'), headers.get('x-api-key'), headers.get('x-route-fixture')))
+        original, parent, policy, contracts, frame = bind(fixture.runtime)
+        endpoint = replace(original.config.profiles['local'], api_key_env='DELEGATION_FIXTURE_KEY')
+        runner = sdk.ProsaicRuntime(replace(original.config, profiles={'local': endpoint}),
+                                    custom_tools=original._custom_tools)
+        fixture.queue_calls([dict(id='delegate', name='review', arguments='{"task":"Check"}')])
+        fixture.queue_text('{"finding":"verified"}')
+        fixture.queue_text('Reviewed')
+        env = {'DELEGATION_FIXTURE_KEY':'synthetic-credential'}
+        headers = {'x-route-fixture':'synthetic-routing'} if provider == 'openai-compatible' else None
+
+        def mutate_host_environment(event):
+            if event['event']=='tool_started':
+                env['DELEGATION_FIXTURE_KEY']='wrong-credential'
+
+        result = runner.turn(parent, message='parent', policy=policy, tool_contract_bindings=contracts,
+            sub_agent_frame=frame, sub_agent_access=sdk.SubAgentAccessV1('grants-v1',
+                lambda *_: True, lambda *_: True, lambda: True), accounting=MemoryRecorder(provider_id=provider),
+            tool_journal=SqliteJournal(tmp_path/'effects.sqlite'), on_event=mutate_host_environment,
+            context=sdk.ExecutionContext(invocation_id=frame.scope.invocation_id), env=env, request_headers=headers)
+        assert result.result.stdout == 'Reviewed'
+        expected = (('Bearer synthetic-credential', None, 'synthetic-routing')
+                    if provider == 'openai-compatible' else (None, 'synthetic-credential', None))
+        assert observed == [expected]*3
+
+
+def test_existing_slot_rejects_changed_provider_route(tmp_path):
+    from dataclasses import replace
+    with ConversationFixture('openai-compatible') as fixture:
+        original, parent, policy, contracts, frame = bind(fixture.runtime)
+        options = dict(message='parent', policy=policy, tool_contract_bindings=contracts,
+            sub_agent_frame=frame, sub_agent_access=sdk.SubAgentAccessV1('grants-v1',
+                lambda *_: True, lambda *_: True, lambda: True), accounting=MemoryRecorder(),
+            tool_journal=SqliteJournal(tmp_path/'effects.sqlite'),
+            context=sdk.ExecutionContext(invocation_id=frame.scope.invocation_id))
+        fixture.queue_calls([dict(id='delegate', name='review', arguments='{"task":"Check"}')])
+        fixture.queue_text('{"finding":"verified"}')
+        fixture.queue_text('Reviewed')
+        assert original.turn(parent, **options).result.stdout == 'Reviewed'
+        endpoint = replace(original.config.profiles['local'], model='other-model')
+        changed = sdk.ProsaicRuntime(replace(original.config, profiles={'local': endpoint}),
+                                     custom_tools=original._custom_tools)
+        fixture.queue_calls([dict(id='delegate', name='review', arguments='{"task":"Check"}')])
+        turn = changed.turn(parent, **options)
+        assert turn.result.exit_code != 0 and turn.sub_agent_proof['launches']==0
+        assert len(fixture.requests)==4
