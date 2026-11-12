@@ -158,7 +158,7 @@ def prepare_turn(runtime, artifact, *, message, history=(), input_data=None, pol
                  context_selection=None, context_report=None, context_work=None, _warn_rules=True,
                  input_profile=None, authoritative_input_data=None, authoritative_input_profile=None,
                  authoritative_input_limits=None, _frozen_input=None, _input_variant_selection=None,
-                 _input_data_variants=None, tool_contract_bindings=None):
+                 _input_data_variants=None, tool_contract_bindings=None, sub_agent_frame=None):
     limits = limits if limits is not None else TurnLimits()
     if type(limits) is not TurnLimits:
         raise TurnAdmissionError('invalidPolicy')
@@ -198,6 +198,8 @@ def prepare_turn(runtime, artifact, *, message, history=(), input_data=None, pol
         from .mcp import admit_mcp_tools
         admit_mcp_tools(runtime._custom_tools, names, surface="api", policy=policy,
                         contracts=tool_contract_bindings, initial_tool=policy.initial_tool)
+        from .sub_agents import admit_sub_agents
+        admit_sub_agents(runtime, owned_agent, names, policy, tool_contract_bindings, sub_agent_frame)
         admit_tool_contracts(runtime._custom_tools, names, tool_contract_bindings)
         from .tool_parallel_contracts import admit_parallel_execution
         admit_parallel_execution(policy,tool_contract_bindings,metadata_limit=limits.max_metadata_bytes)
@@ -322,6 +324,8 @@ def prepare_turn(runtime, artifact, *, message, history=(), input_data=None, pol
                     'cliSandbox': {'mode': runtime.config.cli_sandbox.mode,
                                    'runtimeRoots': list(runtime.config.cli_sandbox.runtime_roots)},
                     'messages': messages}
+        if sub_agent_frame is not None:
+            material['subAgentsV1'] = sub_agent_frame.to_dict()
         if not ruleset.empty:
             # Guard versions and effective bindings: readmission detects drift.
             material['rules'] = ruleset.material()
@@ -361,7 +365,7 @@ def prepare_turn(runtime, artifact, *, message, history=(), input_data=None, pol
             max_bytes=ownership_cap,
             max_depth=limits.max_json_depth, max_nodes=limits.max_json_nodes)).hexdigest()
         prepared = PreparedTurn._create(encoded, identity, input_bytes,
-            encoding_version='conversation-turn-v5' if policy.parallel_tools is not None else 'conversation-turn-v4' if tool_contract_bindings is not None else (
+            encoding_version='conversation-turn-v6' if sub_agent_frame is not None else 'conversation-turn-v5' if policy.parallel_tools is not None else 'conversation-turn-v4' if tool_contract_bindings is not None else (
                 'conversation-turn-v3' if views is not None else ('conversation-turn-v2' if context_policy is not None else 'conversation-turn-v1')),
             context_work=work)
         # Private compiled rules, reused by execution; never serialized or compared.

@@ -91,3 +91,8 @@ __all__ += ['CitationsV1', 'CitationViolation', 'validate_citations', 'ToolInvoc
 
 from .tool_parallel_contracts import ParallelToolPolicyV1
 __all__ += ['ParallelToolPolicyV1']
+
+from .sub_agents import (SubAgentAccessV1, SubAgentFrameV1, SubAgentPolicyV1, SubAgentReadV1,
+                         SubAgentSpecV1, bind_sub_agent_tools, is_sub_agent_tool)
+__all__ += ['SubAgentAccessV1', 'SubAgentFrameV1', 'SubAgentPolicyV1', 'SubAgentReadV1',
+            'SubAgentSpecV1', 'bind_sub_agent_tools', 'is_sub_agent_tool']

@@ -892,3 +892,7 @@ after the tool POST requires journal reconciliation.
 MCP registrations run serially in parallel tool batches. Existing local tools
 use the base install. The MCP extra is needed when opening a client or executing
 a selected MCP alias.
+
+### Bounded sub-agents
+
+An API turn can expose host-registered `SubAgentSpecV1` aliases as serial tools. Pass a `SubAgentFrameV1` with the independently selected child projections to preparation and live `SubAgentAccessV1` grants to execution. The turn requires the owner's accounting context, recorder and fenced tool journal. Parent and child share hard provider and tool limits, a reported-token threshold and a deadline. The child receives the bounded task, optional validated draft and its projection. The parent receives the validated finding and approved observations through the normal tool result and citation contract.

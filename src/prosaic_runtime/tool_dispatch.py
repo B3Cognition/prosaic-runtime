@@ -32,6 +32,7 @@ class WorkerSettlementV1:
     replayed: bool = False
     exception: BaseException | None = field(default=None, repr=False, compare=False)
     terminal: object = field(default=None, repr=False, compare=False)
+    journal_outcome: dict | None = field(default=None, repr=False, compare=False)
 
     @property
     def outcome(self):
@@ -109,6 +110,9 @@ def prepare_custom_tool_call(tool, raw_arguments, *, call_id, call_index, batch_
         if not allowed:
             _report(options,'authorization_denied')
             return _settlement(call_id,call_index,batch_index,'authorization_denied',{'status':'error','error':'authorization_denied'})
+    from .sub_agents import is_sub_agent_tool, digest
+    from .sub_agent_execution import current_execution, decode_receipt, JOURNAL_BYTES
+    delegation = current_execution() if is_sub_agent_tool(tool) else None
     check(); key = token = None
     if tool.operation_key is not None:
         from .tools import ToolDeadlineExceeded
@@ -121,6 +125,8 @@ def prepare_custom_tool_call(tool, raw_arguments, *, call_id, call_index, batch_
         check(); context = replace(context,operation_key=key)
         if signature is None:
             signature=hashlib.sha256(canonical_json(dict(tool_name=tool.name,tool_version=tool.version,arguments=arguments)).encode()).hexdigest()
+        if delegation is not None:
+            signature = digest([signature, delegation.frame.identity])
         refs = dict(operation_key=key,signature=signature)
         if options.get('_await_operation') is not None:
             waited=options['_await_operation'](context.scope.operation_namespace,key,signature)
@@ -136,13 +142,21 @@ def prepare_custom_tool_call(tool, raw_arguments, *, call_id, call_index, batch_
         except Exception:
             _report(options,'tool_journal_failed'); _complete(options,None,'uncertain',**refs)
             raise ToolEffectFailure('tool_journal_failed') from None
-        try: replay = validate_claim(claim,signature,tool.max_result_bytes)
+        try: replay = validate_claim(claim, signature, JOURNAL_BYTES if delegation is not None else tool.max_result_bytes)
         except ToolEffectFailure as exc:
             _report(options,exc.reason); _complete(options,None,'uncertain',**refs); raise
         if claim.state=='uncertain':
             _report(options,'tool_effect_uncertain'); _complete(options,None,'uncertain',**refs)
             raise ToolEffectFailure('tool_effect_uncertain')
         if claim.state=='replay':
+            if delegation is not None:
+                document, replay = decode_receipt(delegation, context, tool, replay)
+                if (not delegation.authorize_launch(tool.name, arguments, context)
+                        or not delegation.authorize_result(tool.name, context, tuple(document['sources']), 'replay')):
+                    _report(options, 'authorization_denied')
+                    return _settlement(call_id, call_index, batch_index, 'authorization_denied',
+                                       {'status': 'error', 'error': 'authorization_denied'})
+                delegation.record(context, document)
             from .mcp import is_mcp_tool
             if is_mcp_tool(tool):
                 # A journal lookup can block while the caller's grant changes.
@@ -195,6 +209,14 @@ def invoke_prepared_tool(call):
     if type(value) is TerminalCompletion and call.operation_key is None:
         return result('ok',terminal=value)
     try:
+        from .sub_agents import is_sub_agent_tool
+        if is_sub_agent_tool(tool):
+            from .sub_agent_execution import current_execution, encode_receipt, decode_receipt
+            execution = current_execution()
+            envelope = encode_receipt(execution, call.context, tool, value)
+            _, outcome = decode_receipt(execution, call.context, tool, envelope)
+            return result('ok' if outcome['status'] == 'ok' else 'controlled_failure',
+                          outcome, journal_outcome=envelope)
         if tool.result_contract is not None:
             from .tool_result_contract import normalize_tool_result
             outcome=normalize_tool_result(tool,value)
@@ -218,10 +240,24 @@ def settle_custom_tool_call(call, settlement, *, on_completion=None):
         if code not in {'ok','controlled_failure'} or settlement.exception is not None:
             _report(options,'tool_effect_uncertain'); _complete(options,None,'uncertain',**refs)
             raise ToolEffectFailure('tool_effect_uncertain')
-        try: options['tool_journal'].commit(call.context.scope.operation_namespace,call.operation_key,call.claim_token,deepcopy(outcome))
+        try:
+            committed = settlement.journal_outcome if settlement.journal_outcome is not None else outcome
+            options['tool_journal'].commit(call.context.scope.operation_namespace, call.operation_key,
+                                           call.claim_token, deepcopy(committed))
         except Exception:
             _report(options,'tool_journal_failed'); _complete(options,None,'uncertain',**refs)
             raise ToolEffectFailure('tool_journal_failed') from None
+        if settlement.journal_outcome is not None:
+            from .sub_agent_execution import current_execution, decode_receipt
+            delegation = current_execution()
+            document, _ = decode_receipt(delegation, call.context, call.tool, settlement.journal_outcome)
+            if not delegation.authorize_result(call.tool.name, call.context, tuple(document['sources']), 'result'):
+                outcome = {'status': 'error', 'error': 'authorization_denied'}
+                code = 'controlled_failure'
+                settlement = _settlement(call.call_id, call.call_index, call.batch_index, code, outcome,
+                                         handler_entered=settlement.handler_entered)
+            else:
+                delegation.record(call.context, document)
         options.get('_phase_state',{}).update(status='completed',code=code,**refs)
         _report(options,code); _complete(options,outcome,'completed',**refs); check(); return settlement
     if settlement.exception is not None:

@@ -350,6 +350,7 @@ class TurnResult:
     rules_fixed: tuple = ()
     rules_faulted: tuple = ()  # Guards that raised or returned an unusable verdict or repair.
     rules_fingerprint: str | None = None
+    sub_agent_proof: dict | None = None
 
 
 @dataclass(frozen=True, init=False)

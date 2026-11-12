@@ -43,7 +43,7 @@ class FrozenTurnInput(_OwnedRecord):
             'authoritativeInputLimits','inputViews','inputVariantSelection','sourceHistoryDigest','selectedHistoryDigest',
             'bindings','contextSelection','contextReport','initialContextWork','contextWork',
             'nativePayloadDigest','workspaceDigest','executionAttempt'})
-        if type(document['version']) is not int or (document['version'], document['encodingVersion']) not in ((1, 'conversation-turn-v3'), (2, 'conversation-turn-v4'), (3, 'conversation-turn-v5')):
+        if type(document['version']) is not int or (document['version'], document['encodingVersion']) not in ((1, 'conversation-turn-v3'), (2, 'conversation-turn-v4'), (3, 'conversation-turn-v5'), (5, 'conversation-turn-v6')):
             raise ValueError('invalid frozen version')
         for name in ('contextIdentity','messageDigest','sourceHistoryDigest','selectedHistoryDigest','nativePayloadDigest','workspaceDigest'):
             _hash(document[name])
@@ -73,11 +73,16 @@ class FrozenTurnInput(_OwnedRecord):
             raise ValueError('unexpected optional input view')
         bindings=document['bindings']
         _closed(bindings,{'agent','policy','limits','profile','endpoint','tools','cliSandbox'},
-                {'rules','contextPolicy','counterDescriptor'} | ({'toolContractV1'} if document['version']>=2 else set()) | ({'parallelToolsV1'} if document['version']==3 else set()))
+                {'rules','contextPolicy','counterDescriptor'} | ({'toolContractV1'} if document['version']>=2 else set()) | ({'parallelToolsV1'} if document['version'] in (3,5) else set())
+                | ({'subAgentsV1'} if document['version']==5 else set()))
+        if document['version']==5:
+            from .sub_agents import SubAgentFrameV1
+            if SubAgentFrameV1.from_dict(bindings.get('subAgentsV1')).to_dict() != bindings['subAgentsV1']:
+                raise ValueError('noncanonical delegation frame')
         if document['version']>=2:
             from .tool_contracts import validate_bindings_document
             validate_bindings_document(bindings.get('toolContractV1'))
-        if document['version']==3:
+        if document['version']==3 or document['version']==5 and 'parallelToolsV1' in bindings:
             from .tool_parallel_contracts import validate_parallel_binding
             validate_parallel_binding(bindings.get('parallelToolsV1'))
             if bindings['parallelToolsV1']['policy'] != bindings['policy'].get('parallel_tools'):
@@ -109,13 +114,13 @@ def _monotone(before,after):
 
 
 def export_frozen(prepared):
-    if prepared.encoding_version not in ('conversation-turn-v3', 'conversation-turn-v4', 'conversation-turn-v5'): raise TurnAdmissionError('unsupportedCapability')
+    if prepared.encoding_version not in ('conversation-turn-v3', 'conversation-turn-v4', 'conversation-turn-v5', 'conversation-turn-v6'): raise TurnAdmissionError('unsupportedCapability')
     value=json.loads(prepared._encoded)
     excluded={'history','selectedHistory','messages','message','inputData','workspace','inputProfile',
         'authoritativeInputData','authoritativeInputProfile','authoritativeInputLimits','inputViews',
         'inputVariantSelection','nativePayloadDigest','contextSelection','contextReport'}
     work=prepared.context_work.to_dict() if prepared.context_work is not None else None
-    record=dict(version=3 if prepared.encoding_version=='conversation-turn-v5' else 2 if prepared.encoding_version=='conversation-turn-v4' else 1,encodingVersion=prepared.encoding_version,contextIdentity=prepared.context_identity,
+    record=dict(version=5 if prepared.encoding_version=='conversation-turn-v6' else 3 if prepared.encoding_version=='conversation-turn-v5' else 2 if prepared.encoding_version=='conversation-turn-v4' else 1,encodingVersion=prepared.encoding_version,contextIdentity=prepared.context_identity,
         inputBytes=prepared.input_bytes,message=value['message'],messageDigest=hashlib.sha256(value['message'].encode('utf-8')).hexdigest(),
         selectedInputData=value['inputData'],inputProfile=value.get('inputProfile'),
         authoritativeInputData=value.get('authoritativeInputData'),authoritativeInputProfile=value.get('authoritativeInputProfile'),
@@ -131,12 +136,16 @@ def export_frozen(prepared):
 
 @tool_contract_preparation
 def restore_turn(runtime,artifact,*,history=(),frozen_input,policy,limits,context_policy=None,
-                 token_counters=None,workspace=None,context_work=None,fresh_attempt=False,tool_contract_bindings=None):
+                 token_counters=None,workspace=None,context_work=None,fresh_attempt=False,tool_contract_bindings=None,sub_agent_frame=None):
     try:
         if type(fresh_attempt) is not bool: raise ValueError('invalid attempt option')
         frozen=FrozenTurnInput.from_dict(frozen_input.to_dict() if type(frozen_input) is FrozenTurnInput else frozen_input).to_dict()
         if frozen['bindings'].get('toolContractV1') != (tool_contract_bindings.to_dict() if tool_contract_bindings is not None else None):
             raise ValueError('tool contract binding')
+        if frozen['bindings'].get('subAgentsV1') != (sub_agent_frame.to_dict() if sub_agent_frame is not None else None):
+            raise ValueError('delegation binding')
+        if fresh_attempt and sub_agent_frame is not None:
+            raise ValueError('delegation does not support fresh attempts')
         if type(limits) is not TurnLimits or context_digest(str(workspace) if workspace is not None else None)!=frozen['workspaceDigest']:
             raise ValueError('workspace binding')
         owned_history=validate_conversation_history(history,limits=limits)
@@ -166,7 +175,7 @@ def restore_turn(runtime,artifact,*,history=(),frozen_input,policy,limits,contex
             context_report=ContextAssemblyReport.from_dict(frozen['contextReport']) if frozen['contextReport'] is not None else None,
             context_work=work,_warn_rules=False,_frozen_input=frozen,
             _input_variant_selection=InputVariantSelection.from_dict(frozen['inputVariantSelection']) if frozen['inputVariantSelection'] is not None else None,
-            tool_contract_bindings=tool_contract_bindings)
+            tool_contract_bindings=tool_contract_bindings, sub_agent_frame=sub_agent_frame)
         if prepared.context_identity!=frozen['contextIdentity']: raise ValueError('context binding')
         material=json.loads(prepared._encoded)
         if context_digest(material.get('selectedHistory',material['history']))!=frozen['selectedHistoryDigest']:

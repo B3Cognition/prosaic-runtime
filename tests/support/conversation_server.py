@@ -23,7 +23,8 @@ class ConversationFixture:
                 raw = self.rfile.read(int(self.headers['Content-Length']))
                 fixture.raw_requests.append(raw)
                 fixture.requests.append(json.loads(raw))
-                status, content_type, body = fixture.responses.pop(0)
+                response = fixture.responses.pop(0)
+                status, content_type, body = response(fixture.requests[-1]) if callable(response) else response
                 self.send_response(status)
                 self.send_header('Content-Type', content_type)
                 self.send_header('Content-Length', str(len(body)))
