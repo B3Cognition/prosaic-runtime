@@ -112,3 +112,31 @@ def test_parent_cites_only_delivered_approved_child_observation(tmp_path):
         assert result.result.metadata['citations_v1']['markers']
         assert result.sub_agent_proof['toolCalls'] == 2
         assert result.sub_agent_proof['receipts'][0]['sources'] == ['fact-v1', 'graph:revision-1']
+
+
+
+def test_denied_frozen_sources_do_not_claim_the_slot(tmp_path):
+    with ConversationFixture('openai-compatible') as fixture:
+        runner, parent, policy, contracts, frame = bind(fixture.runtime)
+        allowed = False
+        claims = []
+
+        class Journal(SqliteJournal):
+            def claim(self, *args):
+                claims.append(args)
+                return super().claim(*args)
+
+        options = dict(message='parent', policy=policy, tool_contract_bindings=contracts,
+            sub_agent_frame=frame, accounting=MemoryRecorder(), tool_journal=Journal(tmp_path / 'effects.sqlite'),
+            sub_agent_access=sdk.SubAgentAccessV1('grants-v1', lambda *_: True, lambda *_: allowed, lambda: True),
+            context=sdk.ExecutionContext(invocation_id=frame.scope.invocation_id))
+        fixture.queue_calls([dict(id='delegate', name='review', arguments='{"task":"Check"}')])
+        fixture.queue_text('Unavailable')
+        assert runner.turn(parent, **options).result.stdout == 'Unavailable'
+        assert not claims
+        allowed = True
+        fixture.queue_calls([dict(id='delegate', name='review', arguments='{"task":"Check"}')])
+        fixture.queue_text('{"finding":"verified"}')
+        fixture.queue_text('Reviewed')
+        assert runner.turn(parent, **options).result.stdout == 'Reviewed'
+        assert len(claims) == 1

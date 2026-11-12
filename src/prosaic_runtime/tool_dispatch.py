@@ -113,6 +113,11 @@ def prepare_custom_tool_call(tool, raw_arguments, *, call_id, call_index, batch_
     from .sub_agents import is_sub_agent_tool, digest
     from .sub_agent_execution import current_execution, decode_receipt, JOURNAL_BYTES
     delegation = current_execution() if is_sub_agent_tool(tool) else None
+    if delegation is not None and not delegation.preflight(context):
+        check()
+        _report(options,'authorization_denied')
+        return _settlement(call_id,call_index,batch_index,'authorization_denied',
+                           {'status':'error','error':'delegate_unavailable'})
     check(); key = token = None
     if tool.operation_key is not None:
         from .tools import ToolDeadlineExceeded

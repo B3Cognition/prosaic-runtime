@@ -620,8 +620,12 @@ class ProsaicRuntime:
                     or recorder.provider_id != snapshot[0].profiles[snapshot[0].default_profile].provider
                     or resolved.run_id != scope.run_id):
                 raise TurnAdmissionError('invalidPolicy')
+            try:
+                env = dict(os.environ if env is None else env)
+            except (TypeError, ValueError):
+                raise TurnAdmissionError('invalidPolicy') from None
             delegation = DelegationExecution(sub_agent_frame, sub_agent_access, self,
-                snapshot[0], recorder, policy, cancelled)
+                snapshot[0], recorder, policy, cancelled, env, owned_headers)
             if not delegation.owner_valid():
                 raise TurnAdmissionError('invalidPolicy')
         if 'contextPolicy' in owned:

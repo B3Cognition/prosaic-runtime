@@ -31,9 +31,10 @@ class ChildResult:
 
 
 class DelegationExecution:
-    def __init__(self, frame, access, runtime, config, recorder, policy, cancelled):
+    def __init__(self, frame, access, runtime, config, recorder, policy, cancelled, env, request_headers):
         self.frame, self.access, self.runtime = frame, access, runtime
         self.config, self.recorder = config, recorder
+        self._env, self._headers = env, dict(request_headers)
         self.launches = 0
         self.records = []
         self._exposed = []
@@ -69,6 +70,10 @@ class DelegationExecution:
     def can_launch(self):
         return (self.launches < self.frame.policy.max_delegations
                 and all(b.provider_remaining > 1 for b in active_budgets()))
+
+    def preflight(self, context):
+        sources = self.frame.projections[context.tool_name]['sources']
+        return self.can_launch() and self.authorize_result(context.tool_name, context, tuple(sources), 'childUse')
 
     def authorize_result(self, alias, context, refs, purpose):
         try:
@@ -151,7 +156,7 @@ class DelegationExecution:
         self.launches += 1
         with budget.activate():
             result = child.turn(prepared, context=accounting, accounting=self.recorder,
-                tool_contract_bindings=contracts, cancelled=cancelled)
+                tool_contract_bindings=contracts, cancelled=cancelled, env=self._env, request_headers=self._headers)
         if result.result.exit_code != 0:
             raise ToolEffectFailure('tool_effect_uncertain')
         refs = tuple(source_references(sources))
