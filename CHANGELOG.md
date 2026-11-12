@@ -6,9 +6,9 @@
   longer stops the turn as a guard fault; it takes the rule retry path. Such a turn may now spend one more provider
   request (always within `RunPolicy` budgets) and may succeed; the rule is reported in the new
   `TurnResult.rules_declined` instead of `rules_faulted`. Authors who want a declined repair to stop the turn at once
-  should bind the rule with `on_violation=fail`. A turn prepared or frozen under 0.9.21 keeps identical bytes but
-  follows the new behaviour when executed by this release. `TurnResult.rules_retried` lists rules answered with a
-  granted retry. Unusable repairs and raising guards remain faults.
+  should bind the rule with `on_violation=fail`. A turn prepared or frozen under 0.9.22 or earlier keeps identical
+  bytes but follows the new behaviour when executed by this release. `TurnResult.rules_retried` lists rules
+  answered with a granted retry. Unusable repairs and raising guards remain faults.
 - Add opt-in `ProsaicRuntime(..., correct_malformed_tool_calls=True)` (default off): a conversation turn may ask the
   model once to resend a tool call that batch admission refused, with a closed-code envelope and within the request
   budget, instead of failing with `invalidToolRequest`. `TurnResult.tool_request_corrections` reports it.
@@ -23,6 +23,12 @@
 - Fix: a `before_tool` repair that the tool schema refuses now lists the repairing rule in `rules_faulted`, as
   documented; it already stopped the turn with `ruleViolation`. Since the refused batch never runs, no repair recorded
   for it stays in `rules_fixed`.
+
+## 0.9.22 — 2026-11-11
+
+- Add the optional MCP client for host-approved read tools with bounded Streamable HTTP and journaled dispatch.
+- Recheck current authorization before dispatch and replay. Support offline receipt adoption through Harness.
+- See [release notes](docs/release-0.9.22.md).
 
 ## 0.9.21 — 2026-11-11
 

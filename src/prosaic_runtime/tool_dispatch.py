@@ -143,6 +143,15 @@ def prepare_custom_tool_call(tool, raw_arguments, *, call_id, call_index, batch_
             _report(options,'tool_effect_uncertain'); _complete(options,None,'uncertain',**refs)
             raise ToolEffectFailure('tool_effect_uncertain')
         if claim.state=='replay':
+            from .mcp import is_mcp_tool
+            if is_mcp_tool(tool):
+                # A journal lookup can block while the caller's grant changes.
+                allowed = tool.authorize(arguments, context)
+                check()
+                if not allowed:
+                    _report(options, 'authorization_denied')
+                    return _settlement(call_id, call_index, batch_index, 'authorization_denied',
+                                       {'status': 'error', 'error': 'authorization_denied'})
             if tool.result_contract is not None:
                 from .tool_result_contract import validate_tool_result_outcome
                 try: replay=validate_tool_result_outcome(tool,replay)

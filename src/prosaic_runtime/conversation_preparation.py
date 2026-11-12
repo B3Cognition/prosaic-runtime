@@ -195,6 +195,9 @@ def prepare_turn(runtime, artifact, *, message, history=(), input_data=None, pol
         policy = policy_from_document(json.loads(encode_owned(policy_document(policy))))
         names = requested & runtime.config.allowed_tools & policy.allowed_tools
         from .tool_contracts import admit_tool_contracts
+        from .mcp import admit_mcp_tools
+        admit_mcp_tools(runtime._custom_tools, names, surface="api", policy=policy,
+                        contracts=tool_contract_bindings, initial_tool=policy.initial_tool)
         admit_tool_contracts(runtime._custom_tools, names, tool_contract_bindings)
         from .tool_parallel_contracts import admit_parallel_execution
         admit_parallel_execution(policy,tool_contract_bindings,metadata_limit=limits.max_metadata_bytes)

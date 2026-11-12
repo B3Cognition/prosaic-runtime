@@ -27,7 +27,7 @@ jobs:
       - name: Install explicit Core release and Runtime
         run: |
           python -m pip install ./.ci-prosaic
-          python -m pip install -e '.[test]'
+          python -m pip install -e '.[test,mcp]' 'mcp==2.3.0'
           python -m pip install --force-reinstall --no-deps 'https://files.pythonhosted.org/packages/0d/a8/8b926410b806448dd7762c8b04f7c4c6b0b86d2837b8a5c30d374aa892c0/b3_prosaic_harness-0.9.12-py3-none-any.whl#sha256=fb07797c3e42ab2e7e8f0a727b7bd25229e9b223cf15309716f10ff9d1f1147b'
       - name: Install Linux CLI sandbox backend
         if: runner.os == 'Linux'
@@ -83,11 +83,11 @@ jobs:
       - name: Require installed context-pack APIs
         run: |
           python -m venv "$RUNNER_TEMP/runtime-context-packs"
-          "$RUNNER_TEMP/runtime-context-packs/bin/python" -m pip install dist/b3_prosaic_runtime-0.9.21-py3-none-any.whl 'b3-prosaic-runtime-postgres==0.3.0' pytest
+          "$RUNNER_TEMP/runtime-context-packs/bin/python" -m pip install 'dist/b3_prosaic_runtime-0.9.22-py3-none-any.whl[mcp]' 'mcp==2.3.0' 'b3-prosaic-runtime-postgres==0.3.0' pytest
           "$RUNNER_TEMP/runtime-context-packs/bin/python" -m pip check
           "$RUNNER_TEMP/runtime-context-packs/bin/python" -I scripts/context_pack_wheel_smoke.py
           "$RUNNER_TEMP/runtime-context-packs/bin/python" -I scripts/tool_contract_smoke.py
-          "$RUNNER_TEMP/runtime-context-packs/bin/python" -I -m pytest -o pythonpath=tests tests/test_parallel_tool_installed.py -q
+          "$RUNNER_TEMP/runtime-context-packs/bin/python" -I -m pytest -o pythonpath=tests tests/test_parallel_tool_installed.py tests/test_mcp_installed.py -q
 
   metering-postgres:
     runs-on: '${{ matrix.os }}'
@@ -130,7 +130,7 @@ jobs:
           python -m build adapters/postgres
       - name: Install release wheels
         run: |
-          python -m pip install dist/b3_prosaic_runtime-0.9.21-py3-none-any.whl
+          python -m pip install dist/b3_prosaic_runtime-0.9.22-py3-none-any.whl
           python -m pip install adapters/postgres/dist/b3_prosaic_runtime_postgres-0.3.0-py3-none-any.whl
       - name: Use the immutable published recorder 0.3.0 for PostgreSQL compatibility
         run: python -m pip install --force-reinstall --no-deps 'https://files.pythonhosted.org/packages/4f/95/39d4602749df2e83a8d7afc4f9f68819e0dea48c2f688d824f8a07ed1aae/b3_prosaic_runtime_postgres-0.3.0-py3-none-any.whl#sha256=5f29ce5b0a1cb3ce4ee41f44c50e322b5b1af73cbe186ecadc428f81ccc7b5ca'

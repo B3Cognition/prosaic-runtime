@@ -1,5 +1,7 @@
 # Prosaic Runtime
 
+Runtime **0.9.22** adds an [optional MCP client](docs/release-0.9.22.md) for host-approved read tools over Streamable HTTP.
+
 Runtime **0.9.21** adds [opt-in parallel read tools](docs/parallel-tools.md) for API runs and turns. See [release notes](docs/release-0.9.21.md).
 
 Runtime **0.9.20** adds opt-in safe tool events and checked citations. See [release notes](docs/release-0.9.20.md) and [the contract](docs/tool-events-citations.md).
@@ -73,7 +75,7 @@ Runtime is distributed as `b3-prosaic-runtime` and requires
 `b3-prosaic>=0.5.0,<0.6` from the package index. Python imports (`prosaic_runtime`)
 and the `prosaic-runtime` CLI remain unchanged. The separately installed recorder
 is `b3-prosaic-runtime-postgres` **0.3.0**, selecting Runtime 0.9.x.
-Install the release with `python -m pip install 'b3-prosaic-runtime==0.9.21'`.
+Install the release with `python -m pip install 'b3-prosaic-runtime==0.9.22'`.
 
 ### Opt-in final-answer phase
 
@@ -238,7 +240,7 @@ an isolated Python environment; no sudo or global Python installation is needed:
 ```sh
 git clone https://github.com/B3Cognition/prosaic-runtime.git
 cd prosaic-runtime
-git checkout v0.9.21
+git checkout v0.9.22
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install .
@@ -248,7 +250,7 @@ The package installs compatible `b3-prosaic` 0.5.x into the same environment.
 Use the release tag after publication; older release tags retain historical docs.
 
 For public-index installation, create a fresh virtual environment or
-container image and run `python -m pip install 'b3-prosaic-runtime==0.9.21'`.
+container image and run `python -m pip install 'b3-prosaic-runtime==0.9.22'`.
 Install the optional recorder with
 `python -m pip install 'b3-prosaic-runtime-postgres==0.3.0'`. Never add renamed
 packages to an environment containing legacy `prosaic`, `prosaic-runtime` or
@@ -865,3 +867,34 @@ See [execution correlation and graceful drain](docs/execution-lifecycle.md) for 
 The next development candidate supports opt-in, bounded **parallel read tools**
 on both API provider wires, with ordered guards and evidence. See
 [parallel read policy, events and compatibility](docs/parallel-tools.md).
+
+### MCP read tools
+
+Use the optional `b3-prosaic-runtime[mcp]` extra and import the host API from
+`prosaic_runtime.mcp`. Configure `McpServerV1` for an approved HTTPS
+Streamable HTTP endpoint and select protocol `2026-07-28` or `2025-11-25`.
+`McpClientV1` receives host callbacks for destination approval, resource-bound
+bearer credentials, access scope and per-call authorization. Credential-free
+loopback HTTP requires explicit fixture opt-in. Use a canonical path with
+unreserved URL characters and slash separators.
+
+Enter the client as a context manager and call
+`client.discover(access_scope=scope)` during host onboarding. Save the private
+`catalog.to_dict()` document and pin `catalog.sha256` independently. Restore it
+with `client.restore_catalog(document, access_scope=scope, expected_sha256=sha)`.
+Bind each reviewed tool with `McpToolSpecV1`, including its local alias, literal
+`read_only=True`, typed result contract and result projector. Review the remote
+schema and supply a closed argument schema for an open remote input schema.
+
+Pass the generated registrations as `custom_tools`. API runs and turns need
+finite provider and tool attempt caps, an invocation scope with an explicit
+operation namespace, a tool journal and `ToolContractBindingsV1` with an
+evidence authorizer. The model sees the approved alias. The client relists before
+a fresh dispatch and compares the selected schema with its approved snapshot.
+Completed journal entries replay under current authorization. A changed
+catalogue requires review and rebinding for new work. An ambiguous response
+after the tool POST requires journal reconciliation.
+
+MCP registrations run serially in parallel tool batches. Existing local tools
+use the base install. The MCP extra is needed when opening a client or executing
+a selected MCP alias.
