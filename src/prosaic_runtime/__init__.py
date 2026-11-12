@@ -1,5 +1,5 @@
 """Execute neutral Prosaic artifacts with explicitly granted authority."""
-__version__ = '0.9.22'
+__version__ = '0.9.23'
 
 from .artifacts import ProsaicArtifact
 from .config import EndpointConfig, RuntimeConfig, RunLimits, CliSandboxConfig

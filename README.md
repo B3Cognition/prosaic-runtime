@@ -1,5 +1,7 @@
 # Prosaic Runtime
 
+Runtime **0.9.23** adds [bounded sub-agents](docs/release-0.9.23.md) for role-aware API turns.
+
 Runtime **0.9.22** adds an [optional MCP client](docs/release-0.9.22.md) for host-approved read tools over Streamable HTTP.
 
 Runtime **0.9.21** adds [opt-in parallel read tools](docs/parallel-tools.md) for API runs and turns. See [release notes](docs/release-0.9.21.md).

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.23 — 2026-11-12
+
+- Add one-level serial delegation for registered specialists with independent context, shared budgets and route-bound journal receipts.
+- Project approved child observations through the parent citation contract.
+- See [release notes](docs/release-0.9.23.md).
+
 ## 0.9.22 — 2026-11-11
 
 - Add the optional MCP client for host-approved read tools with bounded Streamable HTTP and journaled dispatch.
