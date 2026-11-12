@@ -29,8 +29,9 @@ def run_tool(runtime, name, arguments, *, policy=None, cwd='.', on_event=None,
     config, custom, cli = runtime.config, dict(runtime._custom_tools), frozenset(runtime._cli_tools)
     grants = frozenset(config.allowed_tools)
     from .mcp import is_mcp_tool
-    mcp_selected = type(name) is str and is_mcp_tool(custom.get(name))
-    admit_tool_contracts(custom, {name} if type(name) is str and not mcp_selected else (),
+    from .sub_agents import is_sub_agent_tool
+    unsupported_custom = type(name) is str and (is_mcp_tool(custom.get(name)) or is_sub_agent_tool(custom.get(name)))
+    admit_tool_contracts(custom, {name} if type(name) is str and not unsupported_custom else (),
                          current_bindings(), automatic_citations=False)
     policy = policy if policy is not None else RunPolicy(timeout_s=config.limits.timeout_s,
                                                         max_tool_rounds=config.limits.max_tool_rounds)
@@ -78,7 +79,7 @@ def run_tool(runtime, name, arguments, *, policy=None, cwd='.', on_event=None,
     if result is None:
         if type(name) is not str or name not in custom and name not in BUILTIN_TOOLS:
             result = finish('not_registered')
-        elif name in BUILTIN_TOOLS or name in cli or mcp_selected:
+        elif name in BUILTIN_TOOLS or name in cli or unsupported_custom:
             result = finish('unsupported_direct_tool')
         elif name not in grants or name not in policy.allowed_tools:
             result = finish('not_granted')
