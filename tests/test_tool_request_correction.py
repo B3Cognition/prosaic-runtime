@@ -5,6 +5,7 @@ import json
 
 import pytest
 
+from prosaic_runtime.tool_request_correction import PLACEHOLDER
 from prosaic_runtime import CustomTool, ProsaicRuntime, RunPolicy, RuntimeConfig, TurnAdmissionError, Verdict
 from support.conversation_server import ConversationFixture
 from support.rules_support import recorder, tagged
@@ -312,8 +313,10 @@ def test_a_correction_after_the_prompt_keeps_roles_strictly_alternating(provider
         placeholder = json.loads(fx.raw_requests[1])['messages'][-2]
     assert turn.result.exit_code == 0
     assert roles == ['user', 'assistant', 'user'] and strictly_alternating(roles)
-    # The refused response is replaced by a fixed neutral placeholder: no model text, no tool calls.
+    # The refused response is replaced by the fixed bracketed host marker: no model text, no tool calls.
     assert 'tool_calls' not in placeholder and 'QA-999' not in json.dumps(placeholder)
+    text = placeholder['content'] if isinstance(placeholder['content'], str) else placeholder['content'][0]['text']
+    assert text == PLACEHOLDER == '[host: tool request not accepted; nothing ran]'
 
 
 @pytest.mark.parametrize('provider', PROVIDERS)

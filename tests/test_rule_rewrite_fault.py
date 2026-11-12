@@ -126,3 +126,33 @@ def test_an_unnamed_refusal_still_faults_only_the_culprit(provider, monkeypatch)
         turn, effects = lookup_turn(fx, [first.guard, second.guard], body, calls)
     assert effects == [] and turn.rules_faulted == ('subagents/shelf-keeper.md:2:id_check',)
     assert turn.rules_fixed == ()
+
+
+@pytest.mark.parametrize('provider', PROVIDERS)
+def test_a_batch_refusal_no_single_rewrite_explains_faults_every_rewriting_rule(provider, monkeypatch):
+    from prosaic_runtime.tool_registry import BoundedToolRegistry, InvalidToolRequest
+
+    admit = BoundedToolRegistry.validate_batch
+
+    def batch_level(self, calls):  # Refuses the rewritten batch as a whole, unnamed; each call passes alone.
+        text = json.dumps(calls)
+        if len(calls) > 1 and 'REC-2' in text and 'REC-4' in text:
+            raise InvalidToolRequest()
+        return admit(self, calls)
+
+    monkeypatch.setattr(BoundedToolRegistry, 'validate_batch', batch_level)
+    first = recorder('shelf_check', Verdict(False, fixed={'recordId': 'REC-2'}), stages=TOOL_STAGES)
+    second = recorder(
+        'id_check', Verdict(True), Verdict(True), Verdict(False, fixed={'recordId': 'REC-4'}), stages=TOOL_STAGES
+    )
+    body = fix_rule('shelf_check', 'Use canonical ids.') + fix_rule('id_check', 'Use string ids.')
+    calls = [
+        {'id': 'native-1', 'name': 'shelf_lookup', 'arguments': json.dumps({'recordId': 'REC-1'})},
+        {'id': 'native-2', 'name': 'shelf_lookup', 'arguments': json.dumps({'recordId': 'REC-3'})},
+    ]
+    with ConversationFixture(provider) as fx:
+        turn, effects = lookup_turn(fx, [first.guard, second.guard], body, calls)
+    assert effects == [] and turn.evidence.to_dict()['failureCode'] == 'ruleViolation'
+    # Never a stop with no fault recorded: every rule that rewrote the refused batch is faulted.
+    assert turn.rules_faulted == ('subagents/shelf-keeper.md:1:shelf_check', 'subagents/shelf-keeper.md:2:id_check')
+    assert turn.rules_fixed == ()

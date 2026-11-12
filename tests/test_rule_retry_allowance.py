@@ -187,3 +187,48 @@ def test_the_allowance_enters_turn_identity_only_when_not_one():
         with pytest.raises(TurnAdmissionError) as refused:
             runtime(fx, [guard.guard]).turn(two)
         assert refused.value.code == 'bindingMismatch' and fx.requests == []
+
+
+def tool_stage_turn(fx, stage, verdicts, rounds, retries):
+    """Tool rounds whose calls a retry-bound rule refuses at ``stage``; returns the turn and the calls that ran."""
+    calls = []
+    fx.tools['shelf_lookup'] = CustomTool(
+        'shelf_lookup',
+        'Look up a synthetic shelf mark',
+        {'type': 'object', 'properties': {'recordId': {'type': 'string'}}, 'additionalProperties': False},
+        lambda arguments: calls.append(arguments) or {'shelfMark': 'QA-104'},
+        'shelf-v1',
+    )
+    for n in range(rounds):
+        fx.queue_calls(
+            [{'id': f'native-{n}', 'name': 'shelf_lookup', 'arguments': json.dumps({'recordId': f'REC-{n}'})}]
+        )
+    fx.queue_text('Never reached.')
+    guard = recorder('shelf_check', *verdicts, stages=TOOL_STAGES)
+    turn = runtime(fx, [guard.guard], retries).turn(
+        tagged(rule(stage), tools=fx.tools), message='Find the record', policy=fx.policy
+    )
+    return turn, calls
+
+
+@pytest.mark.parametrize('provider', PROVIDERS)
+@pytest.mark.parametrize('stage', TOOL_STAGES)
+def test_a_tool_stage_refusal_with_no_allowance_stops(provider, stage):
+    with ConversationFixture(provider) as fx:
+        turn, calls = tool_stage_turn(fx, stage, [Verdict(False)], rounds=1, retries=0)
+        assert len(fx.requests) == 1
+    assert failure(turn) == 'ruleViolation' and turn.completed_turn is None
+    assert calls == ([] if stage == 'before_tool' else [{'recordId': 'REC-0'}])  # after_tool: the effect happened.
+    assert turn.rule_retries_used == 0 and turn.rules_retried == () and turn.rules_faulted == ()
+    assert turn.rules_violated == (RULE_ID,)
+
+
+@pytest.mark.parametrize('provider', PROVIDERS)
+@pytest.mark.parametrize('stage', TOOL_STAGES)
+def test_a_tool_stage_refusal_after_the_allowance_is_spent_stops(provider, stage):
+    with ConversationFixture(provider) as fx:
+        turn, calls = tool_stage_turn(fx, stage, [Verdict(False), Verdict(False)], rounds=2, retries=1)
+        assert len(fx.requests) == 2  # Round 1 is refused with feedback; round 2 finds the allowance spent.
+    assert failure(turn) == 'ruleViolation' and turn.completed_turn is None
+    assert calls == ([] if stage == 'before_tool' else [{'recordId': 'REC-0'}, {'recordId': 'REC-1'}])
+    assert turn.rule_retries_used == 1 and turn.rules_retried == (RULE_ID,) and turn.rules_faulted == ()

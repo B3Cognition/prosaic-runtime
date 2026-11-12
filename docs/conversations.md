@@ -156,8 +156,12 @@ like `guards`, so it is not a YAML key):
   Like a rule retry, it runs under the turn's deadline and token budget: if
   either runs out during it, the turn fails with `timeout` or `budgetExceeded`,
   which then stands in for the original `invalidToolRequest`.
+- Worst case, one turn spends one correction plus up to three rule retries
+  (`rule_retries=3`) beyond its normal requests, always within
+  `max_provider_requests`.
 - On the wire, the refused response is replaced by a fixed assistant
-  placeholder (no model text, no tool calls) before the envelope, so roles stay
+  placeholder, the bracketed host marker `[host: tool request not accepted;
+  nothing ran]` (no model text, no tool calls), before the envelope, so roles stay
   strictly alternating on providers and chat templates that require it.
 - `TurnResult.tool_request_corrections` lists the issue code of the correction
   taken; `providerAttempts` counts its request.

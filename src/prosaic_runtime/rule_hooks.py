@@ -430,6 +430,9 @@ class RuleHooks:
                 else:
                     refused_calls = [call['id'] for call in calls
                                      if call['id'] in rewritten and not _admissible(registry, call)]
+                    # Every rewrite is admissible alone, so the batch-level refusal cannot be pinned on one:
+                    # fault every rewriting rule rather than stop with no fault recorded.
+                    refused_calls = refused_calls or list(rewritten)
                 self.faulted.update(rule_id for call_id in refused_calls for rule_id in repairers[call_id])
                 # The batch never runs, so every repair recorded for it repaired nothing, the innocent ones too.
                 self.fixed.intersection_update(fixed_before)
