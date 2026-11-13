@@ -1,8 +1,8 @@
 # Changelog
 
-## 0.9.24 — 2026-11-13
+## 0.9.25 — 2026-11-13
 
-- See [release notes](docs/release-0.9.24.md).
+- See [release notes](docs/release-0.9.25.md).
 
 - **Behaviour change, on by default:** a `fix` guard that declines to repair (a violation with `fixed=None`) no
   longer stops the turn as a guard fault; it takes the rule retry path. Such a turn may now spend one more provider
