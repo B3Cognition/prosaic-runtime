@@ -1,6 +1,8 @@
 # Prosaic Runtime
 
-Runtime **0.9.23** adds [bounded sub-agents](docs/release-0.9.23.md) for role-aware API turns.
+Runtime **0.9.24** adds [guarded-turn recovery](docs/release-0.9.24.md).
+
+Runtime 0.9.23 added [bounded sub-agents](docs/release-0.9.23.md) for role-aware API turns.
 
 Runtime **0.9.22** adds an [optional MCP client](docs/release-0.9.22.md) for host-approved read tools over Streamable HTTP.
 

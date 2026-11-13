@@ -1,5 +1,7 @@
 # Releases and compatibility
 
+Runtime 0.9.24 adds [guarded-turn recovery](release-0.9.24.md).
+
 Runtime 0.9.23 adds [bounded sub-agents](release-0.9.23.md) and pairs with Harness 0.9.17.
 
 Runtime 0.9.22 adds the [optional MCP client](release-0.9.22.md) and pairs with Harness 0.9.16.
