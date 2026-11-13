@@ -126,7 +126,7 @@ def test_retry_never_adds_requests_beyond_the_policy(provider):
     [
         ('fail', [Verdict(False)]),
         ('retry', [RuntimeError('guard bug')]),
-        ('fix', [Verdict(False, fixed=None)]),
+        ('fix', [Verdict(False, fixed={'not': 'text'})]),  # A decline (fixed=None) retries: test_rule_decline_retry.
         ('retry', ['not a verdict']),
         ('fix', [Verdict(False, fixed=7)]),
     ],

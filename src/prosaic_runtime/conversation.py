@@ -351,6 +351,13 @@ class TurnResult:
     rules_faulted: tuple = ()  # Guards that raised or returned an unusable verdict or repair.
     rules_fingerprint: str | None = None
     sub_agent_proof: dict | None = None
+    # Fix rules whose guard declined to repair (a violation without a repair) and so took the retry
+    # path; and rules whose violation was answered with a granted retry. Ids only, like the above.
+    rules_declined: tuple = ()
+    rules_retried: tuple = ()
+    rule_retries_used: int = 0  # Retries granted from the runtime's rule_retries, citation repairs included.
+    # Closed issue codes of malformed tool calls the model was asked to correct (at most one per turn).
+    tool_request_corrections: tuple = ()
 
 
 @dataclass(frozen=True, init=False)

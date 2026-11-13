@@ -83,7 +83,7 @@ jobs:
       - name: Require installed context-pack APIs
         run: |
           python -m venv "$RUNNER_TEMP/runtime-context-packs"
-          "$RUNNER_TEMP/runtime-context-packs/bin/python" -m pip install 'dist/b3_prosaic_runtime-0.9.23-py3-none-any.whl[mcp]' 'mcp==2.3.0' 'b3-prosaic-runtime-postgres==0.3.0' pytest
+          "$RUNNER_TEMP/runtime-context-packs/bin/python" -m pip install 'dist/b3_prosaic_runtime-0.9.23-py3-none-any.whl[mcp]' 'b3-prosaic==0.5.0' 'mcp==2.3.0' 'b3-prosaic-runtime-postgres==0.3.0' pytest
           "$RUNNER_TEMP/runtime-context-packs/bin/python" -m pip check
           "$RUNNER_TEMP/runtime-context-packs/bin/python" -I scripts/context_pack_wheel_smoke.py
           "$RUNNER_TEMP/runtime-context-packs/bin/python" -I scripts/tool_contract_smoke.py

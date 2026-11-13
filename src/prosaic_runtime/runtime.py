@@ -424,7 +424,8 @@ class ProsaicRuntime:
     capabilities |= frozenset({'context_input_variants_v1'})
     capabilities |= frozenset({'tool_events_v1', 'tool_results_v1', 'citations_v1', 'parallel_tool_calls_v1', 'sub_agents_v1'})
     def __init__(self, config: RuntimeConfig, *, source=".prosaic", executable="prosaic", custom_tools=None,
-                 accounting=None, context_defaults=None, lifecycle=None, guards=None, allow_unbound_guards=False):
+                 accounting=None, context_defaults=None, lifecycle=None, guards=None, allow_unbound_guards=False,
+                 rule_retries=1, correct_malformed_tool_calls=False):
         self.lifecycle = lifecycle if lifecycle is not None else ExecutionLifecycle()
         if not isinstance(self.lifecycle, ExecutionLifecycle):
             raise TypeError("lifecycle must be an ExecutionLifecycle")
@@ -447,6 +448,15 @@ class ProsaicRuntime:
         if type(allow_unbound_guards) is not bool:
             raise ValueError('allow_unbound_guards must be boolean')
         self._allow_unbound_guards = allow_unbound_guards
+        # Host policy for conversation turns, like the guards themselves. Constructor arguments rather than
+        # RuntimeConfig fields: a new configuration field would change every Harness workflow identity.
+        if type(correct_malformed_tool_calls) is not bool:
+            raise ValueError('correct_malformed_tool_calls must be boolean')
+        self._correct_malformed_tool_calls = correct_malformed_tool_calls
+        from .rule_hooks import MAX_RULE_RETRIES
+        if type(rule_retries) is not int or not 0 <= rule_retries <= MAX_RULE_RETRIES:
+            raise ValueError(f'rule_retries must be an integer from 0 to {MAX_RULE_RETRIES}')
+        self._rule_retries = rule_retries
 
     @property
     def tool_descriptors(self):
@@ -571,6 +581,9 @@ class ProsaicRuntime:
         owned['_ruleSet'] = ruleset
 
         def with_rules(turn_result):
+            correction = owned.get('_toolRequestCorrection')
+            if correction is not None and correction.issues:
+                turn_result = replace(turn_result, tool_request_corrections=correction.issues)
             hooks = owned.get('_ruleHooks')
             if hooks is not None:
                 return replace(turn_result, **hooks.report())
@@ -1042,6 +1055,10 @@ class ProsaicRuntime:
                     backend.turn_capture = _turn_capture
                     _turn_capture.backend = backend
                     _turn_capture.parallel_order = policy.parallel_tools is not None
+                    if _turn_prepared.get('toolRequestCorrection') is True:  # Sealed in the prepared turn.
+                        from .tool_request_correction import ToolRequestCorrection
+                        backend.tool_request_correction = _turn_prepared['_toolRequestCorrection'] = (
+                            ToolRequestCorrection(_budget))
                     ruleset = _turn_prepared.get('_ruleSet')
                     answer_rules = False
                     if ruleset is not None and any(binding.bound for binding in ruleset.bindings):
@@ -1050,6 +1067,7 @@ class ProsaicRuntime:
                             ruleset, message=_turn_prepared['message'], input_data=_turn_prepared['inputData'],
                             authoritative_input_data=_turn_prepared.get('authoritativeInputData'),
                             budget=_budget, check_boundary=backend.check_boundary,
+                            retries=_turn_prepared.get('rules', {}).get('ruleRetries', 1),  # Sealed when not 1.
                             typed_result_tools=tuple(name for name, tool in custom.items() if tool.result_contract is not None))
                         answer_rules = any(b.bound for b in ruleset.at('before_answer') + ruleset.at('final'))
                     from .events import withheld_text

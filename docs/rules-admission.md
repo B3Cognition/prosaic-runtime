@@ -43,7 +43,8 @@ runtime = ProsaicRuntime(config, guards=[guard, *generic_guards()])
 
 `Verdict(ok, reason=None, refused_values=(), fixed=None)`. `fixed` is the repair:
 new arguments (`before_tool`), a new tool payload (`after_tool`) or new answer
-text (`before_answer`, `final`). A guard that can repair declares
+text (`before_answer`, `final`). A violation left at `fixed=None` declines the
+repair, and a `fix` binding then retries (see Hook points). A guard that can repair declares
 `fixes=True` next to its stages; admission refuses an `on_violation=fix` binding
 on any other guard, so the misconfiguration fails at startup rather than in
 production. `settings_schema` must be a closed object schema with explicit
@@ -143,7 +144,7 @@ same stage across files:
 
 Hooks run inside the existing turn loop. A guard never raises into the loop: an
 exception there would look like a provider or observation failure. Any guard
-exception, invalid verdict or failed repair is a safe failure.
+exception, invalid verdict or unusable repair is a safe failure.
 
 | Stage | Runs on | `fix` | `retry` | `fail` |
 | --- | --- | --- | --- | --- |
@@ -164,11 +165,28 @@ turns do not support (see Terminal completion).
   three repair passes; still violated after that is a failure. A repair is never
   success on its own, and a `retry` or `fail` is decided only on verdicts judged
   against the final repaired value, never on one a later repair made stale.
-- **retry** happens at most once per turn, across all stages, within the existing
-  deadline and `RunPolicy` budgets. When no provider request remains it fails
-  instead; a retry never adds a request beyond the policy. All refusals of one
-  tool batch, before or after its calls, share that one retry, because their
-  feedback returns in the same next request.
+  A fix guard may **decline**: a violation with no repair (`fixed=None`). The
+  rule then takes the `retry` path for that verdict, with the same allowance,
+  budgets and feedback as a `retry` binding; with no retry left the turn fails
+  with `ruleViolation`. A decline is not a guard fault. A repair of the wrong
+  type, too large, not strictly encodable or outside the tool schema still is.
+  This is the default from this release: a turn prepared or frozen earlier has
+  the same bytes but retries a declined repair when executed now. Bind the rule
+  with `on_violation=fail` to stop the turn at once instead.
+- **retry** happens at most `rule_retries` times per turn (default 1), across
+  all stages, within the existing deadline and `RunPolicy` budgets. When no
+  provider request remains it fails instead; a retry never adds a request beyond
+  the policy. All refusals of one tool batch, before or after its calls, share
+  one retry, because their feedback returns in the same next request. Declined
+  repairs and citation repairs draw on the same allowance. The host sets it from
+  0 (never retry) to 3 with `ProsaicRuntime(config, guards=..., rule_retries=2)`,
+  like the guards themselves (not a YAML key); other values are refused when the
+  runtime is constructed. A value other than 1 is part of the prepared turn's
+  identity, so a turn prepared under one allowance is refused with
+  `bindingMismatch` under another; the rules fingerprint is unchanged. A retry
+  still runs under the turn's deadline and token budget; if either runs out
+  during it, the turn fails with `timeout` or `budgetExceeded`, which then
+  stands in for the violation that prompted the retry.
 - **fail** returns a safe failed `TurnResult` with failure code `ruleViolation`.
 
 `before_tool` rewrites are recorded as what ran: the wire message, the tool
@@ -263,12 +281,16 @@ strictly encodable, since they appear in feedback and results.
 
 ## Turn results
 
-`TurnResult` gains `rules_evaluated`, `rules_violated`, `rules_fixed` and
-`rules_faulted` (rule ids only; never rule text, settings or values) and
-`rules_fingerprint`. A guard fault (a raise, an invalid verdict, undeliverable
-feedback values or an unusable repair) fails the turn with `ruleViolation`, like a violation, and its rule id
-is also listed in `rules_faulted`, so a guard bug can be told apart from a rule
-the model broke.
+`TurnResult` gains `rules_evaluated`, `rules_violated`, `rules_fixed`,
+`rules_faulted`, `rules_declined` and `rules_retried` (rule ids only; never rule
+text, settings or values) and `rules_fingerprint`. A guard fault (a raise, an
+invalid verdict, undeliverable feedback values or an unusable repair) fails the
+turn with `ruleViolation`, like a violation, and its rule id is also listed in
+`rules_faulted`, so a guard bug can be told apart from a rule the model broke.
+`rules_declined` lists fix rules whose guard declined to repair (never also a
+fault on that account); `rules_retried` lists rules whose violation was answered
+with a granted retry, whether bound as `retry` or declined as `fix`;
+`rule_retries_used` counts the retries the turn spent, citation repairs included.
 `rules_violated` lists rules whose violation decided an outcome: a repair, a
 retry, a failure, or the last pass before stopping. A verdict made stale by a
 later repair in the same pass is not reported. The

@@ -132,3 +132,57 @@ unchanged; the adapter now selects the Runtime 0.9.x family.
 ## Sent effort evidence
 
 Runtime0.9.18 returns bounded [`reasoning_effort_v1`](sent-reasoning-effort.md) observations. Exact sent controls are separate from requested/default annotations; provider compliance remains unobserved. HTTP call IDs join existing recorder evidence without schema changes. Private durable Result receipts retain this additive metadata.
+
+## Optional malformed tool call correction
+
+By default a tool batch that fails admission (an ungranted tool name, a call of
+the wrong shape, arguments that are not a JSON object, too large or outside the
+tool's schema) ends the turn with `invalidToolRequest` before any call in it
+runs. A Python host may pass `ProsaicRuntime(config, correct_malformed_tool_calls=True)`
+to ask the model once per turn to send it again instead (a constructor argument,
+like `guards`, so it is not a YAML key):
+
+- Nothing in the refused batch runs, is authorized or enters `CompletedTurn`.
+- The next request carries one user-role envelope, after a fixed sentence saying
+  it is data, not instructions:
+  `{"toolRequestCorrection": {"version": 1, "issue": "argumentsSchema", "callIndex": 0, "tool": "lookup"}}`.
+  `issue` is a closed code (`batchShape`, `terminalBatch`, `callShape`,
+  `callIdentity`, `functionShape`, `toolNotGranted`, `argumentsMalformed`,
+  `argumentsTooLarge`, `argumentsSchema`); `tool` appears only for a granted
+  tool. Model text, argument values and validator messages are never echoed.
+- The correction honours a host-required first tool (`RunPolicy.initial_tool`):
+  when the refused call is that tool, the correction request carries the same
+  forcing as the original request, and the fixed sentence asks only for the call
+  again with valid arguments, not for an answer without it. A text-only response
+  then fails the turn exactly as it would without the correction (`providerFailure`:
+  the first-tool choice was not honoured), never as an ungrounded success. For
+  other tools the sentence also allows answering without the tool.
+- The correction never runs after tool shutdown: once the runtime disables tools
+  for lack of progress (repeated identical tool rounds), a malformed batch ends
+  the turn with `invalidToolRequest` and spends no further provider request.
+- The correction is a provider request inside the existing `RunPolicy` budget:
+  with none left, the turn fails as before. A second malformed batch fails the
+  turn with `invalidToolRequest`. It is separate from the rule retry allowance.
+  Like a rule retry, it runs under the turn's deadline and token budget: if
+  either runs out during it, the turn fails with `timeout` or `budgetExceeded`,
+  which then stands in for the original `invalidToolRequest`.
+- Worst case, one turn spends one correction plus up to three rule retries
+  (`rule_retries=3`) beyond its normal requests, always within
+  `max_provider_requests`.
+- On the wire, the refused response is replaced by a fixed assistant
+  placeholder, the bracketed host marker `[host: tool request not accepted;
+  nothing ran]` (no model text, no tool calls), before the envelope, so roles stay
+  strictly alternating on providers and chat templates that require it.
+- `TurnResult.tool_request_corrections` lists the issue code of the correction
+  taken; `providerAttempts` counts its request.
+- A provider response that cannot be parsed (for example duplicate envelope keys,
+  or a native tool block the provider parser rejects) and unencodable arguments
+  in a guarded turn stay terminal: they cannot be described without echoing raw
+  output.
+- Streamed text of the refused response was already delivered to observers, as
+  streamed turn events are provisional; only the accepted answer enters history.
+
+The switch is part of the prepared turn's identity only when on, so default
+turns keep their bytes; a prepared or frozen turn readmitted under a different
+setting is refused with `bindingMismatch`. It does not change
+`bounded_tool_recovery`, which applies after a call has been dispatched.

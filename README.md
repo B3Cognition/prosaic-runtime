@@ -635,11 +635,17 @@ only for conversation turns, and only with guards the host registers in Python:
 admission (always for `on_violation=fail`), and `RuntimeConfig.required_guards`
 sets minimum actions, optionally with pinned settings and stage, that prose cannot
 weaken. Bound guards run before tools, after
-tools, on the draft and on the final answer, to `fix`, `retry` once within existing
-budgets, or `fail` with `ruleViolation`. `run()` refuses enforce-tagged prose
+tools, on the draft and on the final answer, to `fix`, `retry` within existing
+budgets (once per turn by default; `ProsaicRuntime(..., rule_retries=...)` allows 0 to 3),
+or `fail` with `ruleViolation`. `run()` refuses enforce-tagged prose
 rather than running it unchecked. Without tags nothing changes, byte for byte. See
 [rule admission](docs/rules-admission.md); guarded Harness conversations need a
 companion Harness release.
+
+`ProsaicRuntime(config, correct_malformed_tool_calls=True)` lets a conversation turn ask
+the model once to resend a tool call that batch admission refused, within the
+request budget, instead of failing with `invalidToolRequest`. It is off by
+default; see [conversation turns](docs/conversations.md).
 
 ## Limits and events
 

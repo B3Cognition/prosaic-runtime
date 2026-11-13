@@ -73,8 +73,10 @@ class FrozenTurnInput(_OwnedRecord):
             raise ValueError('unexpected optional input view')
         bindings=document['bindings']
         _closed(bindings,{'agent','policy','limits','profile','endpoint','tools','cliSandbox'},
-                {'rules','contextPolicy','counterDescriptor'} | ({'toolContractV1'} if document['version']>=2 else set()) | ({'parallelToolsV1'} if document['version'] in (3,5) else set())
+                {'rules','contextPolicy','counterDescriptor','toolRequestCorrection'} | ({'toolContractV1'} if document['version']>=2 else set()) | ({'parallelToolsV1'} if document['version'] in (3,5) else set())
                 | ({'subAgentsV1'} if document['version']==5 else set()))
+        if 'toolRequestCorrection' in bindings and bindings['toolRequestCorrection'] is not True:
+            raise ValueError('invalid tool request correction binding')  # Present only when on.
         if document['version']==5:
             from .sub_agents import SubAgentFrameV1
             if SubAgentFrameV1.from_dict(bindings.get('subAgentsV1')).to_dict() != bindings['subAgentsV1']:

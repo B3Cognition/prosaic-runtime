@@ -2,8 +2,10 @@
 
 Hooks never raise a guard's exception into the loop: a raise there would look
 like a provider or observation failure. Every guard fault, invalid verdict,
-failed repair or exhausted retry becomes RuleStop, which the loop returns as a
-safe ``ruleViolation`` result. One retry per turn; three fix passes.
+unusable repair or exhausted retry becomes RuleStop, which the loop returns as a
+safe ``ruleViolation`` result. A fix guard that declines (a violation without a
+repair) takes the retry path instead. Up to ``rule_retries`` retries per turn
+(default 1); three fix passes.
 """
 
 import json
@@ -14,6 +16,7 @@ from .rule_facts import tool_facts
 from .rule_types import encode_fact
 
 FIX_PASSES = 3
+MAX_RULE_RETRIES = 3  # Each retry is a provider request; raising the bound later breaks no host.
 MAX_REFUSED_VALUES = 64
 MAX_VALUE_CHARS = 2048
 MAX_INT_BITS = 6804  # Every integer of up to 2,048 digits fits; the digit count is then checked exactly.
@@ -101,6 +104,25 @@ def _text_repair(fixed):
         return False
 
 
+def _admissible(registry, call):
+    """Whether batch admission accepts ``call`` on its own."""
+    try:
+        registry.validate_batch([call])
+    except Exception:  # Any refusal: the call is not admissible alone.
+        return False
+    return True
+
+
+def _declined(binding, verdict):
+    """A fix guard that returns a violation without a repair declines; it does not offer an unusable one."""
+    return binding.action == 'fix' and not verdict.ok and verdict.fixed is None
+
+
+def _effective_action(binding, verdict):
+    """A declined repair falls back to the retry path: retry outranks fix, so this never weakens a rule."""
+    return 'retry' if _declined(binding, verdict) else binding.action
+
+
 def _canonical(value):
     # Round-trip first, so keys become JSON strings before sorting (e.g. {1: ..} equals {'1': ..}).
     return json.dumps(json.loads(json.dumps(value, allow_nan=False)), sort_keys=True)
@@ -118,7 +140,7 @@ def _same(left, right):
 
 class RuleHooks:
     def __init__(self, ruleset, *, message, input_data, budget, check_boundary, authoritative_input_data=None,
-                 typed_result_tools=()):
+                 typed_result_tools=(), retries=1):
         self.ruleset = ruleset
         self.message = message
         # Encoded once per turn; each check decodes only what its guard reads, privately.
@@ -130,9 +152,11 @@ class RuleHooks:
         self.seen_results, self.seen_builtin = [], []
         self.typed_result_tools = frozenset(typed_result_tools)
         self.seen_contracts = []
-        self.retry_used, self.retry_token, self.batch = False, None, 0
+        self.retry_allowance, self.retries_used, self.retry_token, self.batch = retries, 0, None, 0
         self.refusals = {}
         self.evaluated, self.violated, self.fixed, self.faulted = set(), set(), set(), set()
+        self.declined, self.retried = set(), set()
+        self.last_repairers = []
 
     # Reporting ---------------------------------------------------------------
     def report(self):
@@ -146,6 +170,9 @@ class RuleHooks:
             rules_violated=pick(self.violated),
             rules_fixed=pick(self.fixed),
             rules_faulted=pick(self.faulted),
+            rules_declined=pick(self.declined),
+            rules_retried=pick(self.retried),
+            rule_retries_used=self.retries_used,
             rules_fingerprint=self.ruleset.rules_fingerprint(),
         )
 
@@ -263,15 +290,23 @@ class RuleHooks:
             entries[index]['refusedCount'] = len(values[index])
         return envelope(entries, omitted)['ruleFeedback']
 
-    def _take_retry(self, token=None):
-        """One retry per turn. All refusals of one tool batch share it (``token``)."""
-        if self.retry_used:
-            return token is not None and token == self.retry_token
-        cap = self.budget.policy.max_provider_requests if self.budget is not None else None
-        if cap is not None and self.budget.provider_requests >= cap:
-            return False  # Never add provider requests beyond the policy.
-        self.retry_used, self.retry_token = True, token
-        return True
+    def _take_retry(self, token=None, violations=()):
+        """Up to ``retry_allowance`` retries per turn. All refusals of one tool batch share one (``token``).
+
+        ``violations`` are the (binding, verdict) pairs the retry answers; a granted retry reports them.
+        """
+        if token is not None and token == self.retry_token:
+            granted = True  # This batch already holds a retry; its feedback returns in the same next request.
+        elif self.retries_used >= self.retry_allowance:
+            granted = False
+        else:
+            cap = self.budget.policy.max_provider_requests if self.budget is not None else None
+            granted = cap is None or self.budget.provider_requests < cap  # Never add requests beyond the policy.
+            if granted:
+                self.retries_used, self.retry_token = self.retries_used + 1, token
+        if granted:
+            self.retried.update(binding.rule_id for binding, _ in violations)
+        return granted
 
     def citation_retry(self, turn, messages):
         """Reuse the explicit answer-rule allowance, never create another pool."""
@@ -293,6 +328,7 @@ class RuleHooks:
         """
         encoded = {name: encode_fact(fact) for name, fact in facts.items()}  # Once per settle, not per check.
         current = encode_fact(value)
+        self.last_repairers = repairers = []  # Rules whose repair shaped the settled value, in order.
         for number in range(1, FIX_PASSES + 2):
             violations, changed = [], False
             for binding in bindings:
@@ -303,6 +339,8 @@ class RuleHooks:
                     continue
                 violations.append((binding, verdict))
                 if binding.action == 'fix':
+                    if _declined(binding, verdict):
+                        continue  # Decided below as a retry: a guard that cannot repair is not a broken guard.
                     if not accept(verdict.fixed):
                         self.violated.add(binding.rule_id)
                         self.faulted.add(binding.rule_id)  # An unusable repair is a guard bug.
@@ -313,13 +351,15 @@ class RuleHooks:
                         value = verdict.fixed if type(verdict.fixed) is str else json.loads(current.text)
                         self.violated.add(binding.rule_id)  # A repaired violation is a real violation.
                         self.fixed.add(binding.rule_id)
+                        repairers.append(binding.rule_id)
             if not violations:
                 return value, []
             if changed and number <= FIX_PASSES:
                 continue  # Verdicts in this pass may predate a repair: recheck every rule.
             # Stable (or final) pass: these verdicts decide the outcome, so they are reported.
             self.violated.update(binding.rule_id for binding, _ in violations)
-            if changed or any(binding.action != 'retry' for binding, _ in violations):
+            self.declined.update(binding.rule_id for binding, verdict in violations if _declined(binding, verdict))
+            if changed or any(_effective_action(binding, verdict) != 'retry' for binding, verdict in violations):
                 return STOP  # Still repairing after the bounded passes, a fail, or a fix that could not repair.
             return value, violations
         return STOP
@@ -342,7 +382,7 @@ class RuleHooks:
         bindings = self.ruleset.at('before_tool')
         if not bindings:
             return None
-        rewritten, refused = {}, []
+        rewritten, refused, repairers, fixed_before = {}, [], {}, set(self.fixed)
         for call in turn.tool_calls:
             name = call['function']['name']
             arguments = json.loads(call['function']['arguments'])
@@ -353,9 +393,9 @@ class RuleHooks:
             if blocking:
                 refused.append((call['id'], blocking))
             elif not _same(value, arguments):
-                rewritten[call['id']] = value
+                rewritten[call['id']], repairers[call['id']] = value, self.last_repairers
         if refused:
-            if not self._take_retry(('tools', self.batch)):
+            if not self._take_retry(('tools', self.batch), [pair for _, blocking in refused for pair in blocking]):
                 return STOP
             for call_id, blocking in refused:
                 self.refusals[call_id] = {
@@ -379,7 +419,23 @@ class RuleHooks:
                         for block in turn.continuation
                     ]
                 turn.tool_calls = list(registry.validate_batch(turn.tool_calls))
-            except Exception:  # A repair outside the tool schema is a guard fault.
+            except Exception as error:  # A repair outside the tool schema is a guard fault.
+                # The batch was admitted before these repairs, so a refused call is a rewritten one: fault only
+                # the rules that rewrote it. When admission cannot name the call, each rewritten call is checked
+                # on its own, so a rule whose repair is admissible is never blamed.
+                index = getattr(error, 'index', None)
+                calls = turn.tool_calls
+                if type(index) is int and 0 <= index < len(calls) and calls[index]['id'] in rewritten:
+                    refused_calls = [calls[index]['id']]
+                else:
+                    refused_calls = [call['id'] for call in calls
+                                     if call['id'] in rewritten and not _admissible(registry, call)]
+                    # Every rewrite is admissible alone, so the batch-level refusal cannot be pinned on one:
+                    # fault every rewriting rule rather than stop with no fault recorded.
+                    refused_calls = refused_calls or list(rewritten)
+                self.faulted.update(rule_id for call_id in refused_calls for rule_id in repairers[call_id])
+                # The batch never runs, so every repair recorded for it repaired nothing, the innocent ones too.
+                self.fixed.intersection_update(fixed_before)
                 return STOP
         return None
 
@@ -415,7 +471,7 @@ class RuleHooks:
         value, blocking = outcome
         if blocking:
             # Feedback for every refusal in this batch goes back in the same next request.
-            if not self._take_retry(('tools', self.batch)):
+            if not self._take_retry(('tools', self.batch), blocking):
                 return STOP
             value = {'status': 'error', 'error': 'rule_refused', 'ruleFeedback': self._feedback(blocking)}
         self._observe(name, value)
@@ -424,7 +480,7 @@ class RuleHooks:
         return {**message, 'content': json.dumps(value, ensure_ascii=False, allow_nan=False)}
 
     def answer(self, turn, messages):
-        """Check the raw draft, then final rules; fix, retry once, or stop."""
+        """Check the raw draft, then final rules; fix, retry within the allowance, or stop."""
         bindings = self.ruleset.at('before_answer') + self.ruleset.at('final')
         if not bindings:
             return None
@@ -440,7 +496,7 @@ class RuleHooks:
             return STOP
         text, blocking = outcome
         if blocking:
-            if not self._take_retry():
+            if not self._take_retry(violations=blocking):
                 return STOP
             rejected = {'role': 'assistant', 'content': draft}
             if turn.continuation is not None:

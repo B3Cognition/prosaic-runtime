@@ -329,6 +329,10 @@ def prepare_turn(runtime, artifact, *, message, history=(), input_data=None, pol
         if not ruleset.empty:
             # Guard versions and effective bindings: readmission detects drift.
             material['rules'] = ruleset.material()
+            if runtime._rule_retries != 1:
+                material['rules']['ruleRetries'] = runtime._rule_retries  # Default turns keep their bytes.
+        if runtime._correct_malformed_tool_calls:
+            material['toolRequestCorrection'] = True  # Only when on: default turns keep their bytes.
         if tool_contract_bindings is not None:
             material['toolContractV1'] = tool_contract_bindings.to_dict()
             if policy.parallel_tools is not None:

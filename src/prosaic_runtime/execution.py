@@ -12,6 +12,7 @@ from .terminal import binding
 from .terminal import content_digest
 from .openai_compatible_compaction import compact_tool_result_messages, ToolResultCompactionStats
 from .rule_hooks import RETRY, STOP
+from .tool_registry import InvalidToolRequest
 from .openai_compatible_progress import (_progress, _progress_llm_preview, _progress_turn_summary, _single_line_preview, _tool_call_name, _tool_result_status, _elapsed_s)
 
 
@@ -100,8 +101,12 @@ class ExecutionBackend:
                 'tool_rounds': tool_rounds, 'token_usage_details': token_usage_details,
                 **_transcript_metadata(transcript)})
 
+        correcting = False  # The next request is the one tool-request correction: labelled apart in logs.
         while True:
             turn_number = tool_rounds + 1
+            turn_label = f'{turn_number} (correction)' if correcting else str(turn_number)
+            correction_mark = {'correction': True} if correcting else {}
+            correcting = False
             turn_started = time.monotonic()
             initial_tool = _metadata_str(prompt_metadata, 'initial_tool')
             acquiring = turn_number == 1 and 'final_prompt' in prompt_metadata
@@ -140,7 +145,7 @@ class ExecutionBackend:
                 )
             _progress(
                 "turn "
-                f"{turn_number}: request "
+                f"{turn_label}: request "
                 f"model={payload.get('model')} "
                 f"stream={str(streaming).lower()} "
                 f"messages={len(messages)} "
@@ -152,13 +157,14 @@ class ExecutionBackend:
                 transcript.write(
                     "provider_error",
                     turn=turn_number,
+                    **correction_mark,
                     exit_code=turn_or_result.exit_code,
                     reason=str(turn_or_result.metadata.get("provider_error_code") or ""),
                 )
                 turn_or_result.metadata.update(_transcript_metadata(transcript))
                 _progress(
                     "turn "
-                    f"{turn_number}: "
+                    f"{turn_label}: "
                     f"failed code={turn_or_result.exit_code} "
                     f"reason={turn_or_result.metadata.get('provider_error_code')}"
                 )
@@ -168,6 +174,7 @@ class ExecutionBackend:
             transcript.write(
                 "turn_response",
                 turn=turn_number,
+                **correction_mark,
                 finish_reason=turn.finish_reason or "",
                 tool_calls=len(turn.tool_calls),
                 text_chars=len(turn.text),
@@ -177,7 +184,7 @@ class ExecutionBackend:
             )
             _progress(
                 "turn "
-                f"{turn_number}: response "
+                f"{turn_label}: response "
                 f"finish_reason={turn.finish_reason or 'unknown'} "
                 f"tool_calls={len(turn.tool_calls)} "
                 f"text_chars={len(turn.text)} "
@@ -193,7 +200,9 @@ class ExecutionBackend:
                     token_usage_details,
                     turn.token_usage_details,
                 )
-            if turn_number == 1 and initial_tool and payload.get('tools'):
+            # The host-required first tool was forced on this request (a correction request keeps that forcing).
+            forced_first_tool = turn_number == 1 and bool(initial_tool) and bool(payload.get('tools'))
+            if forced_first_tool:
                 names = [_tool_call_name(call) for call in turn.tool_calls]
                 if names != [initial_tool]:
                     transcript.write('final', finish_reason='tool_choice_not_honored',
@@ -241,7 +250,21 @@ class ExecutionBackend:
                                       'failure_reason': 'incomplete_response',
                                       'token_usage_details': token_usage_details})
                     # No model field may opt into or out of this boundary.
-                    turn.tool_calls = list(registry.validate_batch(turn.tool_calls))
+                    try:
+                        turn.tool_calls = list(registry.validate_batch(turn.tool_calls))
+                    except InvalidToolRequest as error:
+                        correction = getattr(self, 'tool_request_correction', None)
+                        # After a no-progress tool shutdown the batch stops the turn as without the correction.
+                        envelope = (correction.take(error, required=forced_first_tool)
+                                    if correction is not None and not tools_disabled else None)
+                        if envelope is None:
+                            raise
+                        _progress(f'turn {turn_number}: malformed tool request ({error.issue}); one correction')
+                        messages.extend(envelope)  # Placeholder for the refused response, then the envelope.
+                        correcting = True
+                        # Nothing in the batch ran; the batch and envelope stay out of history. turn_number is
+                        # unchanged, so a forced first tool stays forced and checked on the correction request.
+                        continue
                 if tools_disabled:
                     return CliRunResult(
                         exit_code=1,
