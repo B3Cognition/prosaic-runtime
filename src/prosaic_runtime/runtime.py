@@ -422,7 +422,7 @@ class ProsaicRuntime:
     capabilities |= frozenset({'guard_input_views_v1'})
     capabilities |= frozenset({'frozen_turn_inputs_v1'})
     capabilities |= frozenset({'context_input_variants_v1'})
-    capabilities |= frozenset({'tool_events_v1', 'tool_results_v1', 'citations_v1', 'parallel_tool_calls_v1'})
+    capabilities |= frozenset({'tool_events_v1', 'tool_results_v1', 'citations_v1', 'parallel_tool_calls_v1', 'sub_agents_v1'})
     def __init__(self, config: RuntimeConfig, *, source=".prosaic", executable="prosaic", custom_tools=None,
                  accounting=None, context_defaults=None, lifecycle=None, guards=None, allow_unbound_guards=False,
                  rule_retries=1, correct_malformed_tool_calls=False):
@@ -479,7 +479,7 @@ class ProsaicRuntime:
                      policy=None, limits=None, workspace=None, context_policy=None,
                      token_counters=None, context_selection=None, context_report=None, context_work=None,
                      _warn_rules=True, input_profile=None, authoritative_input_data=None,
-                     authoritative_input_profile=None, authoritative_input_limits=None, tool_contract_bindings=None):
+                     authoritative_input_profile=None, authoritative_input_limits=None, tool_contract_bindings=None, sub_agent_frame=None):
         """Purely admit and own one role-aware conversational input."""
         from .conversation_preparation import prepare_turn
         return prepare_turn(self, artifact, message=message, history=history,
@@ -489,7 +489,7 @@ class ProsaicRuntime:
                             context_work=context_work, _warn_rules=_warn_rules,input_profile=input_profile,
                             authoritative_input_data=authoritative_input_data,
                             authoritative_input_profile=authoritative_input_profile,authoritative_input_limits=authoritative_input_limits,
-                            tool_contract_bindings=tool_contract_bindings)
+                            tool_contract_bindings=tool_contract_bindings, sub_agent_frame=sub_agent_frame)
 
     @tracked
     @tool_contract_entry
@@ -499,7 +499,7 @@ class ProsaicRuntime:
              operation_context=None, tool_journal=None, context_policy=None,
              token_counters=None, context_work=None, context_checkpoint=None, on_admitted=None, request_headers=None,
              input_profile=None, authoritative_input_data=None, authoritative_input_profile=None, authoritative_input_limits=None,
-             tool_contract_bindings=None):
+             tool_contract_bindings=None, sub_agent_frame=None, sub_agent_access=None):
         """Execute one bounded role-aware turn; streamed events are provisional."""
         from .request_headers import snapshot_headers
         owned_headers = snapshot_headers(request_headers)
@@ -513,6 +513,11 @@ class ProsaicRuntime:
             try:
                 owned = json.loads(artifact._encoded)
                 if owned.get('toolContractV1') != (tool_contract_bindings.to_dict() if tool_contract_bindings is not None else None):
+                    raise TurnAdmissionError('bindingMismatch')
+                from .sub_agents import SubAgentFrameV1
+                if 'subAgentsV1' in owned and sub_agent_frame is None:
+                    sub_agent_frame = SubAgentFrameV1.from_dict(owned['subAgentsV1'])
+                if owned.get('subAgentsV1') != (sub_agent_frame.to_dict() if sub_agent_frame is not None else None):
                     raise TurnAdmissionError('bindingMismatch')
                 approved = ProsaicArtifact.from_inspection(owned['agent'])
                 context_args = {}
@@ -530,21 +535,22 @@ class ProsaicRuntime:
                         context_work=context_work if context_work is not None else artifact.context_work)
                 elif token_counters is not None or context_work is not None:
                     raise TurnAdmissionError('invalidPolicy')
-                if artifact.encoding_version in ('conversation-turn-v3', 'conversation-turn-v4', 'conversation-turn-v5'):
+                if artifact.encoding_version in ('conversation-turn-v3', 'conversation-turn-v4', 'conversation-turn-v5', 'conversation-turn-v6'):
                     from .input_views import AuthoritativeInputLimits
                     context_args.update(input_profile=owned.get('inputProfile'),
                         authoritative_input_data=owned.get('authoritativeInputData'),
                         authoritative_input_profile=owned.get('authoritativeInputProfile'),
                         authoritative_input_limits=AuthoritativeInputLimits(**owned['authoritativeInputLimits']) if owned.get('authoritativeInputLimits') is not None else None)
                 # Readmission repeats admission silently; warnings were raised at preparation.
-                if artifact.encoding_version in ('conversation-turn-v3', 'conversation-turn-v4', 'conversation-turn-v5'):
+                if artifact.encoding_version in ('conversation-turn-v3', 'conversation-turn-v4', 'conversation-turn-v5', 'conversation-turn-v6'):
                     from .context_contracts import ContextPolicy
                     prepared=self.restore_turn(approved,
                         history=tuple(ConversationMessage.from_dict(m) for m in owned['history']),
                         frozen_input=artifact.export_frozen_input(),policy=policy_from_document(owned['policy']),
                         limits=TurnLimits(**owned['limits']),workspace=owned['workspace'],
                         context_policy=ContextPolicy.from_dict(owned['contextPolicy']) if 'contextPolicy' in owned else None,
-                        token_counters=token_counters,context_work=context_work,tool_contract_bindings=tool_contract_bindings)
+                        token_counters=token_counters,context_work=context_work,tool_contract_bindings=tool_contract_bindings,
+                        sub_agent_frame=sub_agent_frame)
                 else:
                     prepared = self.prepare_turn(approved, message=owned['message'],
                         history=tuple(ConversationMessage.from_dict(m) for m in owned['history']),
@@ -562,7 +568,8 @@ class ProsaicRuntime:
                 input_data=input_data, policy=policy, limits=limits, workspace=workspace,
                 context_policy=context_policy, token_counters=token_counters,input_profile=input_profile,
                 authoritative_input_data=authoritative_input_data,authoritative_input_profile=authoritative_input_profile,
-                authoritative_input_limits=authoritative_input_limits,tool_contract_bindings=tool_contract_bindings)
+                authoritative_input_limits=authoritative_input_limits,tool_contract_bindings=tool_contract_bindings,
+                sub_agent_frame=sub_agent_frame)
             if context_work is not None:
                 raise TurnAdmissionError('invalidPolicy')
             owned = json.loads(prepared._encoded)
@@ -615,6 +622,26 @@ class ProsaicRuntime:
         except (ValueError, TypeError, AttributeError):
             raise TurnAdmissionError('invalidPolicy') from None
         frozen_accounting = (recorder, resolved, enabled)
+        delegation = None
+        if sub_agent_frame is not None or sub_agent_access is not None:
+            from .sub_agents import SubAgentAccessV1
+            from .sub_agent_execution import DelegationExecution, current_execution
+            if (sub_agent_frame is None or type(sub_agent_access) is not SubAgentAccessV1
+                    or sub_agent_access.revision != sub_agent_frame.access_revision
+                    or recorder is None or resolved is None or context is None or tool_journal is None
+                    or current_execution() is not None or resolved.invocation_id != scope.invocation_id
+                    or recorder.provider_id != snapshot[0].profiles[snapshot[0].default_profile].provider
+                    or resolved.run_id != scope.run_id):
+                raise TurnAdmissionError('invalidPolicy')
+            try:
+                env = dict(os.environ if env is None else env)
+            except (TypeError, ValueError):
+                raise TurnAdmissionError('invalidPolicy') from None
+            delegation = DelegationExecution(sub_agent_frame, sub_agent_access, self,
+                snapshot[0], recorder, policy, cancelled, env, owned_headers,
+                route={'profile': owned['profile'], 'endpoint': owned['endpoint']})
+            if not delegation.owner_valid():
+                raise TurnAdmissionError('invalidPolicy')
         if 'contextPolicy' in owned:
             if enabled:
                 # Freeze evidence attribution/headroom before readmission or the
@@ -634,13 +661,13 @@ class ProsaicRuntime:
             try:
                 guard.readmit(lambda: initial_payload(self, approved, policy, owned['selectedHistory'],
                     owned['message'], owned['inputData'], context_policy=context_policy,
-                    canonical_messages=prepared.encoding_version in ('conversation-turn-v3', 'conversation-turn-v4', 'conversation-turn-v5'))[-1])
+                    canonical_messages=prepared.encoding_version in ('conversation-turn-v3', 'conversation-turn-v4', 'conversation-turn-v5', 'conversation-turn-v6'))[-1])
             except ToolDeadlineExceeded:
                 terminal = capture.finish(Result(1, '', 'timeout', timed_out=True,
                     metadata={'failure_reason': 'invocation_timeout'}), budget)
                 return with_rules(replace(terminal, context_report=guard.report, context_work=guard.work))
             owned['_contextGuard'] = guard
-        elif prepared.encoding_version in ('conversation-turn-v3', 'conversation-turn-v4', 'conversation-turn-v5'):
+        elif prepared.encoding_version in ('conversation-turn-v3', 'conversation-turn-v4', 'conversation-turn-v5', 'conversation-turn-v6'):
             from .conversation_preparation import initial_payload,native_payload_digest
             native=initial_payload(self,approved,policy,owned['history'],owned['message'],owned['inputData'],canonical_messages=True)[-1]
             if native_payload_digest(native)!=owned['nativePayloadDigest'] or len(json.dumps(native,allow_nan=False).encode('utf-8'))!=prepared.input_bytes:
@@ -653,11 +680,15 @@ class ProsaicRuntime:
             on_admitted()
         emitter = ObserverEmitter(observer, source='runtime', scope=scope)
         started, result = time.monotonic(), None
-        with observation_context(emitter, self._custom_tools):
+        def turn_event(event):
+            if delegation is None or event.get('event') not in {'text', 'text_delta', 'reasoning_delta'}:
+                capture.event(event, on_event)
+        with observation_context(emitter, self._custom_tools), (
+                delegation.activate() if delegation is not None else nullcontext()):
             try:
                 emitter.emit('invocation_started')
                 result = self._run_accounted(approved, cwd=owned['workspace'], policy=policy,
-                    on_event=lambda event: capture.event(event, on_event), cancelled=cancelled, env=env, context=context, accounting=accounting,
+                    on_event=turn_event, cancelled=cancelled, env=env, context=context, accounting=accounting,
                     operation_context=scope, tool_journal=tool_journal,
                     _turn_prepared=owned, _turn_capture=capture, _budget=budget, _turn_snapshot=snapshot,
                     _turn_accounting=frozen_accounting, _request_headers=owned_headers, _effort_trace=trace)
@@ -671,7 +702,12 @@ class ProsaicRuntime:
                 emitter.emit('invocation_completed', outcome='completed' if result is not None and result.exit_code == 0 else 'execution_failure',
                     duration_ms=(time.monotonic() - started) * 1000,
                     exit_code=result.exit_code if result is not None else None)
+        if delegation is not None and not delegation.continuation_granted():
+            result = replace(result, exit_code=1, stdout='', stderr='evidenceUseDenied',
+                             metadata={'failure_reason': 'evidenceUseDenied'})
         completed = capture.finish(result, budget)
+        if delegation is not None:
+            completed = replace(completed, sub_agent_proof=delegation.proof())
         completed = replace(completed, context_report=guard.report, context_work=guard.work) if guard is not None else completed
         return with_rules(completed)
 
@@ -680,21 +716,22 @@ class ProsaicRuntime:
         return cls(RuntimeConfig.load(path), **kwargs)
 
     def restore_turn(self,artifact,*,history=(),frozen_input,policy,limits,context_policy=None,
-                     token_counters=None,workspace=None,context_work=None,fresh_attempt=False,tool_contract_bindings=None):
+                     token_counters=None,workspace=None,context_work=None,fresh_attempt=False,tool_contract_bindings=None,sub_agent_frame=None):
         from .frozen_turns import restore_turn
         return restore_turn(self,artifact,history=history,frozen_input=frozen_input,policy=policy,limits=limits,
             context_policy=context_policy,token_counters=token_counters,workspace=workspace,
-            context_work=context_work,fresh_attempt=fresh_attempt,tool_contract_bindings=tool_contract_bindings)
+            context_work=context_work,fresh_attempt=fresh_attempt,tool_contract_bindings=tool_contract_bindings,
+            sub_agent_frame=sub_agent_frame)
 
     def prepare_turn_variants(self,artifact,*,message,history=(),input_data_variants,policy=None,
                               limits=None,workspace=None,context_policy,token_counters,input_profile=None,
-                              authoritative_input_data=None,authoritative_input_profile=None,authoritative_input_limits=None,tool_contract_bindings=None):
+                              authoritative_input_data=None,authoritative_input_profile=None,authoritative_input_limits=None,tool_contract_bindings=None,sub_agent_frame=None):
         from .input_variants import prepare_turn_variants
         return prepare_turn_variants(self,artifact,message=message,history=history,input_data_variants=input_data_variants,
             policy=policy,limits=limits,workspace=workspace,context_policy=context_policy,token_counters=token_counters,
             input_profile=input_profile,authoritative_input_data=authoritative_input_data,
             authoritative_input_profile=authoritative_input_profile,authoritative_input_limits=authoritative_input_limits,
-            tool_contract_bindings=tool_contract_bindings)
+            tool_contract_bindings=tool_contract_bindings,sub_agent_frame=sub_agent_frame)
 
     def _preflight_names(self, names, cwd, policy, env, deadline, *, _snapshot=None):
         config, custom, cli = _snapshot if _snapshot is not None else (self.config, self._custom_tools, self._cli_tools)
@@ -902,6 +939,9 @@ class ProsaicRuntime:
                                 scope=_operation_context, journal=_tool_journal,
                                 contracts=current_bindings(), initial_tool=policy.initial_tool,
                                 execution=True)
+                from .sub_agents import selected_sub_agents
+                if selected_sub_agents(custom, requested) and (_turn_prepared is None or 'subAgentsV1' not in _turn_prepared):
+                    raise ValueError('delegation requires an admitted API turn')
                 admit_tool_contracts(custom, requested, current_bindings())
                 from .tool_parallel_contracts import admit_parallel_execution
                 admit_parallel_execution(policy,current_bindings(),metadata_limit=_turn_capture.limits.max_metadata_bytes if _turn_capture is not None else 65536)

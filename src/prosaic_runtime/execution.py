@@ -200,7 +200,9 @@ class ExecutionBackend:
                     token_usage_details,
                     turn.token_usage_details,
                 )
-            if turn_number == 1 and initial_tool and payload.get('tools'):
+            # The host-required first tool was forced on this request (a correction request keeps that forcing).
+            forced_first_tool = turn_number == 1 and bool(initial_tool) and bool(payload.get('tools'))
+            if forced_first_tool:
                 names = [_tool_call_name(call) for call in turn.tool_calls]
                 if names != [initial_tool]:
                     transcript.write('final', finish_reason='tool_choice_not_honored',
@@ -252,13 +254,17 @@ class ExecutionBackend:
                         turn.tool_calls = list(registry.validate_batch(turn.tool_calls))
                     except InvalidToolRequest as error:
                         correction = getattr(self, 'tool_request_correction', None)
-                        envelope = correction.take(error) if correction is not None else None
+                        # After a no-progress tool shutdown the batch stops the turn as without the correction.
+                        envelope = (correction.take(error, required=forced_first_tool)
+                                    if correction is not None and not tools_disabled else None)
                         if envelope is None:
                             raise
                         _progress(f'turn {turn_number}: malformed tool request ({error.issue}); one correction')
                         messages.extend(envelope)  # Placeholder for the refused response, then the envelope.
                         correcting = True
-                        continue  # Nothing in the batch ran; the batch and envelope stay out of history.
+                        # Nothing in the batch ran; the batch and envelope stay out of history. turn_number is
+                        # unchanged, so a forced first tool stays forced and checked on the correction request.
+                        continue
                 if tools_disabled:
                     return CliRunResult(
                         exit_code=1,

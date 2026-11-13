@@ -49,6 +49,9 @@ class ExecutionBudget:
     def provider_requests(self):
         with self._lock: return self._provider_requests
     @property
+    def provider_remaining(self):
+        with self._lock: return self._provider_cap - self._provider_requests
+    @property
     def tool_calls(self):
         with self._lock: return self._tool_calls
 

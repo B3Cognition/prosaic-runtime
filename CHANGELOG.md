@@ -6,13 +6,17 @@
   longer stops the turn as a guard fault; it takes the rule retry path. Such a turn may now spend one more provider
   request (always within `RunPolicy` budgets) and may succeed; the rule is reported in the new
   `TurnResult.rules_declined` instead of `rules_faulted`. Authors who want a declined repair to stop the turn at once
-  should bind the rule with `on_violation=fail`. A turn prepared or frozen under 0.9.22 or earlier keeps identical
+  should bind the rule with `on_violation=fail`. A turn prepared or frozen under 0.9.23 or earlier keeps identical
   bytes but follows the new behaviour when executed by this release. `TurnResult.rules_retried` lists rules
   answered with a granted retry. Unusable repairs and raising guards remain faults.
 - Add opt-in `ProsaicRuntime(..., correct_malformed_tool_calls=True)` (default off): a conversation turn may ask the
   model once to resend a tool call that batch admission refused, with a closed-code envelope and within the request
   budget, instead of failing with `invalidToolRequest`. `TurnResult.tool_request_corrections` reports it.
-  Response-level malformation stays terminal. Default turns keep their prepared-turn bytes.
+  Response-level malformation stays terminal. Default turns keep their prepared-turn bytes. A refused call to the
+  host-required first tool (`RunPolicy.initial_tool`) stays forced on the correction request, and the envelope asks
+  only for a resend with valid arguments; a text-only response then fails the turn as it would without the
+  correction. No correction runs after tools are disabled for lack of progress: the batch ends the turn with
+  `invalidToolRequest`, spending no further request.
 - Add `ProsaicRuntime(..., rule_retries=1)` (default 1, the previous single retry; 0 to 3, other values refused when
   the runtime is constructed): the per-turn rule retry allowance, shared by retries, declined repairs and citation
   repairs and always within `RunPolicy` budgets. `TurnResult.rule_retries_used` reports the retries spent. A value
@@ -23,6 +27,12 @@
 - Fix: a `before_tool` repair that the tool schema refuses now lists the repairing rule in `rules_faulted`, as
   documented; it already stopped the turn with `ruleViolation`. Since the refused batch never runs, no repair recorded
   for it stays in `rules_fixed`.
+
+## 0.9.23 — 2026-11-12
+
+- Add one-level serial delegation for registered specialists with independent context, shared budgets and route-bound journal receipts.
+- Project approved child observations through the parent citation contract.
+- See [release notes](docs/release-0.9.23.md).
 
 ## 0.9.22 — 2026-11-11
 

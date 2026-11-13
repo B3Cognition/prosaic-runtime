@@ -150,6 +150,16 @@ like `guards`, so it is not a YAML key):
   `callIdentity`, `functionShape`, `toolNotGranted`, `argumentsMalformed`,
   `argumentsTooLarge`, `argumentsSchema`); `tool` appears only for a granted
   tool. Model text, argument values and validator messages are never echoed.
+- The correction honours a host-required first tool (`RunPolicy.initial_tool`):
+  when the refused call is that tool, the correction request carries the same
+  forcing as the original request, and the fixed sentence asks only for the call
+  again with valid arguments, not for an answer without it. A text-only response
+  then fails the turn exactly as it would without the correction (`providerFailure`:
+  the first-tool choice was not honoured), never as an ungrounded success. For
+  other tools the sentence also allows answering without the tool.
+- The correction never runs after tool shutdown: once the runtime disables tools
+  for lack of progress (repeated identical tool rounds), a malformed batch ends
+  the turn with `invalidToolRequest` and spends no further provider request.
 - The correction is a provider request inside the existing `RunPolicy` budget:
   with none left, the turn fails as before. A second malformed batch fails the
   turn with `invalidToolRequest`. It is separate from the rule retry allowance.
