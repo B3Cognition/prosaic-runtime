@@ -19,6 +19,8 @@ stay terminal: they cannot be described without echoing raw output.
 
 import json
 
+from .config import OMLX_NEMOTRON_CORRECTION
+
 ISSUES = frozenset(
     {
         'batchShape',
@@ -76,3 +78,21 @@ class ToolRequestCorrection:
             {'toolRequestCorrection': data}, ensure_ascii=False
         )
         return [{'role': 'assistant', 'content': PLACEHOLDER}, {'role': 'user', 'content': envelope}]
+
+
+def constrain_nemotron_lookup(payload, features, error):
+    """Apply the tested choice and return its expected native tool name."""
+    if (not features.get(OMLX_NEMOTRON_CORRECTION)
+            or error.issue != 'argumentsSchema' or error.tool != 'lookup'):
+        return
+    tools = payload.get('tools', [])
+    if len(tools) != 1:
+        return
+    tool = tools[0]['function']
+    if tool['name'] != 'lookup' or tool['parameters'] not in (
+            {'type': 'object', 'additionalProperties': False},
+            {'type': 'object', 'properties': {}, 'additionalProperties': False}):
+        return
+    payload.pop('response_format', None)
+    payload['structured_outputs'] = {'choice': ['<tool_call>\n<function=lookup>\n</function>\n</tool_call>']}
+    return 'lookup'

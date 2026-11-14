@@ -1,6 +1,6 @@
 # Prosaic Runtime
 
-Runtime **0.9.25** adds [guarded-turn recovery](docs/release-0.9.25.md).
+Runtime **0.9.26** adds [constrained Nemotron lookup correction](docs/release-0.9.26.md).
 
 Runtime 0.9.23 added [bounded sub-agents](docs/release-0.9.23.md) for role-aware API turns.
 
@@ -116,6 +116,10 @@ servers may reject or ignore it; this is not a portable OpenAI protocol option.
 The constraint covers the envelope, not argument correctness or task quality.
 Runtime still validates native tool names, arguments, permissions and budgets.
 Assistant text is never converted to a tool call by this setting.
+
+For the tested oMLX Nemotron profile, `omlx_nemotron_tool_correction: true`
+constrains one correction of a malformed empty-argument lookup. See
+[profile setup and request limits](docs/conversations.md#constrained-nemotron-lookup-correction).
 
 The optional [stateless conversation API](docs/conversations.md) uses complete,
 bounded portable history through `prepare_turn()` and `turn()`. It requires no

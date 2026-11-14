@@ -1,5 +1,7 @@
 # Releases and compatibility
 
+Runtime 0.9.26 adds [constrained Nemotron lookup correction](release-0.9.26.md).
+
 Runtime 0.9.25 adds [guarded-turn recovery](release-0.9.25.md).
 
 Runtime 0.9.23 adds [bounded sub-agents](release-0.9.23.md) and pairs with Harness 0.9.17.

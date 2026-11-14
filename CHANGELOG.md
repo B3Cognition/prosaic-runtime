@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.26
+
+- Add opt-in oMLX grammar on malformed empty-argument Nemotron lookup corrections.
+- See [release notes](docs/release-0.9.26.md).
+
 ## 0.9.25 — 2026-11-13
 
 - See [release notes](docs/release-0.9.25.md).

@@ -186,3 +186,35 @@ The switch is part of the prepared turn's identity only when on, so default
 turns keep their bytes; a prepared or frozen turn readmitted under a different
 setting is refused with `bindingMismatch`. It does not change
 `bounded_tool_recovery`, which applies after a call has been dispatched.
+
+### Constrained Nemotron lookup correction
+
+On an oMLX endpoint serving `NVIDIA-Nemotron-3.5-Lightning-30B-A3B-MLX-4bit`,
+enable the following on the trusted OpenAI-compatible endpoint profile:
+
+```yaml
+features:
+  streaming: false
+  omlx_nemotron_tool_correction: true
+```
+
+Also enable `correct_malformed_tool_calls=True` in the Runtime constructor or
+the host's Harness bindings. The constraint applies when a singleton `lookup`
+call fails argument schema validation and the only exposed tool is `lookup`
+with a closed, empty object schema. Other tool sets use ordinary correction.
+Use the profile flag separately from `omlx_tool_call_envelope`.
+
+Runtime sends oMLX's `structured_outputs.choice` on the correction request and
+preserves the host's required first-tool choice. It requires one native
+`lookup` call and validates its arguments before the normal authorization and
+execution checks. Text, malformed calls and provider errors can end the turn.
+The original request and post-tool continuation retain their normal output
+controls. The complete recovery needs capacity for three provider requests:
+the original attempt, the correction and the continuation. It uses the same
+time, token and tool budgets. Recovery receipts retain the original rejection
+code, and tool delivery and answer guards supply evidence of the actual read
+and grounding.
+
+The setting is opt-in and part of the prepared endpoint profile identity.
+Streaming, other model identifiers and other provider protocols are outside the
+qualified configuration.
