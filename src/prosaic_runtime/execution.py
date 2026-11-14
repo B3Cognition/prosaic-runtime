@@ -13,6 +13,7 @@ from .terminal import content_digest
 from .openai_compatible_compaction import compact_tool_result_messages, ToolResultCompactionStats
 from .rule_hooks import RETRY, STOP
 from .tool_registry import InvalidToolRequest
+from .tool_request_correction import constrain_nemotron_lookup
 from .openai_compatible_progress import (_progress, _progress_llm_preview, _progress_turn_summary, _single_line_preview, _tool_call_name, _tool_result_status, _elapsed_s)
 
 
@@ -101,12 +102,12 @@ class ExecutionBackend:
                 'tool_rounds': tool_rounds, 'token_usage_details': token_usage_details,
                 **_transcript_metadata(transcript)})
 
-        correcting = False  # The next request is the one tool-request correction: labelled apart in logs.
+        correcting = False  # The next request is the one admitted correction.
+        singleton_error = None
         while True:
             turn_number = tool_rounds + 1
             turn_label = f'{turn_number} (correction)' if correcting else str(turn_number)
             correction_mark = {'correction': True} if correcting else {}
-            correcting = False
             turn_started = time.monotonic()
             initial_tool = _metadata_str(prompt_metadata, 'initial_tool')
             acquiring = turn_number == 1 and 'final_prompt' in prompt_metadata
@@ -123,10 +124,14 @@ class ExecutionBackend:
                                         if tool['function']['name'] in prompt_metadata['acquisition_tools']]
                 if turn_number == 1 and initial_tool and payload.get('tools'):
                     payload['tool_choice'] = {'type': 'function', 'function': {'name': initial_tool}}
-                return payload, compaction
+                correction_tool = (constrain_nemotron_lookup(payload, llm.features, singleton_error)
+                                   if singleton_error is not None else None)
+                return payload, compaction, correction_tool
             guard = getattr(self, 'context_guard', None)
-            payload, compaction = (guard.construct_native(construct_payload) if guard is not None
-                                   else construct_payload())
+            payload, compaction, correction_tool = (
+                guard.construct_native(construct_payload) if guard is not None else construct_payload())
+            correcting = False
+            singleton_error = None
             if compaction.compacted:
                 tool_result_compactions += compaction.compacted
                 tool_result_compaction_saved_chars += compaction.saved_chars
@@ -200,24 +205,25 @@ class ExecutionBackend:
                     token_usage_details,
                     turn.token_usage_details,
                 )
-            # The host-required first tool was forced on this request (a correction request keeps that forcing).
+            # Check both host-required first-tool selection and a constrained correction's native call.
             forced_first_tool = turn_number == 1 and bool(initial_tool) and bool(payload.get('tools'))
-            if forced_first_tool:
+            expected_tool = initial_tool if forced_first_tool else correction_tool
+            if expected_tool is not None:
                 names = [_tool_call_name(call) for call in turn.tool_calls]
-                if names != [initial_tool]:
+                if names != [expected_tool]:
                     transcript.write('final', finish_reason='tool_choice_not_honored',
-                                     expected_tool=initial_tool, token_usage=token_usage,
+                                     expected_tool=expected_tool, token_usage=token_usage,
                                      tool_call_count=0, tool_rounds=0)
                     return CliRunResult(
                         exit_code=1, stdout='',
-                        stderr=f'endpoint did not honor explicit first-tool choice: {initial_tool}',
+                        stderr=f'endpoint did not honor explicit first-tool choice: {expected_tool}',
                         token_usage=token_usage,
                         metadata={
                             'provider': self.name,
                             'request_model': str(payload.get('model') or ''),
                             'provider_error_code': 'tool_choice_not_honored',
                             'failure_reason': 'tool_choice_not_honored',
-                            'expected_tool': initial_tool,
+                            'expected_tool': expected_tool,
                             'observed_tool_call_count': len(names),
                             'tool_call_count': 0, 'tool_rounds': 0,
                             'streamed': turn.streamed,
@@ -262,6 +268,8 @@ class ExecutionBackend:
                         _progress(f'turn {turn_number}: malformed tool request ({error.issue}); one correction')
                         messages.extend(envelope)  # Placeholder for the refused response, then the envelope.
                         correcting = True
+                        if len(turn.tool_calls) == 1:
+                            singleton_error = error
                         # Nothing in the batch ran; the batch and envelope stay out of history. turn_number is
                         # unchanged, so a forced first tool stays forced and checked on the correction request.
                         continue

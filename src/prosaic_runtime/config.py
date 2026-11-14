@@ -8,6 +8,8 @@ import yaml
 from .effort import api_effort_format, supported_efforts
 
 CONFIG_FILENAMES = ("prosaic-runtime.yaml", "prosaic-runtime.yml")
+OMLX_NEMOTRON_CORRECTION = 'omlx_nemotron_tool_correction'
+_OMLX_NEMOTRON_MODEL = 'NVIDIA-Nemotron-3.5-Lightning-30B-A3B-MLX-4bit'
 
 
 @dataclass(frozen=True)
@@ -48,6 +50,14 @@ class EndpointConfig:
             api_effort_format(self.model, self.features)
         if self.provider == 'anthropic' and self.max_tokens is None:
             raise ValueError('Anthropic max_tokens must be a positive integer')
+        grammar = self.features.get(OMLX_NEMOTRON_CORRECTION, False)
+        if type(grammar) is not bool:
+            raise ValueError(f'{OMLX_NEMOTRON_CORRECTION} must be a boolean')
+        if grammar and (self.provider != 'openai-compatible' or self.model != _OMLX_NEMOTRON_MODEL
+                        or self.features.get('streaming') is not False
+                        or self.features.get('omlx_tool_call_envelope', False)):
+            raise ValueError(f'{OMLX_NEMOTRON_CORRECTION} requires the supported nonstreaming '
+                             'OpenAI-compatible Nemotron profile without omlx_tool_call_envelope')
         completion_token_parameter(self)
         if self.temperature is not None and not math.isfinite(self.temperature):
             raise ValueError("temperature must be finite")
