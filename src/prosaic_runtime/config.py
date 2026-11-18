@@ -6,6 +6,7 @@ import math
 import yaml
 
 from .effort import api_effort_format, supported_efforts
+from . import tool_result_format
 
 CONFIG_FILENAMES = ("prosaic-runtime.yaml", "prosaic-runtime.yml")
 OMLX_NEMOTRON_CORRECTION = 'omlx_nemotron_tool_correction'
@@ -59,6 +60,7 @@ class EndpointConfig:
             raise ValueError(f'{OMLX_NEMOTRON_CORRECTION} requires the supported nonstreaming '
                              'OpenAI-compatible Nemotron profile without omlx_tool_call_envelope')
         completion_token_parameter(self)
+        tool_result_format.validate(self.features)
         if self.temperature is not None and not math.isfinite(self.temperature):
             raise ValueError("temperature must be finite")
         for name in ("max_tokens", "max_response_bytes"):

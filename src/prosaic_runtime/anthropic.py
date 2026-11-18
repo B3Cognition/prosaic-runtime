@@ -40,6 +40,14 @@ def native_headers(token):
     return headers
 
 
+def _is_error(content):
+    """Error results stay JSON; any other content (e.g. a TOON-encoded result) is not an error."""
+    try:
+        return json.loads(content).get('status') == 'error'
+    except (ValueError, AttributeError):
+        return False
+
+
 def encode_messages(payload):
     """Convert the loop's internal history after acquisition/tool-choice edits."""
     messages, system = [], []
@@ -51,7 +59,7 @@ def encode_messages(payload):
         if role == 'tool':
             content = message['content']
             block = {'type': 'tool_result', 'tool_use_id': message['tool_call_id'], 'content': content}
-            if json.loads(content).get('status') == 'error':
+            if _is_error(content):
                 block['is_error'] = True
             role, blocks = 'user', [block]
         elif role == 'assistant' and 'provider_content' in message:
