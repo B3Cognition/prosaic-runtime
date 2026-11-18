@@ -15,8 +15,9 @@ import json
 from typing import Callable, Mapping
 
 try:
-    from toon_format import encode as _encode
+    from toon_format import decode as _decode, encode as _encode
 except ImportError:  # optional extra: b3-prosaic-runtime[toon]
+    _decode: Callable[[str], object] | None = None  # type: ignore[no-redef]
     _encode: Callable[[object], str] | None = None  # type: ignore[no-redef]
 
 FEATURE = "tool_result_format"
@@ -61,6 +62,29 @@ def _toon(content: str) -> str | None:
         payload = json.loads(content)
         if not isinstance(payload, dict) or payload.get("status") == "error":
             return None
-        return _encode(payload)
+        text = _encode(payload)
+        # Only send text that reads back as the same data: the model must see what the tool returned, and the
+        # evidence registry finds a result in the request by reading it back (decode_tool_result).
+        return text if _decode(text) == payload else None
     except Exception:  # never fail a request over its format: send the JSON as it was
+        return None
+
+
+def decode_tool_result(text: str) -> object | None:
+    """The data of a TOON tool result found in a request, or None when the text is not one."""
+    if _decode is None or "status: ok" not in text:  # every encoded result is a successful one
+        return None
+    try:
+        return _decode(text)
+    except Exception:
+        return None
+
+
+def toon_view(payload: object) -> object | None:
+    """What ``payload`` reads back as once sent as TOON (2.0 comes back as 2), or None when it cannot be sent so."""
+    if _encode is None or _decode is None:
+        return None
+    try:
+        return _decode(_encode(payload))
+    except Exception:
         return None

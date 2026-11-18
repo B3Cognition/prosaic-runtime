@@ -8,6 +8,7 @@ from jsonschema import Draft202012Validator
 from .conversation import encode_owned
 from .tool_contracts import EvidenceDraftV1, EvidenceUseV1, ToolContractBindingsV1, owned, reference
 from .tool_result_contract import select_pointer, validate_tool_result_outcome, ToolResultValidationError
+from .tool_result_format import decode_tool_result, toon_view
 
 
 def digest(value):
@@ -217,8 +218,13 @@ class EvidenceRegistryV1:
         encode_owned(projected, max_bytes=tool.max_result_bytes)
         if len(json.dumps(projected, allow_nan=False).encode()) > tool.max_result_bytes:
             raise ToolResultValidationError('result_limit')
+        # A TOON request carries this projection as text. Index what that text reads back as too, so delivery
+        # is still proven from the request bytes and never from this internal JSON.
+        view = toon_view(projected)
         self._records = all_records
         self._projections[digest(projected)] = tuple(records)
+        if view is not None:
+            self._projections[digest(view)] = tuple(records)
         return owned(projected)
 
     def prepare_delivery(self, native_payload, *, encoded_bytes=None):
@@ -245,6 +251,11 @@ class EvidenceRegistryV1:
                 except (ValueError, RecursionError):
                     continue
                 stack.append(child)
+            elif type(node) is str:
+                # ponytail: TOON results are decoded again on every request; memoise by text digest if it shows.
+                child = decode_tool_result(node)
+                if child is not None:
+                    stack.append(child)
         for evidence_id in sorted(candidates):
             self.authorize(evidence_id, 'modelUse')
         ticket = _DeliveryTicket(uuid4().hex, hashlib.sha256(encoded_bytes).hexdigest(), tuple(sorted(candidates)))
