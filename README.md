@@ -686,6 +686,28 @@ request's usage.
 
 Usage is reported when supplied by the endpoint. Cost estimation is unavailable in v0.2; `cost_usd = 0` is a legacy compatibility field, not a claim that inference was free. Check `metadata.cost_status`. No retries or model escalation occur automatically. An incomplete or truncated final response is unsuccessful.
 
+### Tool result format (opt-in)
+
+Tool results reach the model as JSON by default. A profile can send them as
+[TOON](https://github.com/toon-format/toon) instead, which writes a list of rows
+with the same plain fields as one table: field names once, then one line per row.
+For list-heavy results this is far fewer input tokens. Install the extra and set
+the feature:
+
+```sh
+python -m pip install 'b3-prosaic-runtime[toon]'
+```
+
+```yaml
+profiles:
+  local:
+    features:
+      tool_result_format: toon   # json (default) | toon
+```
+
+Only the request sent to the provider changes. See
+[docs/tool-result-format.md](docs/tool-result-format.md).
+
 ## Native Anthropic Messages
 
 Endpoint profiles accept `provider: anthropic` for native Messages requests.
