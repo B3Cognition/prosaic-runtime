@@ -4,8 +4,9 @@ import json
 import pytest
 from toon_format import decode
 
-from prosaic_runtime import EndpointConfig, ToolFailure
+from prosaic_runtime import EndpointConfig, ToolFailure, TurnAdmissionError, TurnLimits
 from prosaic_runtime import tool_result_format
+from prosaic_runtime.conversation_preparation import native_payload_digest
 from support.conversation_server import turn_fixture
 
 ROWS = {'rows': [{'id': 1, 'name': 'alpha'}, {'id': 2, 'name': 'beta'}]}
@@ -144,3 +145,53 @@ def test_compacted_results_are_encoded_too(turn_fixture, tmp_path):
         [content] = tool_contents(fx.requests[1])
         compacted = decode(content)
         assert compacted['status'] == 'compacted' and compacted['tool_name'] == 'lookup'
+
+
+def history_fixture(fx, result_format):
+    """A runtime whose profile uses ``result_format``, and a history holding one tool result."""
+    fx.features = {'tool_result_format': result_format}
+    fx.add_tool('lookup', lambda args: ROWS)
+    return fx.runtime, fx.compaction_history(outcomes=1, older_result_chars=10)
+
+
+@pytest.mark.parametrize('provider', ['openai-compatible', 'anthropic'])
+def test_changing_the_format_after_preparing_is_refused_before_dispatch(turn_fixture, provider):
+    with turn_fixture(provider) as fx:
+        runtime, history = history_fixture(fx, 'toon')
+        prepared = runtime.prepare_turn(fx.agent, message='Continue', history=history, policy=fx.policy)
+        fx.features = {'tool_result_format': 'json'}
+        with pytest.raises(TurnAdmissionError) as refused:
+            fx.runtime.turn(prepared)
+        assert refused.value.code == 'bindingMismatch' and fx.requests == []
+
+
+FREEZABLE = {'input_data': {'selected': 'captured'}, 'input_profile': 'pack-v1'}  # freezing needs an input profile
+
+
+@pytest.mark.parametrize('provider', ['openai-compatible', 'anthropic'])
+def test_changing_the_format_after_freezing_is_refused_before_dispatch(turn_fixture, provider):
+    with turn_fixture(provider) as fx:
+        runtime, history = history_fixture(fx, 'toon')
+        frozen = runtime.prepare_turn(fx.agent, message='Continue', history=history, policy=fx.policy,
+                                      **FREEZABLE).export_frozen_input()
+        fx.features = {'tool_result_format': 'json'}
+        with pytest.raises(TurnAdmissionError) as refused:
+            fx.runtime.restore_turn(fx.agent, history=history, frozen_input=frozen, policy=fx.policy,
+                                    limits=TurnLimits())
+        assert refused.value.code == 'bindingMismatch' and fx.requests == []
+
+
+@pytest.mark.parametrize('provider', ['openai-compatible', 'anthropic'])
+def test_frozen_toon_history_restores_and_sends_the_admitted_request(turn_fixture, provider):
+    with turn_fixture(provider) as fx:
+        runtime, history = history_fixture(fx, 'toon')
+        prepared = runtime.prepare_turn(fx.agent, message='Continue', history=history, policy=fx.policy, **FREEZABLE)
+        restored = fx.runtime.restore_turn(fx.agent, history=history, frozen_input=prepared.export_frozen_input(),
+                                           policy=fx.policy, limits=TurnLimits())
+        assert restored.context_identity == prepared.context_identity
+        fx.queue_text('done')
+        assert fx.runtime.turn(restored).result.exit_code == 0
+        assert len(fx.raw_requests[0]) == prepared.input_bytes
+        assert native_payload_digest(fx.requests[0]) == json.loads(restored._encoded)['nativePayloadDigest']
+        [content] = tool_contents(fx.requests[0])
+        assert decode(content) == {'status': 'ok', 'result': {'content': 'x' * 10}}

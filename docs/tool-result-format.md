@@ -17,8 +17,8 @@ result:
 ```
 
 The saving depends on the shape of the data. 20,000 rows of `{id, name, v}` are 910 KB as JSON and 450 KB as
-TOON, encoded in about 60 ms; a live turn with 60 five-field rows sent 1,909 prompt tokens instead of 3,040. To
-reproduce the first figure:
+TOON, encoded in about 60 ms plus about as long again to read the text back and check it. A live turn with 60
+five-field rows sent 1,909 prompt tokens instead of 3,040. To reproduce the size figures:
 
 ```python
 import json
@@ -35,22 +35,37 @@ same way. Everything else keeps JSON: the tool journal, guards, result contracts
 conversation records.
 
 - Error results (`status: error`) stay JSON, and native Anthropic `tool_result` blocks keep `is_error`.
-- A result that cannot be encoded is sent as JSON unchanged; a request never fails because of its format.
+- A result that cannot be encoded, or whose TOON text does not read back as the same data, is sent as JSON
+  unchanged; a request never fails because of its format.
 - Tool definitions and tool call arguments stay JSON: they are small and nested, and models call tools in JSON.
-- `max_result_bytes` is still measured on the JSON result. TOON text is normally smaller, so the limit still holds.
+- `max_result_bytes` is still measured on the JSON result and does not bound the TOON text. TOON can be larger
+  than JSON for deeply nested or irregular data. The request size limits below are what bound the text sent.
 - Guards and rule hooks still receive tool results as JSON data. The model reads the same data as TOON text.
 - Input byte and token limits are checked on the request as sent, so they count the TOON text.
 - Each result is encoded once per run and reused in the run's later requests.
+- Evidence delivery checks, delivery receipts and citations read the request as sent. A TOON result is read back
+  from the request bytes and matched to its evidence, so use is authorized again before each dispatch and the
+  receipt holds the digest of those bytes. A compacted result is not counted as delivered.
 - Default turns keep their bytes. With `toon`, the request bytes of a turn whose history holds tool results
-  change; preparation and execution encode alike, so the first-request check still passes. Switching a profile's
-  format between preparing (or freezing) a turn and running it has not been tested.
-- The conformance suite runs with a fixed feature list and does not exercise this feature.
+  change; preparation and execution encode alike, so the first-request check still passes. Changing a profile's
+  format after preparing or freezing a turn is refused with `bindingMismatch` before anything is sent.
+- The conformance suite forwards this feature, so a `toon` profile is checked with TOON tool results.
+
+## Scope
+
+The feature covers tool results in requests to the two API backends (`openai-compatible` and `anthropic`). Input
+data, context packs and native CLI backends are not affected.
+
+Applications built on Prosaic Harness need the Runtime upgrade, the `toon` extra and the profile feature, nothing
+else: tools, validators, journals and conversation records keep JSON. An application that filters Runtime features
+has to let `tool_result_format` through, and code that reads raw provider requests has to expect TOON text in
+tool results.
 
 ## Getting the most from it
 
-The saving comes from lists of flat rows. Nested objects inside rows make TOON fall back to a list layout and save
-much less, so tools should return lists of rows with plain values (counts or lists as one text field). Single
-records save little.
+The saving comes from lists of rows that share the same fields. Rows whose nested objects are also uniform still
+form one table (`rows[2]{id,pos{x,y}}:`). Rows with differing fields fall back to a list layout and save much
+less, and deeply nested or irregular data can come out larger than JSON. Single records save little.
 
 ## Configuration
 

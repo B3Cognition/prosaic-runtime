@@ -48,8 +48,9 @@ fixture_report = conformance(config, "small", live=True, evidence_origin="fixtur
 Opt-in execution uses already inspected synthetic artifacts, a private temporary
 directory, and one synthetic read-only CustomTool. It never inspects caller
 artifacts, calls doctor, or discovers configured CLI tools. The suite forwards
-only streaming, stream-options, JSON-mode, and reasoning/effort/thinking request
-controls from endpoint features. It does not enable arbitrary transcript, file,
+only streaming, stream-options, JSON-mode, reasoning/effort/thinking and
+tool-result-format request controls from endpoint features, so a `toon` profile
+is exercised with TOON tool results. It does not enable arbitrary transcript, file,
 or web features. Authentication references are used only during opt-in execution.
 Provider responses and input conversations are capped at 65,536 bytes (or a
 smaller caller/endpoint limit). The synthetic tool has 1,024-byte input/output

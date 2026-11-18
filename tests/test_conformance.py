@@ -6,6 +6,7 @@ import io
 import json
 
 import pytest
+from toon_format import decode as toon_decode
 import prosaic_runtime as api
 from prosaic_runtime import EndpointConfig, RuntimeConfig, RunPolicy
 from test_artifact_admission import config
@@ -195,6 +196,29 @@ def test_complete_native_fixture_observes_all_checks(native_server):
     assert len(requests) == 9
     assert requests[2]['body']['tool_choice']['type'] == 'tool'
     assert all(r['path'] == '/v1/messages' for r in requests)
+
+
+def test_openai_suite_sends_tool_results_in_the_profile_format(server):
+    url, requests, responses = server
+    responses.extend(openai_suite())
+    report = run(suite_config(url, streaming=True, json_mode=True, tool_result_format='toon'), live=True,
+                 evidence_origin='fixture')
+    assert report['qualification'] == 'fixture_passed'
+    content = requests[3]['messages'][-1]['content']
+    assert 'value: 7' in content and toon_decode(content) == {'status': 'ok', 'result': {'value': 7}}
+    # A rejected call is an error result, which stays JSON.
+    assert json.loads(requests[5]['messages'][-1]['content'])['status'] == 'error'
+
+
+def test_native_suite_sends_tool_results_in_the_profile_format(native_server):
+    url, requests, responses = native_server
+    responses.extend(native_suite())
+    report = run(suite_config(url, 'anthropic', streaming=True, tool_result_format='toon'), live=True,
+                 evidence_origin='fixture')
+    assert report['qualification'] == 'fixture_passed'
+    [block] = requests[3]['body']['messages'][-1]['content']
+    assert block['type'] == 'tool_result' and 'value: 7' in block['content']
+    assert toon_decode(block['content']) == {'status': 'ok', 'result': {'value': 7}}
 
 
 @pytest.mark.parametrize('scenario,reply,want', [
