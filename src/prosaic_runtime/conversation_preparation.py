@@ -317,12 +317,16 @@ def prepare_turn(runtime, artifact, *, message, history=(), input_data=None, pol
             endpoint_identity['supported_efforts'] = list(endpoint.supported_efforts)
         endpoint_identity.pop('api_key_env', None)
         endpoint_identity.pop('api_key_file', None)
+        sandbox = runtime.config.cli_sandbox
+        sandbox_mode = sandbox.mode
+        if not runtime.config.tool_directories and not runtime.cli_tool_names and not sandbox.runtime_roots:
+            # Released CLI-free prepared turns use this byte representation.
+            sandbox_mode = 'off'
         material = {'agent': raw_agent, 'history': owned_history, 'message': message, 'inputData': data,
                     'policy': policy_document(policy), 'limits': asdict(limits), 'workspace': str(workspace) if workspace is not None else None,
                     'profile': profile, 'endpoint': endpoint_identity,
                     'tools': {n: runtime.tool_descriptors[n] for n in sorted(names - BUILTIN_TOOLS)},
-                    'cliSandbox': {'mode': runtime.config.cli_sandbox.mode,
-                                   'runtimeRoots': list(runtime.config.cli_sandbox.runtime_roots)},
+                    'cliSandbox': {'mode': sandbox_mode, 'runtimeRoots': list(sandbox.runtime_roots)},
                     'messages': messages}
         if sub_agent_frame is not None:
             material['subAgentsV1'] = sub_agent_frame.to_dict()
@@ -365,9 +369,6 @@ def prepare_turn(runtime, artifact, *, message, history=(), input_data=None, pol
         encoded = encode_owned(material, max_bytes=ownership_cap,
             max_depth=limits.max_json_depth, max_nodes=limits.max_json_nodes)
         identity_material = {k: v for k, v in material.items() if k != 'workspace'}
-        if not runtime.config.tool_directories and not runtime.config.cli_sandbox.runtime_roots:
-            # Preserve the historical context identity for CLI-free turns.
-            identity_material['cliSandbox'] = {'mode': 'off', 'runtimeRoots': []}
         identity = hashlib.sha256(encode_owned(identity_material,
             max_bytes=ownership_cap,
             max_depth=limits.max_json_depth, max_nodes=limits.max_json_nodes)).hexdigest()
@@ -395,6 +396,8 @@ def execution_snapshot(runtime, material):
     endpoint = replace(runtime.config.profiles[profile], **material['endpoint'])
     from .config import CliSandboxConfig
     sandbox = CliSandboxConfig(material['cliSandbox']['mode'], tuple(material['cliSandbox']['runtimeRoots']))
+    if not runtime.config.tool_directories and not runtime.cli_tool_names:
+        sandbox = runtime.config.cli_sandbox
     tier = material['agent']['frontmatter'].get('model_tier')
     config = replace(runtime.config, profiles={profile: endpoint}, default_profile=profile,
                      routes={tier: profile} if tier is not None else {}, cli_sandbox=sandbox)

@@ -52,7 +52,8 @@ def test_file_receipts_keep_trace_after_pause_reopen_and_lost_ack(tmp_path,wire)
 
 
 def test_public_0917_workflow_fingerprint_is_unchanged():
-    from prosaic_runtime import EndpointConfig,RuntimeConfig,ProsaicRuntime
-    rt=ProsaicRuntime(RuntimeConfig({'local':EndpointConfig('http://127.0.0.1:9/v1','example',features={'streaming':False,'reasoning_effort':'low'})},{'fast':'local'},'local'),source='/private/tmp/sent-effort-golden-project/.prosaic')
+    from prosaic_runtime import CliSandboxConfig,EndpointConfig,RuntimeConfig,ProsaicRuntime
+    rt=ProsaicRuntime(RuntimeConfig({'local':EndpointConfig('http://127.0.0.1:9/v1','example',features={'streaming':False,'reasoning_effort':'low'})},{'fast':'local'},'local',
+        cli_sandbox=CliSandboxConfig(mode='off')),source='/private/tmp/sent-effort-golden-project/.prosaic')
     flow=workflow(rt)
     assert flow.fingerprint==flow.current_fingerprint()=='7450ebf3b7bcbe82db48544dc27d1b5c2b245aceaa6a41d9651c0f2f3cf69557'

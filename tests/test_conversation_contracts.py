@@ -131,6 +131,7 @@ def test_prepare_turn_preserves_legacy_context_identity_without_cli_tools():
     rt.config = replace(rt.config, cli_sandbox=api.CliSandboxConfig(mode='off'))
     legacy = rt.prepare_turn(agent(), message='Which city?')
     assert default.context_identity == legacy.context_identity
+    assert default._encoded == legacy._encoded
 
 
 @pytest.mark.parametrize('provider', ['openai-compatible', 'anthropic'])
