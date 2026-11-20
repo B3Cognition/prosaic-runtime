@@ -1,5 +1,6 @@
 # Prosaic Runtime
 
+Runtime **0.9.27** [requires CLI sandboxing by default](docs/release-0.9.27.md).
 Runtime **0.9.26** adds [constrained Nemotron lookup correction](docs/release-0.9.26.md).
 
 Runtime 0.9.23 added [bounded sub-agents](docs/release-0.9.23.md) for role-aware API turns.
@@ -156,15 +157,13 @@ Version 0.5.0 adds [custom CLI tools, discovery and offline preflight](docs/cli-
 with a complete runnable CLI and an optional Understanding adapter.
 
 Version 0.5.0 also adds [host-registered custom tools](examples/README.md#host-registered-custom-tools):
-validated Python callbacks with native function calling. Both APIs are opt-in;
-Python callbacks execute trusted host code and are not sandboxed. CLI subprocesses
-are also unsandboxed by default; the opt-in below isolates them.
+validated Python callbacks with native function calling. Register only trusted
+callbacks, which run in the authenticated Runtime process with host permissions.
 
 ## Tool permissions and CLI isolation
 
-Runtime **0.5.2** includes `cli_sandbox_v1` and opt-in CLI isolation.
-Versions 0.5.1 and earlier do not include it; upgrading Prosaic alone does not
-enable isolation. Start with the
+Runtime **0.9.27** requires CLI isolation by default. Runtime **0.5.2**
+introduced `cli_sandbox_v1` with explicit opt-in. Start with the
 [sandboxed CLI walkthrough](examples/README.md#sandboxed-cli-tools-runtime-052)
 and its [complete configuration](examples/cli-tools-sandboxed.yml).
 

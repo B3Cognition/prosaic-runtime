@@ -30,6 +30,8 @@ def test_example_preflight_and_live_runner_use_the_cli(server, tmp_path):
     (tools / 'analyze.yml').write_text(yaml.safe_dump(data))
     config = yaml.safe_load((EXAMPLES / 'cli-tools.yml').read_text())
     config['tool_directories'] = [str(tools)]
+    # Portable runner coverage. The sandbox probe example tests real confinement.
+    config['cli_sandbox'] = {'mode': 'off'}
     for endpoint in config['profiles'].values():
         endpoint.update(base_url=url, api_key_env=None, features={'streaming': False})
     path = tmp_path / 'runtime.yml'; path.write_text(yaml.safe_dump(config))

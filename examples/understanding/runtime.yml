@@ -1,5 +1,6 @@
 tool_directories: [.prosaic/tools]
 allowed_tools: [understanding]
+cli_sandbox: {mode: required}
 default_profile: qwen
 routes: {balanced: qwen}
 limits: {timeout_s: 180, max_tool_rounds: 4}

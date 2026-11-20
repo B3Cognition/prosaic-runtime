@@ -60,8 +60,8 @@ can contain private backend data; filter it before sharing. See
 
 Use this path for **required OS isolation of a custom CLI** with Runtime 0.5.2+.
 Runtime 0.5.1 and earlier do not have `cli_sandbox_v1`.
-The ordinary `cli-tools.yml` example below is a compatibility example with
-sandboxing off. Prosaic Markdown has no new sandbox permission field.
+The `cli-tools.yml` example also explicitly requires isolation for releases
+where sandboxing was opt-in.
 
 ### 1. Install and check prerequisites
 
@@ -88,7 +88,7 @@ On macOS, `/usr/bin/sandbox-exec` must exist. On Linux/ARM64 or AMD64,
 `/usr/bin/bwrap` must be version **0.12.0 or newer**, and the host must permit
 unprivileged user namespaces. Installing an older distribution package is not
 enough; use an updated package or patched upstream build. See
-[backend setup and fail-closed behavior](../docs/cli-tools.md#opt-in-cli-sandbox).
+[backend setup and fail-closed behavior](../docs/cli-tools.md#cli-sandbox).
 Never disable host security or switch to off mode just to make a failed preflight pass.
 
 ### 2. Understand exactly what is requested and granted
@@ -181,15 +181,14 @@ manifest discovery, Markdown declarations, offline preflight, execution, failure
 behavior, and the optional actual Understanding CLI adapter. This feature needs
 Runtime v0.5.1+; Python Prosaic v0.3.0 is installed automatically.
 
-**Compatibility mode:** this section uses `cli-tools.yml`, whose sandbox defaults
-to off. For required isolation use the sandboxed walkthrough above. Neither
-mode treats Markdown or tool output as operator authorization.
+This walkthrough uses `cli-tools.yml` and the same OS sandbox prerequisites
+as the walkthrough above. Operator configuration grants tool authority.
 
 From this repository root, with the updated checkout installed:
 
 ```sh
 source .venv/bin/activate
-python -m pip install -e examples/cli-tool
+python -m pip install examples/cli-tool
 prosaic-example-analyzer examples/evidence/requirements.md --json
 prosaic tools --source examples/.prosaic
 python examples/run_cli_tool.py                  # offline, no model request
@@ -197,7 +196,7 @@ python examples/run_cli_tool.py --live --profile qwen
 ```
 
 `prosaic tools` requires the updated Prosaic CLI. With a uv environment without
-pip, use `uv pip install --python .venv/bin/python -e examples/cli-tool`.
+pip, use `uv pip install --python .venv/bin/python examples/cli-tool`.
 The executable is a normal installed CLI; no Python callback registration is
 needed. Only operator-trusted directories in `tool_directories` are loaded, and
 prose, Runtime YAML and host permissions must all grant the tool.

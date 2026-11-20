@@ -1,4 +1,5 @@
 """Actual tool processes, host canaries and loopback effects, not profile snapshots."""
+from dataclasses import replace
 import json
 import os
 from pathlib import Path
@@ -7,7 +8,7 @@ import sys
 
 import pytest
 import yaml
-from prosaic_runtime import ProsaicRuntime, RuntimeConfig
+from prosaic_runtime import CliSandboxConfig, EndpointConfig, ProsaicRuntime, RuntimeConfig
 from test_runtime import artifact, server, completion
 from test_cli_tools import manifest, config, policy, native_call
 
@@ -117,19 +118,39 @@ def test_linux_rejects_unpatched_bubblewrap_before_model(server, tmp_path, monke
 
 
 def hardened(tmp_path, url, tools):
-    cfg = config(tmp_path, url, [tools])
-    path = tmp_path / 'runtime.yml'
-    raw = yaml.safe_load(path.read_text())
-    raw['cli_sandbox'] = {'mode': 'required'}
-    path.write_text(yaml.safe_dump(raw))
-    return RuntimeConfig.load(path)
+    return config(tmp_path, url, [tools], sandbox_mode='required')
 
 
-def test_unsupported_required_backend_stops_before_model_or_tool(server, tmp_path, monkeypatch):
+@pytest.mark.parametrize('source', ['yaml', 'yaml_with_roots', 'python'])
+def test_default_cli_sandbox_mode_is_required(tmp_path, source):
+    url = 'http://localhost:9/v1'
+    if source == 'python':
+        cfg = RuntimeConfig({'local': EndpointConfig(url, 'test')}, {}, 'local')
+    elif source == 'yaml_with_roots':
+        cfg = config(tmp_path, url, [], sandbox_mode=None, cli_sandbox={'runtime_roots': ['dependencies']})
+        assert cfg.cli_sandbox.runtime_roots == (str(tmp_path / 'dependencies'),)
+    else:
+        cfg = config(tmp_path, url, [], sandbox_mode=None)
+    assert cfg.cli_sandbox.mode == CliSandboxConfig().mode == 'required'
+
+
+def test_prepared_cli_turn_binds_the_default_sandbox_policy(tmp_path):
+    tools, _, _ = manifest(tmp_path)
+    url = 'http://localhost:9/v1'
+    approved = replace(artifact(['analyze_spec']), body='Review the provided specification.')
+    arguments = {'message': 'Analyze the spec', 'workspace': tmp_path,
+                 'policy': policy(max_provider_requests=3, max_tool_calls=2)}
+    runtime = ProsaicRuntime(config(tmp_path, url, [tools], sandbox_mode=None))
+    prepared = runtime.prepare_turn(approved, **arguments)
+    unrestricted = ProsaicRuntime(config(tmp_path, url, [tools], sandbox_mode='off'))
+    assert prepared.context_identity != unrestricted.prepare_turn(approved, **arguments).context_identity
+
+
+def test_unsupported_backend_with_omitted_mode_stops_before_model_or_tool(server, tmp_path, monkeypatch):
     url, requests, _ = server
     marker = tmp_path / 'executed'
     tools, _, _ = manifest(tmp_path, code=f'open({str(marker)!r}, "w").write("bad"); print("{{}}")')
-    cfg = hardened(tmp_path, url, tools)
+    cfg = config(tmp_path, url, [tools], sandbox_mode=None)
     import prosaic_runtime.sandbox as sandbox
     monkeypatch.setattr(sandbox.sys, 'platform', 'unsupported')
     rt = ProsaicRuntime(cfg)
@@ -138,6 +159,31 @@ def test_unsupported_required_backend_stops_before_model_or_tool(server, tmp_pat
     with pytest.raises(ValueError, match='preflight'):
         rt.run(artifact(['analyze_spec']), cwd=tmp_path, policy=policy())
     assert requests == [] and not marker.exists()
+
+
+def test_macos_kernel_denial_stops_even_without_version_probe(server, tmp_path, monkeypatch):
+    from subprocess import CompletedProcess
+    import prosaic_runtime.sandbox as sandbox
+
+    url, requests, _ = server
+    tools, _, _ = manifest(tmp_path, version_probe=[])
+    backend = tmp_path / 'sandbox-exec'
+    backend.touch(mode=0o700)
+    sandbox.sysconfig.get_paths()
+    monkeypatch.setattr(sandbox.sys, 'platform', 'darwin')
+    monkeypatch.setattr(sandbox, 'MACOS_BACKEND', str(backend))
+
+    def deny(argv, **kwargs):
+        assert argv[0] == str(backend)
+        return CompletedProcess(argv, 1)
+
+    monkeypatch.setattr(sandbox.subprocess, 'run', deny)
+    runtime = ProsaicRuntime(hardened(tmp_path, url, tools))
+    report = runtime.preflight(artifact(['analyze_spec']), cwd=tmp_path, policy=policy())
+    assert report['checks']['analyze_spec']['message'] == 'cli_sandbox_unavailable'
+    with pytest.raises(ValueError, match='preflight'):
+        runtime.run(artifact(['analyze_spec']), cwd=tmp_path, policy=policy())
+    assert requests == []
 
 
 @MAC
@@ -176,7 +222,7 @@ print(json.dumps(result))
     with socket.socket() as listener:
         listener.bind(('127.0.0.1', 0)); listener.listen(); listener.settimeout(0.1)
         tools, _, _ = manifest(tmp_path, code=code.replace('PORT', str(listener.getsockname()[1])))
-        rt = ProsaicRuntime(hardened(tmp_path, url, tools))
+        rt = ProsaicRuntime(config(tmp_path, url, [tools], sandbox_mode=None))
         responses.extend([completion('', [native_call('evidence/input.md')]), completion('done')])
         result = rt.run(artifact(['analyze_spec']), cwd=root, policy=policy(read_roots=('evidence',)))
         assert result.exit_code == 0, result.stderr
@@ -197,7 +243,7 @@ def test_version_probe_is_sandboxed_too(server, tmp_path):
     marker = tmp_path / 'probe-write'
     tools, _, _ = manifest(tmp_path, version_probe=['--probe'], path_parameters={}, code=
         f'open({str(marker)!r}, "w").write("bad"); print("analyzer 1.0")')
-    rt = ProsaicRuntime(hardened(tmp_path, url, tools))
+    rt = ProsaicRuntime(config(tmp_path, url, [tools], sandbox_mode=None))
     report = rt.preflight(artifact(['analyze_spec']), cwd=tmp_path, policy=policy(read_roots=()))
     assert report['ok'] is False and report['checks']['analyze_spec']['message'] == 'cli_version'
     assert not marker.exists() and requests == []

@@ -125,6 +125,14 @@ def test_prepare_turn_requires_public_method_and_snapshots_inputs():
     assert prepared.input_bytes > len('Which city?')
 
 
+def test_prepare_turn_preserves_legacy_context_identity_without_cli_tools():
+    rt = runtime()
+    default = rt.prepare_turn(agent(), message='Which city?')
+    rt.config = replace(rt.config, cli_sandbox=api.CliSandboxConfig(mode='off'))
+    legacy = rt.prepare_turn(agent(), message='Which city?')
+    assert default.context_identity == legacy.context_identity
+
+
 @pytest.mark.parametrize('provider', ['openai-compatible', 'anthropic'])
 def test_exact_native_request_bound_includes_escaped_unicode_and_envelope(provider):
     limits = exported('TurnLimits')

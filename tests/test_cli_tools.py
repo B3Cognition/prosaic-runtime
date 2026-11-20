@@ -71,11 +71,13 @@ def manifest(tmp_path, code='print(json.dumps({"argv": sys.argv[1:]}))', **chang
     return tools, executable, path
 
 
-def config(tmp_path, url, directories, **changes):
+def config(tmp_path, url, directories, *, sandbox_mode='off', **changes):
     path = tmp_path / 'runtime.yml'
     data = {'default_profile': 'local', 'routes': {'fast': 'local'}, 'allowed_tools': ['analyze_spec'],
         'tool_directories': [str(p) for p in directories],
         'profiles': {'local': {'base_url': url, 'model': 'test', 'features': {'streaming': False}}}}
+    if sandbox_mode is not None:
+        data['cli_sandbox'] = {'mode': sandbox_mode}
     data.update(changes)
     path.write_text(yaml.safe_dump(data))
     return RuntimeConfig.load(path)

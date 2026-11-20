@@ -1,5 +1,13 @@
 # Prompt-injection containment: first audit, 2026-10-01
 
+## Unreleased CLI default
+
+Runtime requires CLI sandboxing by default, including version probes. Preflight
+fails before inference if the OS cannot apply confinement. Treat Python
+callbacks, authorizers, operation-key resolvers and validators as trusted host
+code. They run in the controller process. Review supported dependencies and
+remaining isolation limits in the [CLI tool guide](cli-tools.md#cli-sandbox).
+
 ## Release status — 2026-10-07
 
 Runtime 0.5.2 includes the opt-in CLI sandbox described below and the independent

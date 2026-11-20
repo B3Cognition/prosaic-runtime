@@ -1,15 +1,16 @@
 # Custom command-line tools: discover, preflight, execute
 
-## Opt-in CLI sandbox
+## CLI sandbox
 
-Runtime **0.5.2+** includes `cli_sandbox_v1`; Runtime 0.5.1 and earlier do not.
+Runtime defaults to `required` for CLI isolation. Runtime **0.5.2** introduced
+`cli_sandbox_v1` as an opt-in capability. Set `mode: required` explicitly for
+compatibility with older releases that support the sandbox.
 
 Start with the complete [sandboxed Runtime walkthrough](../examples/README.md#sandboxed-cli-tools-runtime-052)
 and [sandboxed YAML](../examples/cli-tools-sandboxed.yml), or the companion
 [sandboxed Harness workflow](https://github.com/B3Cognition/prosaic-harness/blob/main/examples/README.md#sandboxed-cli-workflow-harness-042).
-They explain installation, every declaration/grant, offline
-validation and opt-in live execution. The older examples below use off mode for
-compatibility; do not assume their CLI execution is isolated.
+They explain installation, every declaration and grant, offline validation and
+how to opt into live execution.
 
 On macOS or Linux (including ARM64), configure:
 
@@ -33,12 +34,11 @@ are not implicitly inherited; explicitly configured `pass_env` still shares the
 named values by operator intent. File metadata remains visible.
 
 Missing/unsupported OS enforcement reports `cli_sandbox_unavailable` before
-model dispatch. Mode defaults to `off` for compatibility, and off mode retains
-the historical host-authority risk. No automatic downgrade occurs in required
-mode. Additional interpreters/helpers may need narrowly scoped `runtime_roots`;
-do not grant a home directory or `/` as a workaround. Python callbacks and
-trusted validator code are not sandboxed. There is no CLI workspace write grant
-in this first implementation.
+model dispatch, even for manifests without a version probe. Operators who
+explicitly configure `cli_sandbox: {mode: 'off'}` allow CLI subprocesses to run
+with host account permissions. Additional interpreters and helpers may need
+narrowly scoped `runtime_roots`. Python callbacks and validators run as trusted
+host code. Required mode limits CLI writes to private scratch.
 
 Linux requires `/usr/bin/bwrap` **0.12.0 or newer** and operational unprivileged
 user namespaces. Earlier versions are rejected because of the upstream
@@ -64,8 +64,8 @@ execution/effects, not model claims. It prints only a safe summary. See the
 that remains. Install this Runtime working tree explicitly to try it; no existing
 installation, Harness dependency pin or Echelon provider was silently upgraded.
 
-The current setup uses Runtime v0.5.1+, Python Prosaic v0.3.0 (installed
-automatically), and Harness v0.4.1+ for workflow integration. Runtime does not
+The sandboxed examples require Runtime v0.5.2+ and Harness v0.4.2+ for workflow
+integration. Runtime does not
 require the Prosaic catalogue command to execute tools: it validates trusted manifests
 itself. Agent Markdown is still parsed exclusively through `prosaic inspect`.
 
@@ -97,12 +97,12 @@ Install it in the same environment used for Runtime:
 # From the prosaic-runtime repository root, after the normal environment setup.
 source .venv/bin/activate
 python -m pip install -e .
-python -m pip install -e examples/cli-tool
+python -m pip install examples/cli-tool
 prosaic-example-analyzer examples/evidence/requirements.md --json
 ```
 
 For a uv-created environment without pip, the equivalent is
-`uv pip install --python .venv/bin/python -e examples/cli-tool`.
+`uv pip install --python .venv/bin/python examples/cli-tool`.
 
 The result is `{"requirements":2,"vague_ids":["REQ-002"],"passed":false}`.
 Exit zero means the CLI ran successfully; `passed:false` is domain data, not a
@@ -298,15 +298,12 @@ On POSIX, cleanup terminates the process group, including ordinary children; on
 Windows it terminates the direct child. Processes that deliberately escape their
 group require stronger OS isolation.
 
-In default **off mode**, this adapter is **not an OS sandbox**. Read-scope
-checks constrain declared path arguments, not every filesystem access the tool's
-implementation might perform. Tools run with the host account's permissions and
-can have effects. Tool output remains potentially untrusted content. Fixed argv,
-schema/grant checks and credential isolation reduce attack surfaces; destructive
-tools still need host approval. Development **required mode** adds the CLI OS
-boundary described above, but is not complete prompt-injection prevention and
-does not isolate callbacks/native coding providers or validate answer truth.
-Interrupted or retried tools are not guaranteed exactly-once execution.
+Explicit **off mode** leaves subprocess filesystem and network access under the
+host account's permissions. Runtime still checks declared read-path arguments.
+In either mode, treat tool output as untrusted. Callbacks and native coding
+providers have their own execution boundaries. Use deterministic workflow gates
+for output validation and account for repeated effects when retrying an
+interrupted tool call.
 
 The version binds declared `tool_version`, normalized manifest semantics and
 resolved executable path. It does **not** hash an executable's dependencies,
@@ -335,8 +332,9 @@ prosaic-runtime subagents/reviewer.md \
 ```
 
 The second command makes real model requests. Adapt and version-pin the manifest
-for the actual CLI release you install. For a mandatory quality gate, prefer
-controller-owned analysis/report validation rather than relying on prose alone.
+for the actual CLI release you install. Add the tool's dependency directories
+to `runtime_roots` if they fall outside Runtime's library directories. Use
+controller-owned analysis and report validation for mandatory quality gates.
 
 If preflight reports `cli_version`, run the trusted executable's version command
 directly to diagnose its installation. On this development Mac, the default PATH

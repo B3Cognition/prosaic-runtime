@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.27
+
+- Require OS confinement by default for custom CLI tools and version probes.
+- Detect an unavailable macOS sandbox during preflight even when a manifest has no version probe.
+
+
 ## 0.9.26
 
 - Add opt-in oMLX grammar on malformed empty-argument Nemotron lookup corrections.

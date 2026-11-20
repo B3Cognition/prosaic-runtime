@@ -365,6 +365,9 @@ def prepare_turn(runtime, artifact, *, message, history=(), input_data=None, pol
         encoded = encode_owned(material, max_bytes=ownership_cap,
             max_depth=limits.max_json_depth, max_nodes=limits.max_json_nodes)
         identity_material = {k: v for k, v in material.items() if k != 'workspace'}
+        if not runtime.config.tool_directories and not runtime.config.cli_sandbox.runtime_roots:
+            # Preserve the historical context identity for CLI-free turns.
+            identity_material['cliSandbox'] = {'mode': 'off', 'runtimeRoots': []}
         identity = hashlib.sha256(encode_owned(identity_material,
             max_bytes=ownership_cap,
             max_depth=limits.max_json_depth, max_nodes=limits.max_json_nodes)).hexdigest()

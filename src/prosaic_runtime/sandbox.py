@@ -15,38 +15,47 @@ import re
 
 from .tools import ToolExecutionError
 
+MACOS_BACKEND = '/usr/bin/sandbox-exec'
 LINUX_BACKEND = '/usr/bin/bwrap'
+
+
+def _check_backend_command(argv):
+    result = subprocess.run(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL, timeout=5,
+        env={'PATH': '/usr/bin:/bin', 'PYTHONDONTWRITEBYTECODE': '1', 'PYTHONNOUSERSITE': '1'})
+    if result.returncode != 0:
+        raise ToolExecutionError('cli_sandbox_unavailable')
 
 
 def require_backend(config):
     if config.mode != 'required':
         return
-    backend = '/usr/bin/sandbox-exec' if sys.platform == 'darwin' else LINUX_BACKEND
+    backend = MACOS_BACKEND if sys.platform == 'darwin' else LINUX_BACKEND
     if sys.platform not in {'darwin', 'linux'} or not Path(backend).is_file() or not os.access(backend, os.X_OK):
         raise ToolExecutionError('cli_sandbox_unavailable')
-    if sys.platform == 'linux':
-        # Availability means kernel confinement works, not merely bwrap exists.
-        # Probe trusted Python, never the manifest executable or endpoint key.
-        from types import SimpleNamespace
-        try:
+    # Check that the kernel can apply confinement even without a version probe.
+    from types import SimpleNamespace
+    scope = SimpleNamespace(read_roots=(), forbidden_roots=())
+    try:
+        with tempfile.TemporaryDirectory(prefix='prosaic-sandbox-check-') as temporary:
+            scratch = Path(temporary).resolve()
+            if sys.platform == 'darwin':
+                command = ['/usr/bin/true']
+                profile = _profile(command, '/', scope, config, scratch)
+                _check_backend_command([backend, '-p', profile, *command])
+                return
+
             version = subprocess.run([backend, '--version'], stdin=subprocess.DEVNULL,
                 capture_output=True, timeout=5, env={'PATH': '/usr/bin:/bin'})
             match = re.fullmatch(rb'bubblewrap (\d+)\.(\d+)\.(\d+)\s*', version.stdout)
             if version.returncode != 0 or not match or tuple(map(int, match.groups())) < (0, 12, 0):
                 # GHSA-pxhw-h44j-8pfx: unsafe setup on attacker-controlled trees.
                 raise ToolExecutionError('cli_sandbox_unavailable')
-            with tempfile.TemporaryDirectory(prefix='prosaic-sandbox-check-') as temporary:
-                scratch = Path(temporary).resolve()
-                args = _linux_command([sys.executable, '-c', 'pass'], '/',
-                    SimpleNamespace(read_roots=(), forbidden_roots=()),
-                    SimpleNamespace(runtime_roots=()), scratch, scratch)
-                result = subprocess.run(args, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL, timeout=5,
-                    env={'PATH': '/usr/bin:/bin', 'PYTHONDONTWRITEBYTECODE': '1', 'PYTHONNOUSERSITE': '1'})
-                if result.returncode != 0:
-                    raise ToolExecutionError('cli_sandbox_unavailable')
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            raise ToolExecutionError('cli_sandbox_unavailable') from exc
+            options = SimpleNamespace(runtime_roots=())
+            _check_backend_command(_linux_command([sys.executable, '-c', 'pass'], '/',
+                                                 scope, options, scratch, scratch))
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ToolExecutionError('cli_sandbox_unavailable') from exc
 
 
 def _linux_command(argv, cwd, policy, config, scratch, masks):
@@ -176,4 +185,4 @@ def sandbox_command(argv, *, cwd, env, policy, config):
                 yield _linux_command(argv, cwd, policy, config, scratch,
                                      Path(temporary_masks).resolve()), environment
         else:
-            yield ['/usr/bin/sandbox-exec', '-p', _profile(argv, cwd, policy, config, scratch), *argv], environment
+            yield [MACOS_BACKEND, '-p', _profile(argv, cwd, policy, config, scratch), *argv], environment

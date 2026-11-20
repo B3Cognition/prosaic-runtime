@@ -82,7 +82,7 @@ def completion_token_parameter(endpoint):
 @dataclass(frozen=True)
 class CliSandboxConfig:
     """Host-selected CLI isolation. Never supplied by model/prose manifests."""
-    mode: str = 'off'
+    mode: str = 'required'
     runtime_roots: tuple[str, ...] = ()
 
     def __post_init__(self):
@@ -158,7 +158,7 @@ class RuntimeConfig:
                 allowed_tools=frozenset(allowed),
                 limits=RunLimits(**raw.get("limits", {})),
                 tool_directories=tuple(str((path.resolve().parent / p).resolve()) for p in directories),
-                cli_sandbox=CliSandboxConfig(sandbox.get('mode', 'off'),
+                cli_sandbox=CliSandboxConfig(sandbox.get('mode', CliSandboxConfig.mode),
                     tuple(str((path.resolve().parent / p).resolve()) for p in roots)),
                 required_guards=raw.get('required_guards', {}),
             )
