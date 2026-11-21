@@ -1,5 +1,8 @@
 # Releases and compatibility
 
+Runtime 0.9.27 [requires CLI sandboxing by default](release-0.9.27.md).
+Use Harness 0.9.20 for the coordinated upgrade of saved workflows and sessions.
+
 Runtime 0.9.26 adds [constrained Nemotron lookup correction](release-0.9.26.md).
 
 Runtime 0.9.25 adds [guarded-turn recovery](release-0.9.25.md).

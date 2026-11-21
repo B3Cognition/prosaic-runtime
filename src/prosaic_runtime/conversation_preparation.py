@@ -319,8 +319,8 @@ def prepare_turn(runtime, artifact, *, message, history=(), input_data=None, pol
         endpoint_identity.pop('api_key_file', None)
         sandbox = runtime.config.cli_sandbox
         sandbox_mode = sandbox.mode
-        if not runtime.config.tool_directories and not runtime.cli_tool_names and not sandbox.runtime_roots:
-            # Released CLI-free prepared turns use this byte representation.
+        if sandbox.mode_is_default and not runtime.config.tool_directories and not runtime.cli_tool_names:
+            # Restore the serialized mode used by callers who omitted a CLI policy.
             sandbox_mode = 'off'
         material = {'agent': raw_agent, 'history': owned_history, 'message': message, 'inputData': data,
                     'policy': policy_document(policy), 'limits': asdict(limits), 'workspace': str(workspace) if workspace is not None else None,

@@ -5,16 +5,22 @@ default. The YAML and Python APIs use the same default. Missing OS enforcement
 fails preflight before inference, including for CLI manifests without a version
 probe.
 
-Linux deployments need an operational Bubblewrap 0.12.0 or newer at
-`/usr/bin/bwrap`. Run preflight in the deployed image or host policy before
-upgrading a service that grants custom CLI tools. A trusted host can explicitly
-select `cli_sandbox: {mode: 'off'}` for a compatibility workload that requires
-host execution privileges. Python callbacks and validators run as trusted
-in-process code.
+## Upgrade an existing deployment
 
-Use Harness 0.9.20 for the coordinated upgrade of saved workflows and
-conversations. Native bundles retain their original sandbox policy in
-their identities, so reconstruct earlier bundles using their original mode.
+1. Upgrade Runtime and Harness together if you use Harness to resume saved
+   workflows or sessions. CLI-free frozen turns retain their identities,
+   including when the old configuration explicitly selected `required`.
+2. For custom CLI tools, run preflight under the deployment's service account
+   before rollout. Linux needs operational Bubblewrap 0.12.0 or newer at
+   `/usr/bin/bwrap`. Docker workers need a policy that permits its namespace
+   setup. macOS needs operational `/usr/bin/sandbox-exec`.
+3. To finish a saved CLI workflow under its original off-mode policy, explicitly
+   set `cli_sandbox: {mode: 'off'}` in trusted Runtime YAML and keep the rest of its
+   bindings. This uses the worker's host permissions. To switch that workflow to
+   required mode, start a new run and obtain fresh approvals.
+
+Python callbacks and validators run as trusted in-process code. The release
+requires no PostgreSQL recorder version or schema change.
 
 See the [CLI tool guide](cli-tools.md#cli-sandbox) for supported backends and
 operator configuration.

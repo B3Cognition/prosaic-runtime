@@ -4,7 +4,8 @@
 
 - Require OS confinement by default for custom CLI tools and version probes.
 - Detect an unavailable macOS sandbox during preflight even when a manifest has no version probe.
-
+- Preserve frozen CLI-free turns with either the previous default or an explicit sandbox mode.
+- See the [0.9.27 release notes](docs/release-0.9.27.md).
 
 ## 0.9.26
 

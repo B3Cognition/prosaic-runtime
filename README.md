@@ -627,8 +627,8 @@ Paths are relative to `--cwd` (the current directory by default) and must resolv
 
 The CLI provides no general-purpose shell, web browsing, recursive agents,
 workflow scheduler, or application state writer. Explicitly trusted CLI manifests
-can execute fixed application commands. They are unsandboxed in the default
-`off` mode; `required` mode adds the CLI OS boundary described above.
+can execute fixed application commands inside the CLI OS boundary by default.
+An operator can explicitly choose `off` to run those commands with host permissions.
 Hosts retain their output validation, workflow decisions and publication rules.
 
 ### Rule admission (opt-in)

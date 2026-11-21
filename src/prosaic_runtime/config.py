@@ -10,6 +10,7 @@ from .effort import api_effort_format, supported_efforts
 CONFIG_FILENAMES = ("prosaic-runtime.yaml", "prosaic-runtime.yml")
 OMLX_NEMOTRON_CORRECTION = 'omlx_nemotron_tool_correction'
 _OMLX_NEMOTRON_MODEL = 'NVIDIA-Nemotron-3.5-Lightning-30B-A3B-MLX-4bit'
+_DEFAULT_SANDBOX_MODE = object()
 
 
 @dataclass(frozen=True)
@@ -79,11 +80,23 @@ def completion_token_parameter(endpoint):
     return parameter
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class CliSandboxConfig:
     """Host-selected CLI isolation. Never supplied by model/prose manifests."""
     mode: str = 'required'
     runtime_roots: tuple[str, ...] = ()
+
+    def __init__(self, mode=_DEFAULT_SANDBOX_MODE, runtime_roots=()):
+        defaulted = mode is _DEFAULT_SANDBOX_MODE
+        object.__setattr__(self, 'mode', type(self).mode if defaulted else mode)
+        object.__setattr__(self, 'runtime_roots', runtime_roots)
+        object.__setattr__(self, '_mode_is_default', defaulted)
+        self.__post_init__()
+
+    @property
+    def mode_is_default(self):
+        """Whether the operator omitted the mode when constructing the policy."""
+        return getattr(self, '_mode_is_default', False)
 
     def __post_init__(self):
         if self.mode not in {'off', 'required'}:
@@ -158,8 +171,9 @@ class RuntimeConfig:
                 allowed_tools=frozenset(allowed),
                 limits=RunLimits(**raw.get("limits", {})),
                 tool_directories=tuple(str((path.resolve().parent / p).resolve()) for p in directories),
-                cli_sandbox=CliSandboxConfig(sandbox.get('mode', CliSandboxConfig.mode),
-                    tuple(str((path.resolve().parent / p).resolve()) for p in roots)),
+                cli_sandbox=CliSandboxConfig(
+                    runtime_roots=tuple(str((path.resolve().parent / p).resolve()) for p in roots),
+                    **({'mode': sandbox['mode']} if 'mode' in sandbox else {})),
                 required_guards=raw.get('required_guards', {}),
             )
         except (yaml.YAMLError, KeyError, TypeError, ValueError, AttributeError) as exc:
