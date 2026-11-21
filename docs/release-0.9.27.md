@@ -8,8 +8,9 @@ probe.
 ## Upgrade an existing deployment
 
 1. Upgrade Runtime and Harness together if you use Harness to resume saved
-   workflows or sessions. CLI-free frozen turns retain their identities,
-   including when the old configuration explicitly selected `required`.
+   workflows or sessions. With unchanged YAML or direct Python configuration,
+   CLI-free frozen turns retain their identities, including when the old
+   configuration explicitly selected `required`.
 2. For custom CLI tools, run preflight under the deployment's service account
    before rollout. Linux needs operational Bubblewrap 0.12.0 or newer at
    `/usr/bin/bwrap`. Use the [qualified Docker worker policy](https://github.com/B3Cognition/prosaic-integration-lab/blob/8d63e81/docs/sandboxed-tools.md#qualify-the-linux-image)
@@ -18,6 +19,13 @@ probe.
    set `cli_sandbox: {mode: 'off'}` in trusted Runtime YAML and keep the rest of its
    bindings. This uses the worker's host permissions. To switch that workflow to
    required mode, start a new run and obtain fresh approvals.
+
+Python code that copies the nested `CliSandboxConfig` with
+`dataclasses.replace` or serializes it as an explicit mode should reconstruct
+saved records with the mode they originally used. Set `mode='off'` for
+records written with the former default, or `mode='required'` if that was
+explicitly set. For new work, construct `CliSandboxConfig(runtime_roots=...)`
+to use the current default without turning it into an explicit policy.
 
 Python callbacks and validators run as trusted in-process code. The release
 requires no PostgreSQL recorder version or schema change.
