@@ -1,6 +1,7 @@
 # Run Prosaic prose with and without tools
 
-Current published release: **0.9.16**. See [release notes and compatible SDK versions](../docs/releases.md).
+Runtime **0.9.27** runs custom CLI tools in the OS sandbox by default. Review the
+[upgrade notes](../docs/release-0.9.27.md) before moving an existing CLI deployment.
 
 ## Per-call headers and fee guards (Runtime 0.9.16)
 
@@ -69,15 +70,14 @@ From the Runtime repository root, in your existing project virtual environment:
 
 ```sh
 source .venv/bin/activate
-python -m pip install -e .
+python -m pip install 'b3-prosaic-runtime==0.9.27'
 python -m pip install examples/cli-tool
 ```
 
 For a uv environment without pip:
-`uv pip install --python .venv/bin/python -e . examples/cli-tool`.
-Python Prosaic 0.3.0 installs automatically; this environment's `prosaic` must be
-on PATH. These commands install the checked-out Runtime into this
-environment, not every application on your machine.
+`uv pip install --python .venv/bin/python 'b3-prosaic-runtime==0.9.27' examples/cli-tool`.
+The compatible `b3-prosaic` package installs automatically. Put this
+environment's `prosaic` on PATH.
 
 Install the example CLI **without `-e`** here: its implementation then lives in
 the environment's granted library directory. An editable CLI install instead

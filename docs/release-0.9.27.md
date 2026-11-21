@@ -12,8 +12,8 @@ probe.
    including when the old configuration explicitly selected `required`.
 2. For custom CLI tools, run preflight under the deployment's service account
    before rollout. Linux needs operational Bubblewrap 0.12.0 or newer at
-   `/usr/bin/bwrap`. Docker workers need a policy that permits its namespace
-   setup. macOS needs operational `/usr/bin/sandbox-exec`.
+   `/usr/bin/bwrap`. Use the [qualified Docker worker policy](https://github.com/B3Cognition/prosaic-integration-lab/blob/8d63e81/docs/sandboxed-tools.md#qualify-the-linux-image)
+   to permit namespace setup. macOS needs operational `/usr/bin/sandbox-exec`.
 3. To finish a saved CLI workflow under its original off-mode policy, explicitly
    set `cli_sandbox: {mode: 'off'}` in trusted Runtime YAML and keep the rest of its
    bindings. This uses the worker's host permissions. To switch that workflow to
