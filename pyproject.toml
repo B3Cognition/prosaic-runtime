@@ -19,7 +19,9 @@ dependencies = [
 
 [project.optional-dependencies]
 mcp = ["mcp>=2.3.0,<3", "anyio>=4.9,<5", "httpx2>=2.10,<3"]
-test = ["pytest>=8", "build>=1.2", "setuptools>=77", "wheel", "packaging>=24", "b3-prosaic-harness==0.9.12"]
+toon = ["toon-format>=1.2,<2"]
+test = ["pytest>=8", "build>=1.2", "setuptools>=77", "wheel", "packaging>=24", "b3-prosaic-harness==0.9.12",
+        "toon-format>=1.2,<2"]
 
 [project.scripts]
 prosaic-runtime = "prosaic_runtime.cli:main"

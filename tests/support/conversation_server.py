@@ -15,6 +15,7 @@ class ConversationFixture:
         self.provider = provider
         self.requests, self.raw_requests, self.responses, self.tools = [], [], [], {}
         self.streaming = False
+        self.features = {}
         self.observe_request_headers = None
 
     def __enter__(self):
@@ -55,7 +56,8 @@ class ConversationFixture:
         url = f'http://127.0.0.1:{self.http.server_port}/v1'
         return ProsaicRuntime(RuntimeConfig(
             {'local': EndpointConfig(url, 'fixture-model', provider=self.provider,
-                                    features={'streaming': self.streaming, 'provider_transcript_dir': '/not-used'})},
+                                    features={'streaming': self.streaming, 'provider_transcript_dir': '/not-used',
+                                              **self.features})},
             {}, 'local', frozenset(self.tools)), custom_tools=self.tools)
 
     @property
