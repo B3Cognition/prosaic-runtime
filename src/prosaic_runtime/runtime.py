@@ -606,7 +606,8 @@ class ProsaicRuntime:
             admit_tool_effects(self._custom_tools, requested, scope, tool_journal)
         except (ValueError, TypeError, AttributeError) as exc:
             raise TurnAdmissionError('invalidPolicy') from exc
-        capture, budget = TurnCapture(owned['message'], scope, limits), InvocationBudget(policy)
+        capture = TurnCapture(owned['message'], scope, limits, bounded_tool_recovery=policy.bounded_tool_recovery)
+        budget = InvocationBudget(policy)
         if 'inputViews' in owned:
             capture.bind_input_views(owned['inputViews'])
         trace = EffortTrace()
