@@ -104,6 +104,8 @@ class TurnCapture:
                 owned['turn'] = event.get('turn')
             else:
                 owned['call_id'] = self.call_ids.get(event.get('call_id'))
+                if 'tool_version' in event:
+                    owned['tool_version'] = event['tool_version']
             if kind == 'tool_completed':
                 owned['status'] = event.get('status')
                 if 'tool_outcome' in event:
