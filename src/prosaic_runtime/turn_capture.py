@@ -33,8 +33,9 @@ def failure_code(result):
 
 
 class TurnCapture:
-    def __init__(self, message, scope, limits):
+    def __init__(self, message, scope, limits, *, bounded_tool_recovery):
         self.scope, self.limits = scope, limits
+        self.bounded_tool_recovery = bounded_tool_recovery
         self.messages = [{'role': 'user', 'content': [{'type': 'text', 'text': message}],
                           'turnStatus': 'completed'}]
         self.exchange = 0
@@ -104,6 +105,8 @@ class TurnCapture:
                 owned['turn'] = event.get('turn')
             else:
                 owned['call_id'] = self.call_ids.get(event.get('call_id'))
+                if self.bounded_tool_recovery and 'tool_version' in event:
+                    owned['tool_version'] = event['tool_version']
             if kind == 'tool_completed':
                 owned['status'] = event.get('status')
                 if 'tool_outcome' in event:

@@ -3,8 +3,9 @@ import json
 from dataclasses import asdict, replace
 
 import pytest
-from prosaic_runtime import ConversationMessage, InvocationScope, TurnAdmissionError
+from prosaic_runtime import ConversationMessage, Guard, InvocationScope, TurnAdmissionError, Verdict
 from support.conversation_server import turn_fixture
+from support.rules_support import runtime_for, tagged
 
 
 def execute(fx, **kwargs):
@@ -66,6 +67,41 @@ def test_prepared_size_matches_actual_wire_and_is_readmitted(turn_fixture, provi
         with pytest.raises(TurnAdmissionError) as exc:
             rt.turn(prepared)
         assert exc.value.code == 'bindingMismatch' and len(fx.requests) == 1
+
+
+@pytest.mark.parametrize('provider', ['openai-compatible', 'anthropic'])
+def test_guarded_tool_recovery_preserves_registered_version_on_both_events(turn_fixture, provider):
+    reads, drafts, events = [], [], []
+
+    def check(stage, context):
+        drafts.append(context.draft)
+        return Verdict(context.draft == '{"ok":true}')
+
+    with turn_fixture(provider) as fx:
+        fx.add_tool('lookup', lambda arguments: reads.append(arguments) or {'ok': True})
+        fx.queue_calls([{'id': 'provider-tool-id', 'name': 'lookup', 'arguments': '{}'}])
+        fx.queue_text('{"ok":true}')
+        agent = tagged('Verify the lookup. <!-- enforce: checked(stage=final, on_violation=fail) -->',
+                       tools=['lookup'])
+        runtime = runtime_for(fx, guards=[Guard('checked', 'v1', ('final',), check)])
+        policy = replace(fx.policy, initial_tool='lookup', bounded_tool_recovery=True,
+                         max_tool_calls=1, max_provider_requests=2)
+
+        result = runtime.turn(agent, message='Read the fixture', policy=policy, on_event=events.append)
+
+        assert result.result.exit_code == 0 and result.completed_turn is not None
+        assert reads == [{}] and drafts == ['{"ok":true}'] and len(fx.requests) == 2
+        started, completed = [event for event in events
+                              if event['event'] in {'tool_started', 'tool_completed'}]
+        assert (started['event'], completed['event']) == ('tool_started', 'tool_completed')
+        assert started['name'] == completed['name'] == 'lookup'
+        assert started.get('tool_version') == completed.get('tool_version') == fx.tools['lookup'].version
+        assert started['provisional'] is completed['provisional'] is True
+        tool_call, = [block for message in result.completed_turn.to_dict()['messages']
+                      for block in message['content'] if block['type'] == 'toolCall']
+        assert started['call_id'] == completed['call_id'] == tool_call['callId']
+        assert started['call_id'] != 'provider-tool-id'
+        assert completed['status'] == completed['tool_outcome']['code'] == 'ok'
 
 
 @pytest.mark.parametrize('provider', ['openai-compatible', 'anthropic'])
