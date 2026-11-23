@@ -15,7 +15,7 @@ record the packaging correction. The Harness PostgreSQL store has a separate
 libpq 17 requirement and therefore a higher binary-package floor.
 
 Use a fresh virtual environment/image: legacy and renamed packages share imports.
-Install with `python -m pip install 'b3-prosaic-runtime==0.9.27' 'b3-prosaic-runtime-postgres==0.3.0'`.
+Install with `python -m pip install 'b3-prosaic-runtime==0.9.28' 'b3-prosaic-runtime-postgres==0.3.0'`.
 For reproducible deployments, use a complete checksum-pinned manifest. The Python import
 remains `prosaic_runtime_postgres`; no stored accounting format changes are required.
 
