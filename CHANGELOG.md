@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.28
+
+- Preserve registered tool versions on bounded-recovery conversation events so Harness can complete guarded steps.
+- See the [0.9.28 release notes](docs/release-0.9.28.md).
+
 ## 0.9.27
 
 - Require OS confinement by default for custom CLI tools and version probes.

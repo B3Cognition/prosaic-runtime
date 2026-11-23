@@ -70,12 +70,12 @@ From the Runtime repository root, in your existing project virtual environment:
 
 ```sh
 source .venv/bin/activate
-python -m pip install 'b3-prosaic-runtime==0.9.27'
+python -m pip install 'b3-prosaic-runtime==0.9.28'
 python -m pip install examples/cli-tool
 ```
 
 For a uv environment without pip:
-`uv pip install --python .venv/bin/python 'b3-prosaic-runtime==0.9.27' examples/cli-tool`.
+`uv pip install --python .venv/bin/python 'b3-prosaic-runtime==0.9.28' examples/cli-tool`.
 The compatible `b3-prosaic` package installs automatically. Put this
 environment's `prosaic` on PATH.
 

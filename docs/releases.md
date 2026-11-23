@@ -1,5 +1,7 @@
 # Releases and compatibility
 
+Runtime 0.9.28 [repairs guarded tool recovery](release-0.9.28.md) with Harness 0.9.20.
+
 Runtime 0.9.27 [requires CLI sandboxing by default](release-0.9.27.md).
 Use Harness 0.9.20 for the coordinated upgrade of saved workflows and sessions.
 
