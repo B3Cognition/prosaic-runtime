@@ -99,3 +99,16 @@ def test_whole_number_floats_still_match_the_sent_text(provider):
         assert decode(content)['result']['data']['rows'][0]['score'] == 2
         evidence = result.metadata['tool_contract_v1']
         assert list(evidence['deliveries']) == [evidence['records'][0]['id']]
+
+
+@PROVIDERS
+@pytest.mark.parametrize('depth', [2, 70])
+def test_toon_looking_user_text_remains_data(provider, depth):
+    """Only tool results are read as TOON; user text that looks like it, however deep, is sent as typed."""
+    text = 'status: ok\nrows[1]{' + 'k{' * depth + 'v' + '}' * depth + '}:\n  x'
+    with ConversationFixture(provider) as fx:
+        fx.queue_text('Done')  # the endpoint keeps its default JSON result format
+        result = fx.runtime.turn(fx.agent, message=text, policy=fx.policy, tool_contract_bindings=bindings())
+        assert result.result.exit_code == 0
+        assert len(fx.requests) == 1
+        assert result.result.stdout == 'Done'

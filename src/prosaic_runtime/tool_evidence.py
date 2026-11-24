@@ -241,8 +241,20 @@ class EvidenceRegistryV1:
         while stack:
             node = stack.pop()
             if type(node) is dict:
-                candidates.update(self._projections.get(digest(node), ()))
+                # Every staged projection was digested within these bounds, so a node past them matches none.
+                try:
+                    candidates.update(self._projections.get(digest(node), ()))
+                except ValueError:
+                    pass
                 stack.extend(node.values())
+                # TOON is read only where a tool result sits: OpenAI tool messages and Anthropic tool_result blocks.
+                # Other text, such as user messages, stays data.
+                content = node.get('content')
+                if type(content) is str and (node.get('role') == 'tool' or node.get('type') == 'tool_result'):
+                    # ponytail: TOON results are decoded again on every request; memoise by text digest if it shows.
+                    child = decode_tool_result(content)
+                    if child is not None:
+                        stack.append(child)
             elif type(node) is list:
                 stack.extend(node)
             elif type(node) is str and node.lstrip().startswith(('{', '[')):
@@ -251,11 +263,6 @@ class EvidenceRegistryV1:
                 except (ValueError, RecursionError):
                     continue
                 stack.append(child)
-            elif type(node) is str:
-                # ponytail: TOON results are decoded again on every request; memoise by text digest if it shows.
-                child = decode_tool_result(node)
-                if child is not None:
-                    stack.append(child)
         for evidence_id in sorted(candidates):
             self.authorize(evidence_id, 'modelUse')
         ticket = _DeliveryTicket(uuid4().hex, hashlib.sha256(encoded_bytes).hexdigest(), tuple(sorted(candidates)))
