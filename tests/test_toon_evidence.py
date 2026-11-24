@@ -112,3 +112,14 @@ def test_toon_looking_user_text_remains_data(provider, depth):
         assert result.result.exit_code == 0
         assert len(fx.requests) == 1
         assert result.result.stdout == 'Done'
+
+
+@PROVIDERS
+def test_deeply_nested_json_user_text_remains_data(provider):
+    """Text past the digest bounds cannot match staged evidence, so it is sent rather than failing the turn."""
+    text = '{"a": ' * 70 + '1' + '}' * 70
+    with ConversationFixture(provider) as fx:
+        fx.queue_text('Done')
+        result = fx.runtime.turn(fx.agent, message=text, policy=fx.policy, tool_contract_bindings=bindings())
+        assert result.result.exit_code == 0
+        assert len(fx.requests) == 1
