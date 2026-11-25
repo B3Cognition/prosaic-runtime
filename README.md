@@ -1,5 +1,7 @@
 # Prosaic Runtime
 
+Runtime **0.9.29** adds [opt-in TOON tool-result encoding](docs/release-0.9.29.md).
+
 Runtime **0.9.28** [repairs guarded tool recovery](docs/release-0.9.28.md).
 
 Runtime **0.9.27** [requires CLI sandboxing by default](docs/release-0.9.27.md).
