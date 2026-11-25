@@ -12,6 +12,8 @@ are re-exported here.
 
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
+import copy
+import functools
 import hashlib
 import json
 import re
@@ -58,10 +60,47 @@ def _core_api():
     return parse_rules, strip_tags
 
 
+#: Entries each memo below keeps. Core's parse and strip depend on their arguments alone, and a conversation asks
+#: for the same agent text on every turn and every readmission.
+MEMO_ENTRIES = 128
+
+
+def clear_parse_memo():
+    """Forget every remembered parse and strip (tests; a host that wants a cold parse)."""
+    _stripped.cache_clear()
+    _parsed.cache_clear()
+
+
+@functools.lru_cache(maxsize=MEMO_ENTRIES)
+def _stripped(strip_tags, text):
+    # Keyed by the Core function too: a replaced Core is never answered from an older one's result.
+    return strip_tags(text)
+
+
+@functools.lru_cache(maxsize=MEMO_ENTRIES)
+def _parsed(parse_rules, body, identifier):
+    return parse_rules(body, identifier)
+
+
+def _strip(strip_tags, text):
+    if type(text) is not str:
+        return strip_tags(text)
+    stripped = _stripped(strip_tags, text)
+    # Core returns an untagged text as the same object; an equal remembered one must not replace the caller's.
+    return text if stripped == text else stripped
+
+
+def _parse(parse_rules, body, identifier):
+    """Core's parse of (body, identifier), as a copy the caller owns."""
+    if type(body) is not str or type(identifier) is not str:
+        return parse_rules(body, identifier)
+    return copy.deepcopy(_parsed(parse_rules, body, identifier))
+
+
 def strip_for_model(text):
     """Core's strip_tags: the exact text every distribution target receives."""
     api = _core_api()
-    return text if api is None else api[1](text)
+    return text if api is None else _strip(api[1], text)
 
 
 @dataclass(frozen=True)
@@ -391,12 +430,12 @@ def artifact_rules(artifact):
             raise RuleAdmissionError()
         return [], []
     parse_rules, strip_tags = api
-    parsed = parse_rules(artifact.body, artifact.id)
+    parsed = _parse(parse_rules, artifact.body, artifact.id)
     issues = list(parsed['issues'])
     issues += [
         {'code': 'enforce-in-resource'}
         for r in artifact.resources
-        if _markdown(r['relPath']) and strip_tags(r['content']) != r['content']
+        if _markdown(r['relPath']) and _strip(strip_tags, r['content']) != r['content']
     ]
     if not supplied:
         return parsed['rules'], issues

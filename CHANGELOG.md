@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Remember Core's parse and strip of a text (`rules.MEMO_ENTRIES` entries each, keyed by the Core function, the text
+  and, for rules, the artifact id). `artifact_rules`, `strip_for_model` and `ProsaicArtifact.render` return the same
+  answers; each caller still owns its rule list, and an untagged text is still returned as the same object. A
+  conversation parsed its agent's prose with a new CommonMark parser on every turn preparation and readmission.
+
 ## 0.9.29
 
 - Add opt-in TOON encoding for successful tool results on OpenAI-compatible and Anthropic endpoints.
