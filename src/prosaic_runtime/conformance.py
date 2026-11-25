@@ -212,7 +212,7 @@ def _run_suite(config, profile, fingerprint, policy, observer, origin):
     # features. This suite exercises only the provider request controls below.
     features = {key: value for key, value in endpoint.features.items()
                 if key in {'streaming', 'stream_options', 'json_mode', 'reasoning_effort',
-                           'reasoning_effort_format', 'effort', 'thinking'}}
+                           'reasoning_effort_format', 'effort', 'thinking', 'tool_result_format'}}
     isolated_endpoint = replace(endpoint, features=features,
                                 max_response_bytes=min(_MAX_BYTES, endpoint.max_response_bytes))
     isolated = RuntimeConfig({profile: isolated_endpoint}, {}, profile, frozenset({_TOOL_NAME}))

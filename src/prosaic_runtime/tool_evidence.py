@@ -8,6 +8,7 @@ from jsonschema import Draft202012Validator
 from .conversation import encode_owned
 from .tool_contracts import EvidenceDraftV1, EvidenceUseV1, ToolContractBindingsV1, owned, reference
 from .tool_result_contract import select_pointer, validate_tool_result_outcome, ToolResultValidationError
+from .tool_result_format import decode_tool_result, toon_view
 
 
 def digest(value):
@@ -217,8 +218,13 @@ class EvidenceRegistryV1:
         encode_owned(projected, max_bytes=tool.max_result_bytes)
         if len(json.dumps(projected, allow_nan=False).encode()) > tool.max_result_bytes:
             raise ToolResultValidationError('result_limit')
+        # A TOON request carries this projection as text. Index what that text reads back as too, so delivery
+        # is still proven from the request bytes and never from this internal JSON.
+        view = toon_view(projected)
         self._records = all_records
         self._projections[digest(projected)] = tuple(records)
+        if view is not None:
+            self._projections[digest(view)] = tuple(records)
         return owned(projected)
 
     def prepare_delivery(self, native_payload, *, encoded_bytes=None):
@@ -235,8 +241,20 @@ class EvidenceRegistryV1:
         while stack:
             node = stack.pop()
             if type(node) is dict:
-                candidates.update(self._projections.get(digest(node), ()))
+                # Every staged projection was digested within these bounds, so a node past them matches none.
+                try:
+                    candidates.update(self._projections.get(digest(node), ()))
+                except ValueError:
+                    pass
                 stack.extend(node.values())
+                # TOON is read only where a tool result sits: OpenAI tool messages and Anthropic tool_result blocks.
+                # Other text, such as user messages, stays data.
+                content = node.get('content')
+                if type(content) is str and (node.get('role') == 'tool' or node.get('type') == 'tool_result'):
+                    # ponytail: TOON results are decoded again on every request; memoise by text digest if it shows.
+                    child = decode_tool_result(content)
+                    if child is not None:
+                        stack.append(child)
             elif type(node) is list:
                 stack.extend(node)
             elif type(node) is str and node.lstrip().startswith(('{', '[')):

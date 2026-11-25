@@ -20,6 +20,7 @@ from prosaic_runtime.types import Invocation as CliRunRequest, Result as CliRunR
 from prosaic_runtime.openai_compatible_compaction import (
     compact_tool_result_messages,
 )
+from prosaic_runtime.tool_result_format import encode_tool_results
 from prosaic_runtime.openai_compatible_filters import OpenAIPathFilter
 from prosaic_runtime.openai_compatible_progress import (
     OpenAIStreamPreview,
@@ -383,7 +384,9 @@ class OpenAICompatibleBackend(ExecutionBackend):
         llm = self._config
         payload: dict[str, object] = {
             "model": _metadata_str(prompt_metadata, "model") or llm.model or "",
-            "messages": messages,
+            # The cache lives on this backend, which serves one run: a result is encoded once per run.
+            "messages": encode_tool_results(messages, llm.features,
+                                            self.__dict__.setdefault("_tool_result_cache", {})),
         }
         payload.update(_generation_parameters(llm, prompt_metadata))
         if _feature_enabled(llm.features, "json_mode", default=False):
