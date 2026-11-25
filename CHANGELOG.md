@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.29
+
+- Add opt-in TOON encoding for successful tool results on OpenAI-compatible and Anthropic endpoints.
+- Preserve JSON journals, guards, contracts and conversation records, with delivery authorization and citations checked against the final request bytes.
+- Add source and installed-wheel coverage for conformance, frozen turns, evidence delivery and Harness pause/resume recovery.
+- See the [0.9.29 release notes](docs/release-0.9.29.md).
+
 ## 0.9.28
 
 - Preserve registered tool versions on bounded-recovery conversation events so Harness can complete guarded steps.
