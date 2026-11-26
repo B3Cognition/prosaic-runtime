@@ -1,5 +1,7 @@
 # Releases and compatibility
 
+Runtime 0.9.30 [speeds up repeated turn preparation](release-0.9.30.md).
+
 Runtime 0.9.29 adds [opt-in TOON tool-result encoding](release-0.9.29.md) for the two API backends.
 
 Runtime 0.9.28 [repairs guarded tool recovery](release-0.9.28.md) with Harness 0.9.20.
