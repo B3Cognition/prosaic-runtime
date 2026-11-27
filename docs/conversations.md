@@ -218,3 +218,66 @@ and grounding.
 The setting is opt-in and part of the prepared endpoint profile identity.
 Streaming, other model identifiers and other provider protocols are outside the
 qualified configuration.
+
+### Constrained tool request correction
+
+For other tool shapes, a trusted nonstreaming OpenAI-compatible profile can
+constrain the correction request to a resend Runtime can accept:
+
+```yaml
+features:
+  streaming: false
+  constrained_tool_correction: json_schema   # or omlx_grammar
+```
+
+Also enable `correct_malformed_tool_calls=True`. The value selects the wire:
+`json_schema` sends `response_format` with a strict `json_schema`, for servers
+with constrained decoding such as vLLM; `omlx_grammar` sends oMLX's
+`structured_outputs.json`. The setting is refused with streaming, on the
+Anthropic protocol and together with `omlx_tool_call_envelope` or
+`omlx_nemotron_tool_correction`.
+
+The constraint applies to a refused singleton call. The resend has the form
+`{"tool": ..., "arguments": ...}`:
+
+- `argumentsSchema` on a granted tool: `tool` is that name and `arguments`
+  follows that tool's schema.
+- `toolNotGranted`: one `anyOf` branch per granted tool links each name to its
+  arguments. When the branches exceed the bounds or a granted tool's schema
+  cannot be carried, only the name is constrained, to an `enum` of the granted
+  tools. A required first tool narrows this to that tool.
+
+The wire schema keeps only `type`, `properties`, `required`,
+`additionalProperties`, `items`, `enum`, `const` and `anyOf`. Other keywords,
+such as `maximum`, `maxLength`, `pattern` or `format`, are left out, so the
+constraint can be looser than the tool's schema; batch admission still checks
+the real schema. OpenAI's hosted strict mode requires every property to be in
+`required`. Tools with optional properties may be refused there; vLLM-style
+servers accept them. The hosted strict mode also requires an object at the
+root, so the per-tool `anyOf` form may be refused there too. Runtime does not
+rewrite schemas.
+
+The derived schema obeys the 16 KiB schema limit, the JSON depth limit of 64
+and the 65,536 node limit, measured on its canonical compact encoding. A schema
+outside them, a schema shape the constraint cannot carry (such as the tuple
+form of `items`), another issue code or a multi-call batch keeps ordinary
+correction. The correction request sets `tool_choice` to
+`"none"`, so the reply is the constrained content. Runtime parses it, checks it
+against the derived schema and turns it into one host-made call with an
+identifier unique within the turn. That call then passes the existing argument,
+authorization and budget checks. Anything else, including text or a native
+call, ends the turn as an unhonoured tool choice. Runtime does not assume the
+server applied the constraint. The original request and the continuation keep
+their normal output controls. The recovery uses the same single correction and
+request budget: the original attempt, the correction and the continuation.
+
+When the setting is on, the result metadata carries
+`tool_request_correction_constraint`. It records the wire, the issue code, the
+scope (`arguments` or `name`), the SHA-256 of the schema bytes as sent in the
+request body and the sorted names of the dropped keywords. At most 32 names in
+1,024 bytes are listed; `droppedKeywordsOmitted` counts any others. On fallback
+it records the reason (`oversize`, `unsupported`, `issue` or `batch`) instead.
+The record is present on every exit path of a turn whose correction ran,
+including cancellation, deadlines and limits. The setting is part of the prepared
+endpoint profile identity. Without it, requests, prepared turns, identities
+and receipts are unchanged.

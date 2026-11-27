@@ -14,6 +14,7 @@ from .openai_compatible_compaction import compact_tool_result_messages, ToolResu
 from .rule_hooks import RETRY, STOP
 from .tool_registry import InvalidToolRequest
 from .tool_request_correction import constrain_nemotron_lookup
+from . import constrained_correction
 from .openai_compatible_progress import (_progress, _progress_llm_preview, _progress_turn_summary, _single_line_preview, _tool_call_name, _tool_result_status, _elapsed_s)
 
 
@@ -104,6 +105,7 @@ class ExecutionBackend:
 
         correcting = False  # The next request is the one admitted correction.
         singleton_error = None
+        refused = None  # (error, batch size) of the refused batch, for a constrained correction.
         while True:
             turn_number = tool_rounds + 1
             turn_label = f'{turn_number} (correction)' if correcting else str(turn_number)
@@ -126,12 +128,22 @@ class ExecutionBackend:
                     payload['tool_choice'] = {'type': 'function', 'function': {'name': initial_tool}}
                 correction_tool = (constrain_nemotron_lookup(payload, llm.features, singleton_error)
                                    if singleton_error is not None else None)
-                return payload, compaction, correction_tool
+                constraint = None
+                if refused is not None:
+                    constraint = constrained_correction.plan(
+                        llm.features, refused[0], batch_size=refused[1], tools=payload.get('tools', []),
+                        required_tool=initial_tool if turn_number == 1 and initial_tool else None)
+                    if constraint is not None and constraint.schema is not None:
+                        constrained_correction.apply(payload, constraint, llm.features)
+                return payload, compaction, correction_tool, constraint
             guard = getattr(self, 'context_guard', None)
-            payload, compaction, correction_tool = (
+            payload, compaction, correction_tool, constraint = (
                 guard.construct_native(construct_payload) if guard is not None else construct_payload())
+            if constraint is not None:
+                self.tool_request_correction.constraint = constraint.record  # Reported in result metadata.
             correcting = False
             singleton_error = None
+            refused = None
             if compaction.compacted:
                 tool_result_compactions += compaction.compacted
                 tool_result_compaction_saved_chars += compaction.saved_chars
@@ -208,9 +220,14 @@ class ExecutionBackend:
             # Check both host-required first-tool selection and a constrained correction's native call.
             forced_first_tool = turn_number == 1 and bool(initial_tool) and bool(payload.get('tools'))
             expected_tool = initial_tool if forced_first_tool else correction_tool
+            # Only content that fits a constraint becomes a call; it then meets every check below.
+            honored = (constrained_correction.accept(turn, constraint, messages)
+                       if constraint is not None and constraint.schema is not None else True)
+            if not honored and expected_tool is None:
+                expected_tool = constrained_correction.EXPECTED_TOOL
             if expected_tool is not None:
                 names = [_tool_call_name(call) for call in turn.tool_calls]
-                if names != [expected_tool]:
+                if not honored or names != [expected_tool]:
                     transcript.write('final', finish_reason='tool_choice_not_honored',
                                      expected_tool=expected_tool, token_usage=token_usage,
                                      tool_call_count=0, tool_rounds=0)
@@ -268,6 +285,7 @@ class ExecutionBackend:
                         _progress(f'turn {turn_number}: malformed tool request ({error.issue}); one correction')
                         messages.extend(envelope)  # Placeholder for the refused response, then the envelope.
                         correcting = True
+                        refused = (error, len(turn.tool_calls))
                         if len(turn.tool_calls) == 1:
                             singleton_error = error
                         # Nothing in the batch ran; the batch and envelope stay out of history. turn_number is

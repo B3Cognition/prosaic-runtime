@@ -266,6 +266,11 @@ class TurnCapture:
             'tool_calls': budget.tool_calls, 'reported_tokens': known.get('totalTokens', 0), 'usage_complete': complete}
         if code is not None:
             metadata['failure_reason'] = code
+        # Every exit path finishes here: an opted-in correction's record survives cancellation, deadlines and limits.
+        constraint = getattr(getattr(self.backend, 'tool_request_correction', None), 'constraint', None)
+        if constraint is not None:
+            from .constrained_correction import RECORD_KEY
+            metadata[RECORD_KEY] = dict(constraint)
         if type(attribution) is dict:
             metadata['accounting_v1'] = {k: v for k, v in attribution.items()
                                        if k in {'context', 'namespace', 'environment'}}
