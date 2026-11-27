@@ -60,6 +60,8 @@ class EndpointConfig:
                         or self.features.get('omlx_tool_call_envelope', False)):
             raise ValueError(f'{OMLX_NEMOTRON_CORRECTION} requires the supported nonstreaming '
                              'OpenAI-compatible Nemotron profile without omlx_tool_call_envelope')
+        from .constrained_correction import validate_profile
+        validate_profile(self)
         completion_token_parameter(self)
         tool_result_format.validate(self.features)
         if self.temperature is not None and not math.isfinite(self.temperature):
