@@ -54,6 +54,7 @@ class ToolRequestCorrection:
     def __init__(self, budget):
         self.budget = budget
         self.issues = ()  # Closed codes of the corrections taken: reported as TurnResult.tool_request_corrections.
+        self.constraint = None  # Evidence of a constrained correction (see constrained_correction), only when opted in.
 
     def take(self, error, *, required=False):
         """Return the messages to append for ``error``, or None when the turn must fail as before.

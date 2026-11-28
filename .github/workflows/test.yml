@@ -88,7 +88,7 @@ jobs:
           "$RUNNER_TEMP/runtime-context-packs/bin/python" -m pip check
           "$RUNNER_TEMP/runtime-context-packs/bin/python" -I scripts/context_pack_wheel_smoke.py
           "$RUNNER_TEMP/runtime-context-packs/bin/python" -I scripts/tool_contract_smoke.py
-          "$RUNNER_TEMP/runtime-context-packs/bin/python" -I -m pytest -o pythonpath=tests tests/test_parallel_tool_installed.py tests/test_mcp_installed.py tests/test_sub_agent_installed.py tests/test_omlx_tool_correction.py tests/test_toon_installed.py -q
+          "$RUNNER_TEMP/runtime-context-packs/bin/python" -I -m pytest -o pythonpath=tests tests/test_parallel_tool_installed.py tests/test_mcp_installed.py tests/test_sub_agent_installed.py tests/test_omlx_tool_correction.py tests/test_constrained_correction.py tests/test_constrained_correction_wire.py tests/test_constrained_correction_intersections.py tests/test_constrained_correction_evidence.py tests/test_constrained_correction_answer.py tests/test_toon_installed.py -q
 
   metering-postgres:
     runs-on: '${{ matrix.os }}'

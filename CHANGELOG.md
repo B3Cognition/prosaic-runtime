@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- Add opt-in `features.constrained_tool_correction` (`json_schema` or `omlx_grammar`) on nonstreaming
+  OpenAI-compatible profiles. The one malformed-call correction is then constrained to a resend Runtime can
+  accept: the named tool's arguments for `argumentsSchema`, or the granted tools for `toolNotGranted`. The
+  resend still passes every argument, authorization and budget check. An unconstrainable or oversize schema
+  keeps ordinary correction, and a reply outside the constraint fails as an unhonoured tool choice. For an optional
+  tool the schema also admits a text answer, so the offer to answer without the tool is kept. Without the
+  setting, requests, prepared turns, identities and receipts are unchanged. The evidence is in result metadata
+  only; Harness receipt wiring is a follow-up. See
+  [constrained tool request correction](docs/conversations.md#constrained-tool-request-correction).
+
 ## 0.9.30
 
 - Remember Core's parse and strip of a text (`rules.MEMO_ENTRIES` entries each, keyed by the Core function, the text
