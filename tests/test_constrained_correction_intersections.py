@@ -84,9 +84,9 @@ def test_a_correction_on_a_later_turn_is_unforced_and_constrains_the_refused_too
     assert turn.result.exit_code == 0
     assert tools.reads == [('find_station', VALID['find_station']), ('read_gauge', VALID['read_gauge'])]
     assert constraint(first) is None and constraint(second) is None and constraint(answer) is None
-    assert correction['tool_choice'] == 'none' and constraint(correction)['properties']['tool'] == {
-        'const': 'read_gauge'
-    }
+    tool_branch, answer_branch = constraint(correction)['anyOf']  # Unforced on a later turn: the answer is offered.
+    assert correction['tool_choice'] == 'none' and tool_branch['properties']['tool'] == {'const': 'read_gauge'}
+    assert answer_branch['properties'] == {'answer': {'type': 'string'}}
     assert second['tool_choice'] == answer['tool_choice'] == 'auto'
     assert correction['messages'][-3]['role'] == 'tool'  # The first read's result precedes the placeholder.
 

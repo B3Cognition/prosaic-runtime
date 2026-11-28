@@ -247,6 +247,17 @@ The constraint applies to a refused singleton call. The resend has the form
   cannot be carried, only the name is constrained, to an `enum` of the granted
   tools. A required first tool narrows this to that tool.
 
+For an optional tool the envelope still offers to answer without it, so the
+schema has one more branch, `{"answer": ...}`. Runtime takes that reply as the
+final text answer, with no tool call. A required first tool has no answer
+branch: the resend must be the call.
+
+For `toolNotGranted`, the constraint admits any granted tool, including one
+other than the model meant, and the name-only form admits any object of
+arguments. Batch admission still checks the real schema, and authorization
+decides whether the call runs, so a schema-valid call to a granted tool can
+still be refused, or run as an authorized read of that tool.
+
 The wire schema keeps only `type`, `properties`, `required`,
 `additionalProperties`, `items`, `enum`, `const` and `anyOf`. Other keywords,
 such as `maximum`, `maxLength`, `pattern` or `format`, are left out, so the
@@ -254,8 +265,10 @@ constraint can be looser than the tool's schema; batch admission still checks
 the real schema. OpenAI's hosted strict mode requires every property to be in
 `required`. Tools with optional properties may be refused there; vLLM-style
 servers accept them. The hosted strict mode also requires an object at the
-root, so the per-tool `anyOf` form may be refused there too. Runtime does not
-rewrite schemas.
+root, so the `anyOf` form may be refused there too. Runtime does not
+rewrite schemas. A server that refuses the schema with an HTTP error ends the
+turn as a provider failure after two requests, the attempt and the correction,
+with no read.
 
 The derived schema obeys the 16 KiB schema limit, the JSON depth limit of 64
 and the 65,536 node limit, measured on its canonical compact encoding. A schema
@@ -281,3 +294,7 @@ The record is present on every exit path of a turn whose correction ran,
 including cancellation, deadlines and limits. The setting is part of the prepared
 endpoint profile identity. Without it, requests, prepared turns, identities
 and receipts are unchanged.
+
+`omlx_nemotron_tool_correction` is unchanged, and it cannot be combined with
+this setting. The general setting does not supersede it in this release; the
+Nemotron flag stays the qualified configuration for its model.

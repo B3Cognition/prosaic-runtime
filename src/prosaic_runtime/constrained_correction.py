@@ -73,7 +73,8 @@ def plan(features, error, *, batch_size, tools, required_tool=None):
     if wire not in WIRES:
         return None
     base = {'version': 1, 'wire': wire, 'issue': error.issue}
-    offered = {tool['function']['name']: tool['function']['parameters'] for tool in tools}
+    functions = [tool.get('function') if type(tool) is dict else None for tool in tools]
+    offered = {f.get('name'): f.get('parameters') for f in functions if type(f) is dict and type(f.get('name')) is str}
     if required_tool is not None:
         offered = {name: schema for name, schema in offered.items() if name == required_tool}
     if batch_size != 1:
@@ -82,14 +83,22 @@ def plan(features, error, *, batch_size, tools, required_tool=None):
         offered = {error.tool: offered[error.tool]}
     elif error.issue != 'toolNotGranted' or not offered:
         return Plan(None, {**base, 'fallback': 'issue'})
+    # An optional tool keeps the envelope's offer to answer without it; a required first tool does not.
+    answer = required_tool is None
     dropped, scope = set(), 'arguments'
-    schema, reason = _derive(offered, dropped)
+    branches, reason = _derive(offered, dropped)
+    schema, reason = _checked(_compose(branches, answer)) if branches else (None, reason)
     if schema is None and len(offered) > 1:
         dropped, scope = set(), 'name'
-        schema, reason = _checked(_branch({'enum': list(offered)}, {'type': 'object'}))
+        schema, reason = _checked(_compose([_branch({'enum': list(offered)}, {'type': 'object'})], answer))
     if schema is None:
         return Plan(None, {**base, 'fallback': reason})
-    record = {**base, 'scope': scope, 'schemaSha256': hashlib.sha256(_wire_bytes(schema)).hexdigest()}
+    record = {
+        **base,
+        'scope': scope,
+        'answerBranch': answer,
+        'schemaSha256': hashlib.sha256(_wire_bytes(schema)).hexdigest(),
+    }
     return Plan(schema, {**record, **_dropped_names(dropped)})
 
 
@@ -108,7 +117,7 @@ def apply(payload, constraint, features):
 
 
 def accept(turn, constraint, messages):
-    """Turn conforming content into one host-made call; return False for anything else."""
+    """Turn conforming content into one host-made call, or an answer into text; return False for anything else."""
     from .tools import depth, reject_constant, unique_pairs
 
     if turn.tool_calls or turn.finish_reason != 'stop':
@@ -120,6 +129,9 @@ def accept(turn, constraint, messages):
         return False
     if type(value) is not dict or not Draft202012Validator(constraint.schema).is_valid(value):
         return False
+    if 'answer' in value:  # Only an optional tool's schema admits it: the reply is the text answer.
+        turn.text = value['answer']
+        return True
     used = {
         call.get('id')
         for message in messages
@@ -155,7 +167,7 @@ class _Unsupported(ValueError):
 
 
 def _derive(offered, dropped):
-    """The per-tool constraint, or (None, reason)."""
+    """One branch per tool, or (None, reason)."""
     from .tools import depth
 
     branches = []
@@ -170,7 +182,22 @@ def _derive(offered, dropped):
             branches.append(_branch({'const': name}, _structural(parameters, dropped)))
         except _Unsupported:
             return None, 'unsupported'
-    return _checked(branches[0] if len(branches) == 1 else {'anyOf': branches})
+    return branches, None
+
+
+def _compose(branches, answer):
+    """The tool branches, plus the answer branch when the tool is optional; a single branch needs no anyOf."""
+    branches = [*branches, _answer()] if answer else branches
+    return branches[0] if len(branches) == 1 else {'anyOf': branches}
+
+
+def _answer():
+    return {
+        'type': 'object',
+        'properties': {'answer': {'type': 'string'}},
+        'required': ['answer'],
+        'additionalProperties': False,
+    }
 
 
 def _checked(schema):

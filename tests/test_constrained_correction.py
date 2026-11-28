@@ -52,6 +52,25 @@ def branch(name, arguments):
     }
 
 
+# An optional tool keeps the envelope's offer to answer without it: one more branch, the answer itself.
+ANSWER = {
+    'type': 'object',
+    'properties': {'answer': {'type': 'string'}},
+    'required': ['answer'],
+    'additionalProperties': False,
+}
+
+
+def optional(*branches):
+    return {'anyOf': [*branches, ANSWER]}
+
+
+def arguments_of(result):
+    """The arguments schema of the first tool branch."""
+    schema = result.schema['anyOf'][0] if 'anyOf' in result.schema else result.schema
+    return schema['properties']['arguments']
+
+
 def plan(issue='argumentsSchema', tool='find_station', *, features=FEATURES, batch_size=1, tools=TOOLS, **kw):
     return cc.plan(features, InvalidToolRequest(issue, 0, tool), batch_size=batch_size, tools=tools, **kw)
 
@@ -66,12 +85,13 @@ def sha(schema):
 
 def test_arguments_schema_constrains_the_named_tool_and_its_structural_schema():
     result = plan()
-    assert result.schema == branch('find_station', FIND_WIRE)
+    assert result.schema == optional(branch('find_station', FIND_WIRE))
     assert result.record == {
         'version': 1,
         'wire': 'json_schema',
         'issue': 'argumentsSchema',
         'scope': 'arguments',
+        'answerBranch': True,
         'schemaSha256': sha(result.schema),
         'droppedKeywords': ['description', 'maxLength', 'maximum', 'minimum'],
     }
@@ -79,7 +99,7 @@ def test_arguments_schema_constrains_the_named_tool_and_its_structural_schema():
 
 def test_nested_objects_enums_and_required_survive_while_assertions_are_dropped():
     result = plan(tool='read_gauge')
-    assert result.schema == branch('read_gauge', READ_WIRE)
+    assert result.schema == optional(branch('read_gauge', READ_WIRE))
     assert result.record['droppedKeywords'] == ['format', 'minimum', 'pattern']
 
 
@@ -92,7 +112,7 @@ def test_property_names_that_spell_keywords_are_data_not_keywords():
     }
     tools = [{'type': 'function', 'function': {'name': 'probe', 'description': 'd', 'parameters': schema}}]
     result = plan(tool='probe', tools=tools)
-    assert result.schema['properties']['arguments']['properties'] == {
+    assert arguments_of(result)['properties'] == {
         'pattern': {'type': 'string'},
         'minimum': {'type': 'integer'},
     }
@@ -111,7 +131,7 @@ def test_items_type_lists_any_of_and_nested_additional_properties_are_kept():
         },
     }
     tools = [{'type': 'function', 'function': {'name': 'probe', 'description': 'd', 'parameters': schema}}]
-    arguments = plan(tool='probe', tools=tools).schema['properties']['arguments']
+    arguments = arguments_of(plan(tool='probe', tools=tools))
     assert arguments['properties'] == {
         'tags': {'type': 'array', 'items': {'type': ['string', 'null']}},
         'pick': {'anyOf': [{'const': 'a'}, {'type': 'integer'}]},
@@ -131,14 +151,15 @@ def test_derivation_never_mutates_the_offered_tools():
 
 def test_tool_not_granted_constrains_name_and_arguments_per_granted_tool():
     result = plan('toolNotGranted', None)
-    assert result.schema == {'anyOf': [branch('find_station', FIND_WIRE), branch('read_gauge', READ_WIRE)]}
+    assert result.schema == optional(branch('find_station', FIND_WIRE), branch('read_gauge', READ_WIRE))
     assert result.record['scope'] == 'arguments' and result.record['issue'] == 'toolNotGranted'
     assert result.record['droppedKeywords'] == ['description', 'format', 'maxLength', 'maximum', 'minimum', 'pattern']
 
 
 def test_a_required_first_tool_narrows_the_ungranted_resend_to_that_tool():
     result = plan('toolNotGranted', None, required_tool='read_gauge')
-    assert result.schema == branch('read_gauge', READ_WIRE)
+    assert result.schema == branch('read_gauge', READ_WIRE)  # A required tool: no answer branch.
+    assert result.record['answerBranch'] is False
 
 
 def big_enum_tool(name, count):
@@ -157,12 +178,14 @@ def test_ungranted_resend_constrains_the_name_only_when_branches_exceed_the_boun
     for tool in tools:  # Each schema fits alone; together they do not.
         assert len(encode_owned(tool['function']['parameters'])) < cc.MAX_SCHEMA_BYTES
     result = plan('toolNotGranted', None, tools=tools)
-    assert result.schema == {
-        'type': 'object',
-        'additionalProperties': False,
-        'required': ['tool', 'arguments'],
-        'properties': {'tool': {'enum': ['alpha', 'beta']}, 'arguments': {'type': 'object'}},
-    }
+    assert result.schema == optional(
+        {
+            'type': 'object',
+            'additionalProperties': False,
+            'required': ['tool', 'arguments'],
+            'properties': {'tool': {'enum': ['alpha', 'beta']}, 'arguments': {'type': 'object'}},
+        }
+    )
     assert result.record['scope'] == 'name' and result.record['droppedKeywords'] == []
     assert result.record['schemaSha256'] == sha(result.schema)
 
@@ -314,14 +337,14 @@ def test_a_tuple_form_items_list_is_unsupported_so_nothing_inside_it_reaches_the
 )
 def test_valid_unusual_shapes_derive_correctly(parameters, arguments):
     result = probe(parameters)
-    assert result.schema['properties']['arguments'] == arguments
+    assert arguments_of(result) == arguments
     Draft202012Validator.check_schema(result.schema)
 
 
 def test_refs_and_defs_are_dropped_and_recorded_never_left_dangling():
     parameters = {'type': 'object', '$defs': {'s': {'type': 'string'}}, 'properties': {'a': {'$ref': '#/$defs/s'}}}
     result = probe(parameters)
-    assert result.schema['properties']['arguments'] == {'type': 'object', 'properties': {'a': {}}}
+    assert arguments_of(result) == {'type': 'object', 'properties': {'a': {}}}
     assert '$ref' not in json.dumps(result.schema) and result.record['droppedKeywords'] == ['$defs', '$ref']
 
 
@@ -329,7 +352,8 @@ def test_an_unusable_granted_tool_leaves_the_ungranted_resend_constrained_by_nam
     tools = [*TOOLS, {'type': 'function', 'function': {'name': 'odd', 'description': 'd', 'parameters': None}}]
     result = plan('toolNotGranted', None, tools=tools)
     assert result.record['scope'] == 'name'
-    assert result.schema['properties']['tool'] == {'enum': ['find_station', 'read_gauge', 'odd']}
+    assert result.schema['anyOf'][0]['properties']['tool'] == {'enum': ['find_station', 'read_gauge', 'odd']}
+    assert result.schema['anyOf'][1] == ANSWER
 
 
 def test_dropped_keyword_names_are_bounded_in_the_evidence():

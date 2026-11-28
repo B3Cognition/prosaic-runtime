@@ -269,8 +269,9 @@ class TurnCapture:
         # Every exit path finishes here: an opted-in correction's record survives cancellation, deadlines and limits.
         constraint = getattr(getattr(self.backend, 'tool_request_correction', None), 'constraint', None)
         if constraint is not None:
+            import copy
             from .constrained_correction import RECORD_KEY
-            metadata[RECORD_KEY] = dict(constraint)
+            metadata[RECORD_KEY] = copy.deepcopy(constraint)
         if type(attribution) is dict:
             metadata['accounting_v1'] = {k: v for k, v in attribution.items()
                                        if k in {'context', 'namespace', 'environment'}}
